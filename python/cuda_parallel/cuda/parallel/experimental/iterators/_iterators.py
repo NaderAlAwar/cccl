@@ -1,9 +1,10 @@
 import ctypes
 import operator
+import re
 import uuid
 from enum import Enum
 from functools import lru_cache
-from typing import Callable, Dict, Tuple
+from typing import Callable, Dict, Optional, Tuple
 
 import numba
 import numpy as np
@@ -144,16 +145,27 @@ class IteratorBase:
         return make_advanced_iterator(self, offset=offset)
 
     def _get_advance_signature(self) -> Tuple:
+        # Current hacky solution to get the proper type that we can lower
+        if "NdArray" in str(self.numba_type):
+            the_type = types.CPointer(self.numba_type)
+        else:
+            the_type = self.numba_type
         return (
-            self.numba_type,
+            the_type,
             types.uint64,  # distance type
         )
 
     def _get_dereference_signature(self) -> Tuple:
-        if self.iterator_io is IteratorIO.INPUT:
-            return (self.numba_type,)
+        # Current hacky solution to get the proper type that we can lower
+        if "NdArray" in str(self.numba_type):
+            the_type = types.CPointer(self.numba_type)
         else:
-            return (self.numba_type, self.value_type)
+            the_type = self.numba_type
+
+        if self.iterator_io is IteratorIO.INPUT:
+            return (the_type,)
+        else:
+            return (the_type, self.value_type)
 
 
 def sizeof_pointee(context, ptr):
@@ -363,6 +375,23 @@ def make_reverse_iterator(it: DeviceArrayLike | IteratorBase, iterator_io: Itera
         last_element_ptr = _get_last_element_ptr(it)
         it = RawPointer(last_element_ptr, numba.from_dtype(get_dtype(it)), iterator_io)
 
+    # Current hacky solution to get the pointer and strides
+    if "NdArray" in str(type(it)):
+        shape = tuple(it.cvalue.shape)  # type: ignore
+        dtype = it.value_type
+        # The regex gets bitwidth so we divide by 8 to get bytes
+        itemsize = int(re.findall(r"\d+", dtype.name)[-1]) // 8
+        strides = it.cvalue.strides  # type: ignore
+        strides = tuple([s * itemsize for s in strides])
+        last_element_ptr = _get_last_element_ptr(
+            it,
+            shape,
+            dtype,
+            strides,
+            it.cvalue.ptr,  # type: ignore
+        )
+        it.cvalue.ptr = ctypes.c_void_p(last_element_ptr)  # type: ignore
+
     it_advance = cuda.jit(it.advance, device=True)
     it_dereference = cuda.jit(it.dereference, device=True)
 
@@ -494,17 +523,30 @@ def make_advanced_iterator(it: IteratorBase, /, *, offset: int = 1):
     return AdvancedIterator(it, offset)
 
 
-def _get_last_element_ptr(device_array) -> int:
-    shape = get_shape(device_array)
-    dtype = get_dtype(device_array)
+def _get_last_element_ptr(
+    device_array,
+    shape: Optional[Tuple] = None,
+    dtype: Optional[Tuple] = None,
+    strides_in_bytes: Optional[Tuple] = None,
+    ptr: Optional[int] = None,
+) -> int:
+    # This none stuff is for composing strided iterators with reverse ones
+    if shape is None:
+        shape = get_shape(device_array)
+    if dtype is None:
+        dtype = get_dtype(device_array)  # type: ignore
 
-    strides_in_bytes = device_array.__cuda_array_interface__["strides"]
     if strides_in_bytes is None:
-        strides_in_bytes = compute_c_contiguous_strides_in_bytes(shape, dtype.itemsize)
+        strides_in_bytes = device_array.__cuda_array_interface__["strides"]
+
+    if strides_in_bytes is None:
+        strides_in_bytes = compute_c_contiguous_strides_in_bytes(shape, dtype.itemsize)  # type: ignore
 
     offset_to_last_element = sum(
         (dim_size - 1) * stride for dim_size, stride in zip(shape, strides_in_bytes)
     )
 
-    ptr = get_data_pointer(device_array)
+    if ptr is None:
+        ptr = get_data_pointer(device_array)
+
     return ptr + offset_to_last_element

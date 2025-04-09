@@ -14,6 +14,7 @@ from numba.core.typing.templates import AttributeTemplate
 from numba.cuda.cudadecl import registry as cuda_registry
 from numba.cuda.cudaimpl import registry as cuda_lower_registry
 
+from .._utils.protocols import get_data_pointer, get_dtype, get_shape
 from . import _iterators
 
 
@@ -278,11 +279,19 @@ class NdArrayIterator(_iterators.IteratorBase):
 
 
 def make_ndarray_iterator(array_like, perm, iterator_io, prefix=""):
-    ptr = array_like.data.ptr
-    dt = array_like.dtype
-    shape_ = array_like.shape
-    strides_ = array_like.strides
-    itemsize = array_like.itemsize
+    ptr = get_data_pointer(array_like)
+    dt = get_dtype(array_like)
+    shape_ = get_shape(array_like)
+    itemsize = dt.itemsize
+    strides_ = array_like.__cuda_array_interface__["strides"]
+    if strides_ is None:
+        try:
+            # for cupy arrays
+            strides_ = array_like.strides
+        except AttributeError:
+            # for torch arrays
+            strides_ = tuple([s * itemsize for s in array_like.stride()])
+
     perm_shape, perm_strides, rems = zip(
         *tuple(
             (shape_[idx], (strides_[idx] // itemsize), strides_[idx] % itemsize)
