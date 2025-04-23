@@ -3,7 +3,7 @@ import numba
 from . import _iterators
 
 
-def CacheModifiedInputIterator(device_array, modifier, prefix=""):
+def CacheModifiedInputIterator(device_array, modifier):
     """Random Access Cache Modified Iterator that wraps a native device pointer.
 
     Similar to https://nvidia.github.io/cccl/cub/api/classcub_1_1CacheModifiedInputIterator.html
@@ -32,7 +32,6 @@ def CacheModifiedInputIterator(device_array, modifier, prefix=""):
     return _iterators.CacheModifiedPointer(
         device_array.__cuda_array_interface__["data"][0],
         numba.from_dtype(device_array.dtype),
-        prefix,
     )
 
 
@@ -105,11 +104,11 @@ def ReverseInputIterator(sequence):
         A ``ReverseIterator`` object initialized with ``sequence`` to use as an input
 
     """
-    return _iterators.make_reverse_iterator(sequence, _iterators.IteratorIO.INPUT)
+    return _iterators.make_reverse_iterator(sequence, _iterators.IteratorIOKind.INPUT)
 
 
 def ReverseOutputIterator(sequence):
-    """Returns an Iterator over an array in reverse.
+    """Returns an output Iterator over an array in reverse.
 
     Similar to [std::reverse_iterator](https://en.cppreference.com/w/cpp/iterator/reverse_iterator)
 
@@ -129,7 +128,7 @@ def ReverseOutputIterator(sequence):
         A ``ReverseIterator`` object initialized with ``sequence`` to use as an output
 
     """
-    return _iterators.make_reverse_iterator(sequence, _iterators.IteratorIO.OUTPUT)
+    return _iterators.make_reverse_iterator(sequence, _iterators.IteratorIOKind.OUTPUT)
 
 
 def TransformIterator(it, op):

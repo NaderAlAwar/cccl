@@ -161,7 +161,6 @@ class NdArrayIterator(_iterators.IteratorBase):
         shape: Tuple[int],
         strides: Tuple[int],
         iterator_io,
-        prefix,
     ):
         ndim = len(shape)
         if not (len(strides) == ndim):
@@ -173,16 +172,16 @@ class NdArrayIterator(_iterators.IteratorBase):
         super().__init__(
             cvalue=host_sav_cvalue,
             numba_type=state_numba_type,
+            state_type=state_numba_type,
             value_type=value_type,
             iterator_io=iterator_io,
-            prefix=prefix,
         )
 
     @property
     def ltoirs(self):
         abi_suffix = _iterators._get_abi_suffix(self.kind)
-        advance_abi_name = f"{self.prefix}advance_{abi_suffix}"
-        deref_abi_name = f"{self.prefix}dereference_{abi_suffix}"
+        advance_abi_name = f"advance_{abi_suffix}"
+        deref_abi_name = f"dereference_{abi_suffix}"
         advance_ltoir, _ = _iterators.cached_compile(
             self.advance,
             self._get_advance_signature(),
@@ -198,6 +197,10 @@ class NdArrayIterator(_iterators.IteratorBase):
         )
         return {advance_abi_name: advance_ltoir, deref_abi_name: deref_ltoir}
 
+    @ltoirs.setter
+    def ltoirs(self, value):
+        self._ltoirs = value
+
     def _get_advance_signature(self) -> Tuple:
         state_arg_numba_type = types.CPointer(self.numba_type)
         return (
@@ -207,7 +210,7 @@ class NdArrayIterator(_iterators.IteratorBase):
 
     def _get_dereference_signature(self) -> Tuple:
         state_arg_numba_type = types.CPointer(self.numba_type)
-        if self.iterator_io is _iterators.IteratorIO.INPUT:
+        if self.iterator_io is _iterators.IteratorIOKind.INPUT:
             return (state_arg_numba_type,)
         else:
             return (state_arg_numba_type, self.value_type)
@@ -220,7 +223,7 @@ class NdArrayIterator(_iterators.IteratorBase):
     def dereference(self):
         return (
             NdArrayIterator.input_dereference
-            if self.iterator_io is _iterators.IteratorIO.INPUT
+            if self.iterator_io is _iterators.IteratorIOKind.INPUT
             else NdArrayIterator.output_dereference
         )
 
@@ -278,7 +281,7 @@ class NdArrayIterator(_iterators.IteratorBase):
         (state.ptr)[offset_] = x
 
 
-def make_ndarray_iterator(array_like, perm, iterator_io, prefix=""):
+def make_ndarray_iterator(array_like, perm, iterator_io):
     ptr = get_data_pointer(array_like)
     dt = get_dtype(array_like)
     shape_ = get_shape(array_like)
@@ -301,5 +304,5 @@ def make_ndarray_iterator(array_like, perm, iterator_io, prefix=""):
     assert all(rem == 0 for rem in rems)
 
     return NdArrayIterator(
-        ptr, numba.from_dtype(dt), perm_shape, perm_strides, iterator_io, prefix
+        ptr, numba.from_dtype(dt), perm_shape, perm_strides, iterator_io
     )

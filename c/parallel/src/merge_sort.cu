@@ -227,6 +227,16 @@ struct merge_sort_kernel_source
   {
     return build.merge_kernel;
   }
+
+  std::size_t KeySize() const
+  {
+    return build.key_type.size;
+  }
+
+  std::size_t ValueSize() const
+  {
+    return build.item_type.size;
+  }
 };
 
 struct dynamic_vsmem_helper_t
@@ -398,8 +408,9 @@ struct device_merge_sort_vsmem_helper {{
 
     const std::string arch = std::format("-arch=sm_{0}{1}", cc_major, cc_minor);
 
-    constexpr size_t num_args  = 7;
-    const char* args[num_args] = {arch.c_str(), cub_path, thrust_path, libcudacxx_path, ctk_path, "-rdc=true", "-dlto"};
+    constexpr size_t num_args  = 8;
+    const char* args[num_args] = {
+      arch.c_str(), cub_path, thrust_path, libcudacxx_path, ctk_path, "-rdc=true", "-dlto", "-DCUB_DISABLE_CDP"};
 
     constexpr size_t num_lto_args   = 2;
     const char* lopts[num_lto_args] = {"-lto", arch.c_str()};
@@ -438,6 +449,8 @@ struct device_merge_sort_vsmem_helper {{
     build_ptr->cc         = cc;
     build_ptr->cubin      = (void*) result.data.release();
     build_ptr->cubin_size = result.size;
+    build_ptr->key_type   = input_keys_it.value_type;
+    build_ptr->item_type  = input_items_it.value_type;
   }
   catch (const std::exception& exc)
   {
@@ -480,7 +493,7 @@ CUresult cccl_device_merge_sort(
     CUdevice cu_device;
     check(cuCtxGetDevice(&cu_device));
 
-    cub::DispatchMergeSort<
+    auto exec_status = cub::DispatchMergeSort<
       indirect_arg_t,
       indirect_arg_t,
       indirect_arg_t,
@@ -504,6 +517,8 @@ CUresult cccl_device_merge_sort(
                                 {build},
                                 cub::detail::CudaDriverLauncherFactory{cu_device, build.cc},
                                 {d_out_keys.value_type.size});
+
+    error = static_cast<CUresult>(exec_status);
   }
   catch (const std::exception& exc)
   {
