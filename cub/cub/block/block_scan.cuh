@@ -859,6 +859,8 @@ public:
   //! The corresponding output ``thread_data`` in those threads will be ``INT_MIN, 0, 0, 2, ..., 124, 126``.
   //! Furthermore the value ``126`` will be stored in ``block_aggregate`` for all threads.
   //!
+  //! \note ``initial_value`` is not applied to the block-wide aggregate.
+  //!
   //! @endrst
   //!
   //! @tparam ScanOp
@@ -872,7 +874,9 @@ public:
   //!
   //! @param[in] initial_value
   //!   @rst
-  //!   Initial value to seed the exclusive scan (and is assigned to ``output[0]`` in *thread*\ :sub:`0`)
+  //!   Initial value to seed the exclusive scan (and is assigned to ``output[0]`` in *thread*\ :sub:`0`). It is not
+  //!   taken into account for ``block_aggregate``.
+  //!
   //!   @endrst
   //!
   //! @param[in] scan_op
@@ -1070,7 +1074,7 @@ public:
     ExclusiveScan(thread_prefix, thread_prefix, initial_value, scan_op);
 
     // Exclusive scan in registers with prefix as seed
-    internal::ThreadScanExclusive(input, output, scan_op, thread_prefix);
+    detail::ThreadScanExclusive(input, output, scan_op, thread_prefix);
   }
 
   //! @rst
@@ -1117,6 +1121,8 @@ public:
   //! ``{ [INT_MIN,0,0,2], [2,4,4,6], ..., [506,508,508,510] }``.
   //! Furthermore the value ``510`` will be stored in ``block_aggregate`` for all threads.
   //!
+  //! \note ``initial_value`` is not applied to the block-wide aggregate.
+  //!
   //! @endrst
   //!
   //! @tparam ITEMS_PER_THREAD
@@ -1133,7 +1139,8 @@ public:
   //!
   //! @param[in] initial_value
   //!   @rst
-  //!   Initial value to seed the exclusive scan (and is assigned to `output[0]` in *thread*\ :sub:`0`)
+  //!   Initial value to seed the exclusive scan (and is assigned to `output[0]` in *thread*\ :sub:`0`). It is not taken
+  //!   into account for ``block_aggregate``.
   //!   @endrst
   //!
   //! @param[in] scan_op
@@ -1152,7 +1159,7 @@ public:
     ExclusiveScan(thread_prefix, thread_prefix, initial_value, scan_op, block_aggregate);
 
     // Exclusive scan in registers with prefix as seed
-    internal::ThreadScanExclusive(input, output, scan_op, thread_prefix);
+    detail::ThreadScanExclusive(input, output, scan_op, thread_prefix);
   }
 
   //! @rst
@@ -1284,7 +1291,7 @@ public:
     ExclusiveScan(thread_prefix, thread_prefix, scan_op, block_prefix_callback_op);
 
     // Exclusive scan in registers with prefix as seed
-    internal::ThreadScanExclusive(input, output, scan_op, thread_prefix);
+    detail::ThreadScanExclusive(input, output, scan_op, thread_prefix);
   }
 
   //! @}  end member group
@@ -1394,7 +1401,7 @@ public:
     ExclusiveScan(thread_partial, thread_partial, scan_op);
 
     // Exclusive scan in registers with prefix
-    internal::ThreadScanExclusive(input, output, scan_op, thread_partial, (linear_tid != 0));
+    detail::ThreadScanExclusive(input, output, scan_op, thread_partial, (linear_tid != 0));
   }
 
   //! @rst
@@ -1438,7 +1445,7 @@ public:
     ExclusiveScan(thread_partial, thread_partial, scan_op, block_aggregate);
 
     // Exclusive scan in registers with prefix
-    internal::ThreadScanExclusive(input, output, scan_op, thread_partial, (linear_tid != 0));
+    detail::ThreadScanExclusive(input, output, scan_op, thread_partial, (linear_tid != 0));
   }
 
   //! @}  end member group
@@ -1716,7 +1723,7 @@ public:
       ExclusiveSum(thread_prefix, thread_prefix);
 
       // Inclusive scan in registers with prefix as seed
-      internal::ThreadScanInclusive(input, output, scan_op, thread_prefix, (linear_tid != 0));
+      detail::ThreadScanInclusive(input, output, scan_op, thread_prefix, (linear_tid != 0));
     }
   }
 
@@ -1793,7 +1800,7 @@ public:
       ExclusiveSum(thread_prefix, thread_prefix, block_aggregate);
 
       // Inclusive scan in registers with prefix as seed
-      internal::ThreadScanInclusive(input, output, scan_op, thread_prefix, (linear_tid != 0));
+      detail::ThreadScanInclusive(input, output, scan_op, thread_prefix, (linear_tid != 0));
     }
   }
 
@@ -1925,7 +1932,7 @@ public:
       ExclusiveSum(thread_prefix, thread_prefix, block_prefix_callback_op);
 
       // Inclusive scan in registers with prefix as seed
-      internal::ThreadScanInclusive(input, output, scan_op, thread_prefix);
+      detail::ThreadScanInclusive(input, output, scan_op, thread_prefix);
     }
   }
 
@@ -2237,7 +2244,7 @@ public:
       ExclusiveScan(thread_prefix, thread_prefix, scan_op);
 
       // Inclusive scan in registers with prefix as seed (first thread does not seed)
-      internal::ThreadScanInclusive(input, output, scan_op, thread_prefix, (linear_tid != 0));
+      detail::ThreadScanInclusive(input, output, scan_op, thread_prefix, (linear_tid != 0));
     }
   }
 
@@ -2294,7 +2301,7 @@ public:
     ExclusiveScan(thread_prefix, thread_prefix, initial_value, scan_op);
 
     // Exclusive scan in registers with prefix as seed
-    internal::ThreadScanInclusive(input, output, scan_op, thread_prefix);
+    detail::ThreadScanInclusive(input, output, scan_op, thread_prefix);
   }
 
   //! @rst
@@ -2376,7 +2383,7 @@ public:
       ExclusiveScan(thread_prefix, thread_prefix, scan_op, block_aggregate);
 
       // Inclusive scan in registers with prefix as seed (first thread does not seed)
-      internal::ThreadScanInclusive(input, output, scan_op, thread_prefix, (linear_tid != 0));
+      detail::ThreadScanInclusive(input, output, scan_op, thread_prefix, (linear_tid != 0));
     }
   }
 
@@ -2405,6 +2412,8 @@ public:
   //!
   //! The value ``126`` will be stored in ``block_aggregate`` for all threads.
   //!
+  //! \note ``initial_value`` is not applied to the block-wide aggregate.
+  //!
   //! @endrst
   //!
   //! @tparam ITEMS_PER_THREAD
@@ -2421,7 +2430,7 @@ public:
   //!
   //! @param[in] initial_value
   //!   Initial value to seed the inclusive scan (uniform across block). It is not taken
-  //!   into account for block_aggregate.
+  //!   into account for ``block_aggregate``.
   //!
   //! @param[in] scan_op
   //!   Binary scan functor
@@ -2439,7 +2448,7 @@ public:
     ExclusiveScan(thread_prefix, thread_prefix, initial_value, scan_op, block_aggregate);
 
     // Exclusive scan in registers with prefix as seed
-    internal::ThreadScanInclusive(input, output, scan_op, thread_prefix);
+    detail::ThreadScanInclusive(input, output, scan_op, thread_prefix);
   }
 
   //! @rst
@@ -2575,7 +2584,7 @@ public:
       ExclusiveScan(thread_prefix, thread_prefix, scan_op, block_prefix_callback_op);
 
       // Inclusive scan in registers with prefix as seed
-      internal::ThreadScanInclusive(input, output, scan_op, thread_prefix);
+      detail::ThreadScanInclusive(input, output, scan_op, thread_prefix);
     }
   }
 

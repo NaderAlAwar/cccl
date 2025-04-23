@@ -100,8 +100,8 @@ C2H_TEST("DeviceTransform::Transform cudax::async_device_buffer", "[device][devi
 
   cudax::async_device_buffer<type> a{env, num_items, cudax::uninit};
   cudax::async_device_buffer<type> b{env, num_items, cudax::uninit};
-  thrust::sequence(thrust::cuda::par_nosync.on(stream), a.begin(), a.end());
-  thrust::sequence(thrust::cuda::par_nosync.on(stream), b.begin(), b.end());
+  thrust::sequence(thrust::cuda::par_nosync.on(stream.get()), a.begin(), a.end());
+  thrust::sequence(thrust::cuda::par_nosync.on(stream.get()), b.begin(), b.end());
 
   cudax::async_device_buffer<type> result{env, num_items, cudax::uninit};
 
@@ -119,7 +119,7 @@ C2H_TEST("DeviceTransform::Transform cudax::async_device_buffer", "[device][devi
   REQUIRE(
     cudaMemcpyAsync(result_h.data(), result.data(), num_items * sizeof(type), cudaMemcpyDeviceToHost, stream.get())
     == cudaSuccess);
-  stream.wait();
+  stream.sync();
 
   // compute reference and verify
   thrust::host_vector<type> reference_h(num_items);
