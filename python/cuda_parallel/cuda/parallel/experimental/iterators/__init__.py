@@ -1,6 +1,7 @@
 import numba
 
 from . import _iterators
+from . import _strided as _strided
 
 
 def CacheModifiedInputIterator(device_array, modifier):
