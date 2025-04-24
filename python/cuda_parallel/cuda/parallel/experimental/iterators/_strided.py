@@ -179,23 +179,29 @@ class NdArrayIterator(_iterators.IteratorBase):
 
     @property
     def ltoirs(self):
-        abi_suffix = _iterators._get_abi_suffix(self.kind)
-        advance_abi_name = f"advance_{abi_suffix}"
-        deref_abi_name = f"dereference_{abi_suffix}"
-        advance_ltoir, _ = _iterators.cached_compile(
-            self.advance,
-            self._get_advance_signature(),
-            output="ltoir",
-            abi_name=advance_abi_name,
-        )
+        if self._ltoirs is None:
+            abi_suffix = _iterators._get_abi_suffix(self.kind)
+            advance_abi_name = f"advance_{abi_suffix}"
+            deref_abi_name = f"dereference_{abi_suffix}"
+            advance_ltoir, _ = _iterators.cached_compile(
+                self.advance,
+                self._get_advance_signature(),
+                output="ltoir",
+                abi_name=advance_abi_name,
+            )
 
-        deref_ltoir, _ = _iterators.cached_compile(
-            self.dereference,
-            self._get_dereference_signature(),
-            output="ltoir",
-            abi_name=deref_abi_name,
-        )
-        return {advance_abi_name: advance_ltoir, deref_abi_name: deref_ltoir}
+            deref_ltoir, _ = _iterators.cached_compile(
+                self.dereference,
+                self._get_dereference_signature(),
+                output="ltoir",
+                abi_name=deref_abi_name,
+            )
+            self._ltoirs = {
+                advance_abi_name: advance_ltoir,
+                deref_abi_name: deref_ltoir,
+            }
+        assert self._ltoirs is not None
+        return self._ltoirs
 
     @ltoirs.setter
     def ltoirs(self, value):
@@ -215,8 +221,12 @@ class NdArrayIterator(_iterators.IteratorBase):
         else:
             return (state_arg_numba_type, self.value_type)
 
+    @property
+    def advance(self):
+        return self.io_advance
+
     @staticmethod
-    def advance(state_ref, distance):
+    def io_advance(state_ref, distance):
         state_ref.linear_id = state_ref.linear_id + distance
 
     @property

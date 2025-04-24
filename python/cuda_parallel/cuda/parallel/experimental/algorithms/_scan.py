@@ -5,6 +5,7 @@
 
 from __future__ import annotations  # TODO: required for Python 3.7 docs env
 
+import time
 from typing import Callable
 
 import numba
@@ -16,7 +17,7 @@ from .._caching import CachableFunction, cache_with_key
 from .._cccl_interop import call_build, set_cccl_iterator_state, to_cccl_value_state
 from .._utils import protocols
 from .._utils.protocols import get_data_pointer, validate_and_get_stream
-from ..iterators._iterators import IteratorBase
+from ..iterators._iterators import IteratorBase, scrub_duplicate_ltoirs
 from ..typing import DeviceArrayLike, GpuStruct
 
 
@@ -39,6 +40,9 @@ class _Scan:
         h_init: np.ndarray | GpuStruct,
         force_inclusive: bool,
     ):
+        print("scrubbing")
+        d_in, d_out = scrub_duplicate_ltoirs(d_in, d_out)
+
         self.d_in_cccl = cccl.to_cccl_iter(d_in)
         self.d_out_cccl = cccl.to_cccl_iter(d_out)
         self.h_init_cccl = cccl.to_cccl_value(h_init)
@@ -86,6 +90,7 @@ class _Scan:
             temp_storage_bytes = temp_storage.nbytes
             d_temp_storage = get_data_pointer(temp_storage)
 
+        start = time.time()
         temp_storage_bytes = self.device_scan_fn(
             d_temp_storage,
             temp_storage_bytes,
@@ -96,6 +101,9 @@ class _Scan:
             self.h_init_cccl,
             stream_handle,
         )
+        stop = time.time()
+
+        print("Scan time:", (stop - start) * 1000)
         return temp_storage_bytes
 
 
