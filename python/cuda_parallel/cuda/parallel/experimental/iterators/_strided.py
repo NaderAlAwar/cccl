@@ -147,13 +147,15 @@ def strided_view_iterator_numba_type(value_type: types.Type, ndim: int):
     return ndarray_view_type
 
 
-class NdArrayIteratorKind(_iterators.IteratorKind):
+class NdArrayInputIteratorKind(_iterators.IteratorKind):
+    pass
+
+
+class NdArrayOutputIteratorKind(_iterators.IteratorKind):
     pass
 
 
 class NdArrayIterator(_iterators.IteratorBase):
-    iterator_kind_type = NdArrayIteratorKind
-
     def __init__(
         self,
         ptr: int,
@@ -165,6 +167,12 @@ class NdArrayIterator(_iterators.IteratorBase):
         ndim = len(shape)
         if not (len(strides) == ndim):
             raise ValueError
+
+        NdArrayIterator.iterator_kind_type = (
+            NdArrayInputIteratorKind
+            if iterator_io is _iterators.IteratorIOKind.INPUT
+            else NdArrayOutputIteratorKind
+        )
 
         state_numba_type = strided_view_iterator_numba_type(value_type, ndim)
         # build ctypes struct for state of iterator
