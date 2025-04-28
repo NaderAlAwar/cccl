@@ -691,20 +691,20 @@ struct {26} {
 
 template <cub::SortOrder Order>
 CUresult cccl_device_radix_sort_impl(
-  [[maybe_unused]] cccl_device_radix_sort_build_result_t build,
-  [[maybe_unused]] void* d_temp_storage,
-  [[maybe_unused]] size_t* temp_storage_bytes,
-  [[maybe_unused]] cccl_iterator_t d_keys_in,
-  [[maybe_unused]] cccl_iterator_t d_keys_out,
-  [[maybe_unused]] cccl_iterator_t d_values_in,
-  [[maybe_unused]] cccl_iterator_t d_values_out,
-  [[maybe_unused]] cccl_op_t decomposer,
-  [[maybe_unused]] uint64_t num_items,
-  [[maybe_unused]] int begin_bit,
-  [[maybe_unused]] int end_bit,
-  [[maybe_unused]] bool is_overwrite_okay,
-  [[maybe_unused]] int* selector,
-  [[maybe_unused]] CUstream stream)
+  cccl_device_radix_sort_build_result_t build,
+  void* d_temp_storage,
+  size_t* temp_storage_bytes,
+  cccl_iterator_t d_keys_in,
+  cccl_iterator_t d_keys_out,
+  cccl_iterator_t d_values_in,
+  cccl_iterator_t d_values_out,
+  cccl_op_t decomposer,
+  uint64_t num_items,
+  int begin_bit,
+  int end_bit,
+  bool is_overwrite_okay,
+  int* selector,
+  CUstream stream)
 {
   if (cccl_iterator_kind_t::CCCL_POINTER != d_keys_in.type || cccl_iterator_kind_t::CCCL_POINTER != d_values_in.type
       || cccl_iterator_kind_t::CCCL_POINTER != d_keys_out.type
@@ -716,8 +716,8 @@ CUresult cccl_device_radix_sort_impl(
     return CUDA_ERROR_UNKNOWN;
   }
 
-  [[maybe_unused]] CUresult error = CUDA_SUCCESS;
-  [[maybe_unused]] bool pushed    = false;
+  CUresult error = CUDA_SUCCESS;
+  bool pushed    = false;
   try
   {
     pushed = try_push_context();
@@ -727,40 +727,40 @@ CUresult cccl_device_radix_sort_impl(
 
     indirect_arg_t key_arg_in{d_keys_in};
     indirect_arg_t key_arg_out{d_keys_out};
-    [[maybe_unused]] cub::DoubleBuffer<indirect_arg_t> d_keys_buffer(
+    cub::DoubleBuffer<indirect_arg_t> d_keys_buffer(
       *static_cast<indirect_arg_t**>(&key_arg_in), *static_cast<indirect_arg_t**>(&key_arg_out));
 
     indirect_arg_t val_arg_in{d_values_in};
     indirect_arg_t val_arg_out{d_values_out};
-    [[maybe_unused]] cub::DoubleBuffer<indirect_arg_t> d_values_buffer(
+    cub::DoubleBuffer<indirect_arg_t> d_values_buffer(
       *static_cast<indirect_arg_t**>(&val_arg_in), *static_cast<indirect_arg_t**>(&val_arg_out));
 
-    // auto exec_status = cub::DispatchRadixSort<
-    //   Order,
-    //   indirect_arg_t,
-    //   indirect_arg_t,
-    //   OffsetT,
-    //   indirect_arg_t,
-    //   radix_sort::dynamic_radix_sort_policy_t<&radix_sort::get_policy>,
-    //   radix_sort::radix_sort_kernel_source,
-    //   cub::detail::CudaDriverLauncherFactory>::
-    //   Dispatch(
-    //     d_temp_storage,
-    //     *temp_storage_bytes,
-    //     d_keys_buffer,
-    //     d_values_buffer,
-    //     num_items,
-    //     begin_bit,
-    //     end_bit,
-    //     is_overwrite_okay,
-    //     stream,
-    //     decomposer,
-    //     {build},
-    //     cub::detail::CudaDriverLauncherFactory{cu_device, build.cc},
-    //     {d_keys_in.value_type.size});
+    auto exec_status = cub::DispatchRadixSort<
+      Order,
+      indirect_arg_t,
+      indirect_arg_t,
+      OffsetT,
+      indirect_arg_t,
+      radix_sort::dynamic_radix_sort_policy_t<&radix_sort::get_policy>,
+      radix_sort::radix_sort_kernel_source,
+      cub::detail::CudaDriverLauncherFactory>::
+      Dispatch(
+        d_temp_storage,
+        *temp_storage_bytes,
+        d_keys_buffer,
+        d_values_buffer,
+        num_items,
+        begin_bit,
+        end_bit,
+        is_overwrite_okay,
+        stream,
+        decomposer,
+        {build},
+        cub::detail::CudaDriverLauncherFactory{cu_device, build.cc},
+        {d_keys_in.value_type.size});
 
-    // *selector = d_keys_buffer.selector;
-    // error     = static_cast<CUresult>(exec_status);
+    *selector = d_keys_buffer.selector;
+    error     = static_cast<CUresult>(exec_status);
   }
   catch (const std::exception& exc)
   {
