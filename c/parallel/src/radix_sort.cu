@@ -500,6 +500,17 @@ struct agent_onesweep_policy_t {
 struct agent_scan_policy_t {
   static constexpr int ITEMS_PER_THREAD = {14};
   static constexpr int BLOCK_THREADS = {15};
+struct agent_scan_policy_t {
+  static constexpr int ITEMS_PER_THREAD = {14};
+  static constexpr int BLOCK_THREADS = {15};
+  static constexpr cub::BlockLoadAlgorithm LOAD_ALGORITHM   = cub::BLOCK_LOAD_WARP_TRANSPOSE;
+  static constexpr cub::CacheLoadModifier LOAD_MODIFIER     = cub::LOAD_DEFAULT;
+  static constexpr cub::BlockStoreAlgorithm STORE_ALGORITHM = cub::BLOCK_STORE_WARP_TRANSPOSE;
+  static constexpr cub::BlockScanAlgorithm SCAN_ALGORITHM   = cub::BLOCK_SCAN_RAKING_MEMOIZE;
+  struct detail
+  {
+    using delay_constructor_t = cub::detail::default_delay_constructor_t<{16}>;
+  };
 };
 struct agent_downsweep_policy_t {
   static constexpr int ITEMS_PER_THREAD = {17};
@@ -564,6 +575,7 @@ struct {26} {
     src.replace(src.find("{13}"), 4, std::to_string(policy.onesweep.radix_bits));
     src.replace(src.find("{14}"), 4, std::to_string(policy.scan.items_per_thread));
     src.replace(src.find("{15}"), 4, std::to_string(policy.scan.block_threads));
+    src.replace(src.find("{16}"), 4, offset_t);
     src.replace(src.find("{17}"), 4, std::to_string(policy.downsweep.items_per_thread));
     src.replace(src.find("{18}"), 4, std::to_string(policy.downsweep.block_threads));
     src.replace(src.find("{19}"), 4, std::to_string(policy.downsweep.radix_bits));
@@ -575,7 +587,6 @@ struct {26} {
     src.replace(src.find("{25}"), 4, std::to_string(policy.single_tile.radix_bits));
     src.replace(src.find("{26}"), 4, std::string(chained_policy_t));
     src.replace(src.find("{27}"), 4, op_src);
-
 #if false // CCCL_DEBUGGING_SWITCH
     fflush(stderr);
     printf("\nCODE4NVRTC BEGIN\n%sCODE4NVRTC END\n", src.c_str());
