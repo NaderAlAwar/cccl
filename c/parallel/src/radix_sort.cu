@@ -500,9 +500,6 @@ struct agent_onesweep_policy_t {
 struct agent_scan_policy_t {
   static constexpr int ITEMS_PER_THREAD = {14};
   static constexpr int BLOCK_THREADS = {15};
-struct agent_scan_policy_t {
-  static constexpr int ITEMS_PER_THREAD = {14};
-  static constexpr int BLOCK_THREADS = {15};
   static constexpr cub::BlockLoadAlgorithm LOAD_ALGORITHM   = cub::BLOCK_LOAD_WARP_TRANSPOSE;
   static constexpr cub::CacheLoadModifier LOAD_MODIFIER     = cub::LOAD_DEFAULT;
   static constexpr cub::BlockStoreAlgorithm STORE_ALGORITHM = cub::BLOCK_STORE_WARP_TRANSPOSE;
