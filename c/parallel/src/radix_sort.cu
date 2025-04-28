@@ -322,12 +322,14 @@ std::string get_downsweep_kernel_name(
 }
 
 std::string get_histogram_kernel_name(
-  std::string_view chained_policy_t, cccl_sort_order_t sort_order, std::string_view key_t, std::string_view offset_t)
+  std::string_view chained_policy_t,
+  [[maybe_unused]] cccl_sort_order_t sort_order,
+  std::string_view key_t,
+  std::string_view offset_t)
 {
   std::string result = "cub::detail::radix_sort::DeviceRadixSortHistogramKernel<";
   result += std::string(chained_policy_t) + ", ";
-  result += (sort_order == CCCL_ASCENDING) ? "cub::SortOrder::Ascending" : "cub::SortOrder::Descending";
-  result += ", ";
+  result += "cub::SortOrder::Ascending, ";
   result += std::string(key_t) + ", ";
   result += std::string(offset_t) + ", ";
   result += "op_wrapper>";
@@ -584,7 +586,7 @@ struct {26} {
     src.replace(src.find("{25}"), 4, std::to_string(policy.single_tile.radix_bits));
     src.replace(src.find("{26}"), 4, std::string(chained_policy_t));
     src.replace(src.find("{27}"), 4, op_src);
-#if false // CCCL_DEBUGGING_SWITCH
+#if true // CCCL_DEBUGGING_SWITCH
     fflush(stderr);
     printf("\nCODE4NVRTC BEGIN\n%sCODE4NVRTC END\n", src.c_str());
     fflush(stdout);
@@ -615,6 +617,8 @@ struct {26} {
     std::string histogram_kernel_lowered_name;
     std::string exclusive_sum_kernel_lowered_name;
     std::string onesweep_kernel_lowered_name;
+
+    std::cout << "histogram_kernel_name: " << histogram_kernel_name << std::endl;
 
     const std::string arch = "-arch=sm_" + std::to_string(cc_major) + std::to_string(cc_minor);
 
