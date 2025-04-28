@@ -795,11 +795,7 @@ CUresult cccl_device_radix_sort(
   int* selector,
   CUstream stream)
 {
-  auto radix_sort_impl =
-    (build.order == CCCL_ASCENDING)
-      ? cccl_device_radix_sort_impl<cub::SortOrder::Ascending>
-      : cccl_device_radix_sort_impl<cub::SortOrder::Descending>;
-  return radix_sort_impl(
+  return cccl_device_radix_sort_impl<cub::SortOrder::Ascending>(
     build,
     d_temp_storage,
     temp_storage_bytes,
