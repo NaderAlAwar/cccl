@@ -467,27 +467,27 @@ CUresult cccl_device_radix_sort_build(
         : make_kernel_user_unary_operator(key_cpp, decomposer_return_type, decomposer);
     constexpr std::string_view chained_policy_t = "device_radix_sort_policy";
 
-    constexpr std::string_view src_template = R"XXX(
+    const std::string src_template = R"XXX(
 #include <cub/device/dispatch/kernels/radix_sort.cuh>
 #include <cub/agent/single_pass_scan_operators.cuh>
 
-struct __align__({1}) storage_t {{
+struct __align__({1}) storage_t {
   char data[{0}];
-}};
-struct __align__({3}) values_storage_t {{
+};
+struct __align__({3}) values_storage_t {
   char data[{2}];
-}};
-struct agent_histogram_policy_t {{
+};
+struct agent_histogram_policy_t {
   static constexpr int ITEMS_PER_THREAD = {4};
   static constexpr int BLOCK_THREADS = {5};
   static constexpr int RADIX_BITS = {6};
   static constexpr int NUM_PARTS = {7};
-}};
-struct agent_exclusive_sum_policy_t {{
+};
+struct agent_exclusive_sum_policy_t {
   static constexpr int BLOCK_THREADS = {8};
   static constexpr int RADIX_BITS = {9};
-}};
-struct agent_onesweep_policy_t {{
+};
+struct agent_onesweep_policy_t {
   static constexpr int ITEMS_PER_THREAD = {10};
   static constexpr int BLOCK_THREADS = {11};
   static constexpr int RANK_NUM_PARTS = {12};
@@ -495,8 +495,8 @@ struct agent_onesweep_policy_t {{
   static constexpr cub::RadixRankAlgorithm RANK_ALGORITHM       = cub::RADIX_RANK_MATCH_EARLY_COUNTS_ANY;
   static constexpr cub::BlockScanAlgorithm SCAN_ALGORITHM       = cub::BLOCK_SCAN_WARP_SCANS;
   static constexpr cub::RadixSortStoreAlgorithm STORE_ALGORITHM = cub::RADIX_SORT_STORE_DIRECT;
-}};
-struct agent_scan_policy_t {{
+};
+struct agent_scan_policy_t {
   static constexpr int ITEMS_PER_THREAD = {14};
   static constexpr int BLOCK_THREADS = {15};
   static constexpr cub::BlockLoadAlgorithm LOAD_ALGORITHM   = cub::BLOCK_LOAD_WARP_TRANSPOSE;
@@ -504,11 +504,11 @@ struct agent_scan_policy_t {{
   static constexpr cub::BlockStoreAlgorithm STORE_ALGORITHM = cub::BLOCK_STORE_WARP_TRANSPOSE;
   static constexpr cub::BlockScanAlgorithm SCAN_ALGORITHM   = cub::BLOCK_SCAN_RAKING_MEMOIZE;
   struct detail
-  {{
+  {
     using delay_constructor_t = cub::detail::default_delay_constructor_t<{16}>;
-  }};
-}};
-struct agent_downsweep_policy_t {{
+  };
+};
+struct agent_downsweep_policy_t {
   static constexpr int ITEMS_PER_THREAD = {17};
   static constexpr int BLOCK_THREADS = {18};
   static constexpr int RADIX_BITS = {19};
@@ -516,8 +516,8 @@ struct agent_downsweep_policy_t {{
   static constexpr cub::CacheLoadModifier LOAD_MODIFIER = cub::LOAD_DEFAULT;
   static constexpr cub::RadixRankAlgorithm RANK_ALGORITHM = cub::RADIX_RANK_BASIC;
   static constexpr cub::BlockScanAlgorithm SCAN_ALGORITHM = cub::BLOCK_SCAN_WARP_SCANS;
-}};
-struct agent_alt_downsweep_policy_t {{
+};
+struct agent_alt_downsweep_policy_t {
   static constexpr int ITEMS_PER_THREAD = {20};
   static constexpr int BLOCK_THREADS = {21};
   static constexpr int RADIX_BITS = {22};
@@ -525,8 +525,8 @@ struct agent_alt_downsweep_policy_t {{
   static constexpr cub::CacheLoadModifier LOAD_MODIFIER = cub::LOAD_LDG;
   static constexpr cub::RadixRankAlgorithm RANK_ALGORITHM = cub::RADIX_RANK_MEMOIZE;
   static constexpr cub::BlockScanAlgorithm SCAN_ALGORITHM = cub::BLOCK_SCAN_RAKING_MEMOIZE;
-}};
-struct agent_single_tile_policy_t {{
+};
+struct agent_single_tile_policy_t {
   static constexpr int ITEMS_PER_THREAD = {23};
   static constexpr int BLOCK_THREADS = {24};
   static constexpr int RADIX_BITS = {25};
@@ -534,9 +534,9 @@ struct agent_single_tile_policy_t {{
   static constexpr cub::CacheLoadModifier LOAD_MODIFIER = cub::LOAD_LDG;
   static constexpr cub::RadixRankAlgorithm RANK_ALGORITHM = cub::RADIX_RANK_MEMOIZE;
   static constexpr cub::BlockScanAlgorithm SCAN_ALGORITHM = cub::BLOCK_SCAN_WARP_SCANS;
-}};
-struct {26} {{
-  struct ActivePolicy {{
+};
+struct {26} {
+  struct ActivePolicy {
     using HistogramPolicy = agent_histogram_policy_t;
     using ExclusiveSumPolicy = agent_exclusive_sum_policy_t;
     using OnesweepPolicy = agent_onesweep_policy_t;
@@ -546,44 +546,43 @@ struct {26} {{
     using UpsweepPolicy = agent_downsweep_policy_t;
     using AltUpsweepPolicy = agent_alt_downsweep_policy_t;
     using SingleTilePolicy = agent_single_tile_policy_t;
-  }};
-}};
+  };
+};
 {27};
 )XXX";
 
     std::string offset_t;
     check(nvrtcGetTypeName<OffsetT>(&offset_t));
 
-    const std::string src =
-      std::string(src_template)
-        .replace(src_template.find("{0}"), 3, std::to_string(input_keys_it.value_type.size))
-        .replace(src_template.find("{1}"), 3, std::to_string(input_keys_it.value_type.alignment))
-        .replace(src_template.find("{2}"), 3, std::to_string(input_values_it.value_type.size))
-        .replace(src_template.find("{3}"), 3, std::to_string(input_values_it.value_type.alignment))
-        .replace(src_template.find("{4}"), 3, std::to_string(policy.histogram.items_per_thread))
-        .replace(src_template.find("{5}"), 3, std::to_string(policy.histogram.block_threads))
-        .replace(src_template.find("{6}"), 3, std::to_string(policy.histogram.radix_bits))
-        .replace(src_template.find("{7}"), 3, std::to_string(policy.histogram.num_parts))
-        .replace(src_template.find("{8}"), 3, std::to_string(policy.exclusive_sum.block_threads))
-        .replace(src_template.find("{9}"), 3, std::to_string(policy.exclusive_sum.radix_bits))
-        .replace(src_template.find("{10}"), 4, std::to_string(policy.onesweep.items_per_thread))
-        .replace(src_template.find("{11}"), 4, std::to_string(policy.onesweep.block_threads))
-        .replace(src_template.find("{12}"), 4, std::to_string(policy.onesweep.rank_num_parts))
-        .replace(src_template.find("{13}"), 4, std::to_string(policy.onesweep.radix_bits))
-        .replace(src_template.find("{14}"), 4, std::to_string(policy.scan.items_per_thread))
-        .replace(src_template.find("{15}"), 4, std::to_string(policy.scan.block_threads))
-        .replace(src_template.find("{16}"), 4, offset_t)
-        .replace(src_template.find("{17}"), 4, std::to_string(policy.downsweep.items_per_thread))
-        .replace(src_template.find("{18}"), 4, std::to_string(policy.downsweep.block_threads))
-        .replace(src_template.find("{19}"), 4, std::to_string(policy.downsweep.radix_bits))
-        .replace(src_template.find("{20}"), 4, std::to_string(policy.alt_downsweep.items_per_thread))
-        .replace(src_template.find("{21}"), 4, std::to_string(policy.alt_downsweep.block_threads))
-        .replace(src_template.find("{22}"), 4, std::to_string(policy.alt_downsweep.radix_bits))
-        .replace(src_template.find("{23}"), 4, std::to_string(policy.single_tile.items_per_thread))
-        .replace(src_template.find("{24}"), 4, std::to_string(policy.single_tile.block_threads))
-        .replace(src_template.find("{25}"), 4, std::to_string(policy.single_tile.radix_bits))
-        .replace(src_template.find("{26}"), 4, std::string(chained_policy_t))
-        .replace(src_template.find("{27}"), 4, op_src);
+    std::string src = src_template;
+    src.replace(src.find("{0}"), 3, std::to_string(input_keys_it.value_type.size));
+    src.replace(src.find("{1}"), 3, std::to_string(input_keys_it.value_type.alignment));
+    src.replace(src.find("{2}"), 3, std::to_string(input_values_it.value_type.size));
+    src.replace(src.find("{3}"), 3, std::to_string(input_values_it.value_type.alignment));
+    src.replace(src.find("{4}"), 3, std::to_string(policy.histogram.items_per_thread));
+    src.replace(src.find("{5}"), 3, std::to_string(policy.histogram.block_threads));
+    src.replace(src.find("{6}"), 3, std::to_string(policy.histogram.radix_bits));
+    src.replace(src.find("{7}"), 3, std::to_string(policy.histogram.num_parts));
+    src.replace(src.find("{8}"), 3, std::to_string(policy.exclusive_sum.block_threads));
+    src.replace(src.find("{9}"), 3, std::to_string(policy.exclusive_sum.radix_bits));
+    src.replace(src.find("{10}"), 4, std::to_string(policy.onesweep.items_per_thread));
+    src.replace(src.find("{11}"), 4, std::to_string(policy.onesweep.block_threads));
+    src.replace(src.find("{12}"), 4, std::to_string(policy.onesweep.rank_num_parts));
+    src.replace(src.find("{13}"), 4, std::to_string(policy.onesweep.radix_bits));
+    src.replace(src.find("{14}"), 4, std::to_string(policy.scan.items_per_thread));
+    src.replace(src.find("{15}"), 4, std::to_string(policy.scan.block_threads));
+    src.replace(src.find("{16}"), 4, offset_t);
+    src.replace(src.find("{17}"), 4, std::to_string(policy.downsweep.items_per_thread));
+    src.replace(src.find("{18}"), 4, std::to_string(policy.downsweep.block_threads));
+    src.replace(src.find("{19}"), 4, std::to_string(policy.downsweep.radix_bits));
+    src.replace(src.find("{20}"), 4, std::to_string(policy.alt_downsweep.items_per_thread));
+    src.replace(src.find("{21}"), 4, std::to_string(policy.alt_downsweep.block_threads));
+    src.replace(src.find("{22}"), 4, std::to_string(policy.alt_downsweep.radix_bits));
+    src.replace(src.find("{23}"), 4, std::to_string(policy.single_tile.items_per_thread));
+    src.replace(src.find("{24}"), 4, std::to_string(policy.single_tile.block_threads));
+    src.replace(src.find("{25}"), 4, std::to_string(policy.single_tile.radix_bits));
+    src.replace(src.find("{26}"), 4, std::string(chained_policy_t));
+    src.replace(src.find("{27}"), 4, op_src);
 
 #if false // CCCL_DEBUGGING_SWITCH
     fflush(stderr);
