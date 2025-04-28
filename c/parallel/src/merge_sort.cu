@@ -119,7 +119,7 @@ std::string get_iterator_name(cccl_iterator_t iterator, merge_sort_iterator_t wh
   }
 }
 
-merge_sort_runtime_tuning_policy get_policy(int cc, int key_size)
+merge_sort_runtime_tuning_policy get_policy(int /*cc*/, int /*key_size*/)
 {
   // merge_sort_tuning_t chain[] = {
   //   {60, 256, nominal_4b_items_to_items(17, key_size)}, {35, 256, nominal_4b_items_to_items(11, key_size)}};
