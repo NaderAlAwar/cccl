@@ -161,9 +161,8 @@ def to_cccl_iter(array_or_iterator) -> Iterator:
 
 def to_cccl_value_state(array_or_struct: np.ndarray | GpuStruct) -> memoryview:
     if isinstance(array_or_struct, np.ndarray):
-        assert array_or_struct.flags.contiguous
-        data = array_or_struct.data.cast("B")
-        return data
+        # assert array_or_struct.flags.contiguous
+        return array_or_struct.data.cast("B")
     else:
         # it's a GpuStruct, use the array underlying it
         return to_cccl_value_state(array_or_struct._data)
