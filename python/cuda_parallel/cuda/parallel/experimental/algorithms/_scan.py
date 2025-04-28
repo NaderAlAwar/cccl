@@ -13,9 +13,8 @@ import numpy as np
 from .. import _bindings
 from .. import _cccl_interop as cccl
 from .._caching import CachableFunction, cache_with_key
-from .._cccl_interop import call_build, set_cccl_iterator_state, to_cccl_value_state
+from .._cccl_interop import call_build, set_cccl_iterator_state
 from .._utils import protocols
-from .._utils.protocols import get_data_pointer, validate_and_get_stream
 from ..iterators._iterators import IteratorBase
 from ..typing import DeviceArrayLike, GpuStruct
 
@@ -75,18 +74,10 @@ class _Scan:
         set_cccl_iterator_state(self.d_in_cccl, d_in)
         set_cccl_iterator_state(self.d_out_cccl, d_out)
 
-        self.h_init_cccl.state = to_cccl_value_state(h_init)
+        temp_storage_bytes = temp_storage.nbytes
+        d_temp_storage = temp_storage.data.ptr
 
-        stream_handle = validate_and_get_stream(stream)
-
-        if temp_storage is None:
-            temp_storage_bytes = 0
-            d_temp_storage = 0
-        else:
-            temp_storage_bytes = temp_storage.nbytes
-            d_temp_storage = get_data_pointer(temp_storage)
-
-        temp_storage_bytes = self.device_scan_fn(
+        self.device_scan_fn(
             d_temp_storage,
             temp_storage_bytes,
             self.d_in_cccl,
@@ -94,9 +85,8 @@ class _Scan:
             num_items,
             self.op_wrapper,
             self.h_init_cccl,
-            stream_handle,
+            None,
         )
-        return temp_storage_bytes
 
 
 def make_cache_key(
