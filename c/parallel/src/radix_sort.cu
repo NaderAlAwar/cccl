@@ -229,7 +229,7 @@ radix_sort_runtime_tuning_policy get_policy(int /*cc*/, int key_size)
     128, 16, std::max(1, 1 * 4 / std::max(key_size, 4)), onesweep_radix_bits};
   constexpr agent_radix_sort_exclusive_sum_policy exclusive_sum_policy{256, onesweep_radix_bits};
 
-  const auto [onesweep_items_per_thread, onesweep_block_threads] = reg_bound_scaling(384, 21, key_size);
+  const auto [onesweep_items_per_thread, onesweep_block_threads] = reg_bound_scaling(384, 18, key_size);
   // const auto [scan_items_per_thread, scan_block_threads]         = mem_bound_scaling(512, 23, key_size);
   const int scan_items_per_thread = 5;
   const int scan_block_threads    = 512;
@@ -494,20 +494,12 @@ struct agent_onesweep_policy_t {
   static constexpr int RANK_NUM_PARTS = {12};
   static constexpr int RADIX_BITS = {13};
   static constexpr cub::RadixRankAlgorithm RANK_ALGORITHM       = cub::RADIX_RANK_MATCH_EARLY_COUNTS_ANY;
-  static constexpr cub::BlockScanAlgorithm SCAN_ALGORITHM       = cub::BLOCK_SCAN_WARP_SCANS;
+  static constexpr cub::BlockScanAlgorithm SCAN_ALGORITHM       = cub::BLOCK_SCAN_RAKING_MEMOIZE;
   static constexpr cub::RadixSortStoreAlgorithm STORE_ALGORITHM = cub::RADIX_SORT_STORE_DIRECT;
 };
 struct agent_scan_policy_t {
   static constexpr int ITEMS_PER_THREAD = {14};
   static constexpr int BLOCK_THREADS = {15};
-  static constexpr cub::BlockLoadAlgorithm LOAD_ALGORITHM   = cub::BLOCK_LOAD_WARP_TRANSPOSE;
-  static constexpr cub::CacheLoadModifier LOAD_MODIFIER     = cub::LOAD_DEFAULT;
-  static constexpr cub::BlockStoreAlgorithm STORE_ALGORITHM = cub::BLOCK_STORE_WARP_TRANSPOSE;
-  static constexpr cub::BlockScanAlgorithm SCAN_ALGORITHM   = cub::BLOCK_SCAN_RAKING_MEMOIZE;
-  struct detail
-  {
-    using delay_constructor_t = cub::detail::default_delay_constructor_t<{16}>;
-  };
 };
 struct agent_downsweep_policy_t {
   static constexpr int ITEMS_PER_THREAD = {17};
