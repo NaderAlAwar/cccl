@@ -275,7 +275,7 @@ struct device_scan_policy {
     src.replace(src.find("{6}"), 3, op_src);
     src.replace(src.find("{7}"), 3, accum_cpp);
 
-#if false // CCCL_DEBUGGING_SWITCH
+#if true // CCCL_DEBUGGING_SWITCH
     fflush(stderr);
     printf("\nCODE4NVRTC BEGIN\n%sCODE4NVRTC END\n", src.c_str());
     fflush(stdout);
@@ -285,6 +285,9 @@ struct device_scan_policy {
     std::string scan_kernel_name = scan::get_scan_kernel_name(input_it, output_it, op, init, force_inclusive);
     std::string init_kernel_lowered_name;
     std::string scan_kernel_lowered_name;
+
+    std::cout << "init_kernel_name: " << init_kernel_name << std::endl;
+    std::cout << "scan_kernel_name: " << scan_kernel_name << std::endl;
 
     const std::string arch = "-arch=sm_" + std::to_string(cc_major) + std::to_string(cc_minor);
 
