@@ -12,7 +12,7 @@
 #include <cub/detail/launcher/cuda_driver.cuh>
 #include <cub/device/device_radix_sort.cuh>
 
-#include <format>
+// #include <format>
 
 #include "cccl/c/types.h"
 #include "cub/util_type.cuh"
@@ -261,14 +261,15 @@ std::string get_single_tile_kernel_name(
   std::string_view value_t,
   std::string_view offset_t)
 {
-  return std::format(
-    "cub::detail::radix_sort::DeviceRadixSortSingleTileKernel<{0}, {1}, {2}, {3}, {4}, {5}>",
-    chained_policy_t,
-    (sort_order == CCCL_ASCENDING) ? "cub::SortOrder::Ascending" : "cub::SortOrder::Descending",
-    key_t,
-    value_t,
-    offset_t,
-    "op_wrapper");
+  std::string result = "cub::detail::radix_sort::DeviceRadixSortSingleTileKernel<";
+  result += std::string(chained_policy_t) + ", ";
+  result += (sort_order == CCCL_ASCENDING) ? "cub::SortOrder::Ascending" : "cub::SortOrder::Descending";
+  result += ", ";
+  result += std::string(key_t) + ", ";
+  result += std::string(value_t) + ", ";
+  result += std::string(offset_t) + ", ";
+  result += "op_wrapper>";
+  return result;
 }
 
 std::string get_upsweep_kernel_name(
@@ -278,19 +279,24 @@ std::string get_upsweep_kernel_name(
   std::string_view key_t,
   std::string_view offset_t)
 {
-  return std::format(
-    "cub::detail::radix_sort::DeviceRadixSortUpsweepKernel<{0}, {1}, {2}, {3}, {4}, {5}>",
-    chained_policy_t,
-    alt_digit_bits ? "true" : "false",
-    (sort_order == CCCL_ASCENDING) ? "cub::SortOrder::Ascending" : "cub::SortOrder::Descending",
-    key_t,
-    offset_t,
-    "op_wrapper");
+  std::string result = "cub::detail::radix_sort::DeviceRadixSortUpsweepKernel<";
+  result += std::string(chained_policy_t) + ", ";
+  result += alt_digit_bits ? "true" : "false";
+  result += ", ";
+  result += (sort_order == CCCL_ASCENDING) ? "cub::SortOrder::Ascending" : "cub::SortOrder::Descending";
+  result += ", ";
+  result += std::string(key_t) + ", ";
+  result += std::string(offset_t) + ", ";
+  result += "op_wrapper>";
+  return result;
 }
 
 std::string get_scan_bins_kernel_name(std::string_view chained_policy_t, std::string_view offset_t)
 {
-  return std::format("cub::detail::radix_sort::RadixSortScanBinsKernel<{0}, {1}>", chained_policy_t, offset_t);
+  std::string result = "cub::detail::radix_sort::RadixSortScanBinsKernel<";
+  result += std::string(chained_policy_t) + ", ";
+  result += std::string(offset_t) + ">";
+  return result;
 }
 
 std::string get_downsweep_kernel_name(
@@ -301,32 +307,38 @@ std::string get_downsweep_kernel_name(
   std::string_view value_t,
   std::string_view offset_t)
 {
-  return std::format(
-    "cub::detail::radix_sort::DeviceRadixSortDownsweepKernel<{0}, {1}, {2}, {3}, {4}, {5}, {6}>",
-    chained_policy_t,
-    alt_digit_bits ? "true" : "false",
-    (sort_order == CCCL_ASCENDING) ? "cub::SortOrder::Ascending" : "cub::SortOrder::Descending",
-    key_t,
-    value_t,
-    offset_t,
-    "op_wrapper");
+  std::string result = "cub::detail::radix_sort::DeviceRadixSortDownsweepKernel<";
+  result += std::string(chained_policy_t) + ", ";
+  result += alt_digit_bits ? "true" : "false";
+  result += ", ";
+  result += (sort_order == CCCL_ASCENDING) ? "cub::SortOrder::Ascending" : "cub::SortOrder::Descending";
+  result += ", ";
+  result += std::string(key_t) + ", ";
+  result += std::string(value_t) + ", ";
+  result += std::string(offset_t) + ", ";
+  result += "op_wrapper>";
+  return result;
 }
 
 std::string get_histogram_kernel_name(
   std::string_view chained_policy_t, cccl_sort_order_t sort_order, std::string_view key_t, std::string_view offset_t)
 {
-  return std::format(
-    "cub::detail::radix_sort::DeviceRadixSortHistogramKernel<{0}, {1}, {2}, {3}, {4}>",
-    chained_policy_t,
-    (sort_order == CCCL_ASCENDING) ? "cub::SortOrder::Ascending" : "cub::SortOrder::Descending",
-    key_t,
-    offset_t,
-    "op_wrapper");
+  std::string result = "cub::detail::radix_sort::DeviceRadixSortHistogramKernel<";
+  result += std::string(chained_policy_t) + ", ";
+  result += (sort_order == CCCL_ASCENDING) ? "cub::SortOrder::Ascending" : "cub::SortOrder::Descending";
+  result += ", ";
+  result += std::string(key_t) + ", ";
+  result += std::string(offset_t) + ", ";
+  result += "op_wrapper>";
+  return result;
 }
 
 std::string get_exclusive_sum_kernel_name(std::string_view chained_policy_t, std::string_view offset_t)
 {
-  return std::format("cub::detail::radix_sort::DeviceRadixSortExclusiveSumKernel<{0}, {1}>", chained_policy_t, offset_t);
+  std::string result = "cub::detail::radix_sort::DeviceRadixSortExclusiveSumKernel<";
+  result += std::string(chained_policy_t) + ", ";
+  result += std::string(offset_t) + ">";
+  return result;
 }
 
 std::string get_onesweep_kernel_name(
@@ -336,14 +348,15 @@ std::string get_onesweep_kernel_name(
   std::string_view value_t,
   std::string_view offset_t)
 {
-  return std::format(
-    "cub::detail::radix_sort::DeviceRadixSortOnesweepKernel<{0}, {1}, {2}, {3}, {4}, int, int, {5}>",
-    chained_policy_t,
-    (sort_order == CCCL_ASCENDING) ? "cub::SortOrder::Ascending" : "cub::SortOrder::Descending",
-    key_t,
-    value_t,
-    offset_t,
-    "op_wrapper");
+  std::string result = "cub::detail::radix_sort::DeviceRadixSortOnesweepKernel<";
+  result += std::string(chained_policy_t) + ", ";
+  result += (sort_order == CCCL_ASCENDING) ? "cub::SortOrder::Ascending" : "cub::SortOrder::Descending";
+  result += ", ";
+  result += std::string(key_t) + ", ";
+  result += std::string(value_t) + ", ";
+  result += std::string(offset_t) + ", ";
+  result += "int, int, op_wrapper>";
+  return result;
 }
 
 template <auto* GetPolicy>
@@ -541,37 +554,36 @@ struct {26} {{
     std::string offset_t;
     check(nvrtcGetTypeName<OffsetT>(&offset_t));
 
-    const std::string src = std::format(
-      src_template,
-      input_keys_it.value_type.size, // 0
-      input_keys_it.value_type.alignment, // 1
-      input_values_it.value_type.size, // 2
-      input_values_it.value_type.alignment, // 3
-      policy.histogram.items_per_thread, // 4
-      policy.histogram.block_threads, // 5
-      policy.histogram.radix_bits, // 6
-      policy.histogram.num_parts, // 7
-      policy.exclusive_sum.block_threads, // 8
-      policy.exclusive_sum.radix_bits, // 9
-      policy.onesweep.items_per_thread, // 10
-      policy.onesweep.block_threads, // 11
-      policy.onesweep.rank_num_parts, // 12
-      policy.onesweep.radix_bits, // 13
-      policy.scan.items_per_thread, // 14
-      policy.scan.block_threads, // 15
-      offset_t, // 16
-      policy.downsweep.items_per_thread, // 17
-      policy.downsweep.block_threads, // 18
-      policy.downsweep.radix_bits, // 19
-      policy.alt_downsweep.items_per_thread, // 20
-      policy.alt_downsweep.block_threads, // 21
-      policy.alt_downsweep.radix_bits, // 22
-      policy.single_tile.items_per_thread, // 23
-      policy.single_tile.block_threads, // 24
-      policy.single_tile.radix_bits, // 25
-      chained_policy_t, // 26
-      op_src // 27
-    );
+    const std::string src =
+      std::string(src_template)
+        .replace(src_template.find("{0}"), 3, std::to_string(input_keys_it.value_type.size))
+        .replace(src_template.find("{1}"), 3, std::to_string(input_keys_it.value_type.alignment))
+        .replace(src_template.find("{2}"), 3, std::to_string(input_values_it.value_type.size))
+        .replace(src_template.find("{3}"), 3, std::to_string(input_values_it.value_type.alignment))
+        .replace(src_template.find("{4}"), 3, std::to_string(policy.histogram.items_per_thread))
+        .replace(src_template.find("{5}"), 3, std::to_string(policy.histogram.block_threads))
+        .replace(src_template.find("{6}"), 3, std::to_string(policy.histogram.radix_bits))
+        .replace(src_template.find("{7}"), 3, std::to_string(policy.histogram.num_parts))
+        .replace(src_template.find("{8}"), 3, std::to_string(policy.exclusive_sum.block_threads))
+        .replace(src_template.find("{9}"), 3, std::to_string(policy.exclusive_sum.radix_bits))
+        .replace(src_template.find("{10}"), 4, std::to_string(policy.onesweep.items_per_thread))
+        .replace(src_template.find("{11}"), 4, std::to_string(policy.onesweep.block_threads))
+        .replace(src_template.find("{12}"), 4, std::to_string(policy.onesweep.rank_num_parts))
+        .replace(src_template.find("{13}"), 4, std::to_string(policy.onesweep.radix_bits))
+        .replace(src_template.find("{14}"), 4, std::to_string(policy.scan.items_per_thread))
+        .replace(src_template.find("{15}"), 4, std::to_string(policy.scan.block_threads))
+        .replace(src_template.find("{16}"), 4, offset_t)
+        .replace(src_template.find("{17}"), 4, std::to_string(policy.downsweep.items_per_thread))
+        .replace(src_template.find("{18}"), 4, std::to_string(policy.downsweep.block_threads))
+        .replace(src_template.find("{19}"), 4, std::to_string(policy.downsweep.radix_bits))
+        .replace(src_template.find("{20}"), 4, std::to_string(policy.alt_downsweep.items_per_thread))
+        .replace(src_template.find("{21}"), 4, std::to_string(policy.alt_downsweep.block_threads))
+        .replace(src_template.find("{22}"), 4, std::to_string(policy.alt_downsweep.radix_bits))
+        .replace(src_template.find("{23}"), 4, std::to_string(policy.single_tile.items_per_thread))
+        .replace(src_template.find("{24}"), 4, std::to_string(policy.single_tile.block_threads))
+        .replace(src_template.find("{25}"), 4, std::to_string(policy.single_tile.radix_bits))
+        .replace(src_template.find("{26}"), 4, std::string(chained_policy_t))
+        .replace(src_template.find("{27}"), 4, op_src);
 
 #if false // CCCL_DEBUGGING_SWITCH
     fflush(stderr);
@@ -605,7 +617,7 @@ struct {26} {{
     std::string exclusive_sum_kernel_lowered_name;
     std::string onesweep_kernel_lowered_name;
 
-    const std::string arch = std::format("-arch=sm_{0}{1}", cc_major, cc_minor);
+    const std::string arch = "-arch=sm_" + std::to_string(cc_major) + std::to_string(cc_minor);
 
     constexpr size_t num_args  = 8;
     const char* args[num_args] = {

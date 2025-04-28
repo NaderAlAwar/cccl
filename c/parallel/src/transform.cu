@@ -15,7 +15,7 @@
 #include <cub/util_temporary_storage.cuh>
 #include <cub/util_type.cuh>
 
-#include <format>
+// #include <format>
 #include <string>
 #include <type_traits>
 
@@ -117,13 +117,8 @@ std::string get_kernel_name(cccl_iterator_t input_it, cccl_iterator_t output_it,
   std::string transform_op_t;
   check(nvrtcGetTypeName<op_wrapper>(&transform_op_t));
 
-  return std::format(
-    "cub::detail::transform::transform_kernel<{0}, {1}, {2}, {3}, {4}>",
-    chained_policy_t, // 0
-    offset_t, // 1
-    transform_op_t, // 2
-    output_iterator_t, // 3
-    input_iterator_t); // 4
+  return "cub::detail::transform::transform_kernel<" + chained_policy_t + ", " + offset_t + ", " + transform_op_t + ", "
+       + output_iterator_t + ", " + input_iterator_t + ">";
 }
 
 std::string
@@ -142,14 +137,8 @@ get_kernel_name(cccl_iterator_t input1_it, cccl_iterator_t input2_it, cccl_itera
   std::string transform_op_t;
   check(nvrtcGetTypeName<op_wrapper>(&transform_op_t));
 
-  return std::format(
-    "cub::detail::transform::transform_kernel<{0}, {1}, {2}, {3}, {4}, {5}>",
-    chained_policy_t, // 0
-    offset_t, // 1
-    transform_op_t, // 2
-    output_iterator_t, // 3
-    input1_iterator_t, // 4
-    input2_iterator_t); // 5
+  return "cub::detail::transform::transform_kernel<" + chained_policy_t + ", " + offset_t + ", " + transform_op_t + ", "
+       + output_iterator_t + ", " + input1_iterator_t + ", " + input2_iterator_t + ">";
 }
 
 template <auto* GetPolicy>
@@ -216,7 +205,7 @@ CUresult cccl_device_unary_transform_build(
       make_kernel_output_iterator(offset_t, transform::output_iterator_name, output_it_value_t, output_it);
     const std::string op_src = make_kernel_user_unary_operator(input_it_value_t, output_it_value_t, op);
 
-    constexpr std::string_view src_template = R"XXX(
+    [[maybe_unused]] constexpr std::string_view src_template = R"XXX(
 #define _CUB_HAS_TRANSFORM_UBLKCP 0
 #include <cub/device/dispatch/kernels/transform.cuh>
 struct __align__({1}) input_storage_t {{
@@ -242,19 +231,46 @@ struct device_transform_policy {{
 {10}
 )XXX";
 
-    const std::string& src = std::format(
-      src_template,
-      input_it.value_type.size, // 0
-      input_it.value_type.alignment, // 1
-      output_it.value_type.size, // 2
-      output_it.value_type.alignment, // 3
-      policy.block_threads, // 4
-      policy.items_per_thread_no_input, // 5
-      policy.min_items_per_thread, // 6
-      policy.max_items_per_thread, // 7
-      input_iterator_src, // 8
-      output_iterator_src, // 9
-      op_src); // 10
+    const std::string src =
+      "#define _CUB_HAS_TRANSFORM_UBLKCP 0\n"
+      "#include <cub/device/dispatch/kernels/transform.cuh>\n"
+      "struct __align__("
+      + std::to_string(input_it.value_type.alignment)
+      + ") input_storage_t {\n"
+        "  char data["
+      + std::to_string(input_it.value_type.size)
+      + "];\n"
+        "};\n"
+        "struct __align__("
+      + std::to_string(output_it.value_type.alignment)
+      + ") output_storage_t {\n"
+        "  char data["
+      + std::to_string(output_it.value_type.size)
+      + "];\n"
+        "};\n"
+      + input_iterator_src + "\n" + output_iterator_src
+      + "\n"
+        "struct prefetch_policy_t {\n"
+        "  static constexpr int block_threads = "
+      + std::to_string(policy.block_threads)
+      + ";\n"
+        "  static constexpr int items_per_thread_no_input = "
+      + std::to_string(policy.items_per_thread_no_input)
+      + ";\n"
+        "  static constexpr int min_items_per_thread = "
+      + std::to_string(policy.min_items_per_thread)
+      + ";\n"
+        "  static constexpr int max_items_per_thread = "
+      + std::to_string(policy.max_items_per_thread)
+      + ";\n"
+        "};\n"
+        "struct device_transform_policy {\n"
+        "  struct ActivePolicy {\n"
+        "    static constexpr auto algorithm = cub::detail::transform::Algorithm::prefetch;\n"
+        "    using algo_policy = prefetch_policy_t;\n"
+        "  };\n"
+        "};\n"
+      + op_src + "\n";
 
 #if false // CCCL_DEBUGGING_SWITCH
     fflush(stderr);
@@ -265,7 +281,7 @@ struct device_transform_policy {{
     std::string kernel_name = transform::get_kernel_name(input_it, output_it, op);
     std::string kernel_lowered_name;
 
-    const std::string arch = std::format("-arch=sm_{0}{1}", cc_major, cc_minor);
+    const std::string arch = "-arch=sm_" + std::to_string(cc_major) + std::to_string(cc_minor);
 
     // Note: `-default-device` is needed because of the use of lambdas
     // in the transform kernel code. Qualifying those explicitly with
@@ -405,7 +421,7 @@ CUresult cccl_device_binary_transform_build(
     const std::string op_src =
       make_kernel_user_binary_operator(input1_it_value_t, input2_it_value_t, output_it_value_t, op);
 
-    constexpr std::string_view src_template = R"XXX(
+    [[maybe_unused]] constexpr std::string_view src_template = R"XXX(
 #define _CUB_HAS_TRANSFORM_UBLKCP 0
 #include <cub/device/dispatch/kernels/transform.cuh>
 struct __align__({1}) input1_storage_t {{
@@ -439,22 +455,53 @@ struct device_transform_policy {{
 
 {13}
 )XXX";
-    const std::string& src                  = std::format(
-      src_template,
-      input1_it.value_type.size, // 0
-      input1_it.value_type.alignment, // 1
-      input2_it.value_type.size, // 2
-      input2_it.value_type.alignment, // 3
-      output_it.value_type.size, // 4
-      output_it.value_type.alignment, // 5
-      policy.block_threads, // 6
-      policy.items_per_thread_no_input, // 7
-      policy.min_items_per_thread, // 8
-      policy.max_items_per_thread, // 9
-      input1_iterator_src, // 10
-      input2_iterator_src, // 11
-      output_iterator_src, // 12
-      op_src); // 13
+    const std::string src =
+      "#define _CUB_HAS_TRANSFORM_UBLKCP 0\n"
+      "#include <cub/device/dispatch/kernels/transform.cuh>\n"
+      "struct __align__("
+      + std::to_string(input1_it.value_type.alignment)
+      + ") input1_storage_t {\n"
+        "  char data["
+      + std::to_string(input1_it.value_type.size)
+      + "];\n"
+        "};\n"
+        "struct __align__("
+      + std::to_string(input2_it.value_type.alignment)
+      + ") input2_storage_t {\n"
+        "  char data["
+      + std::to_string(input2_it.value_type.size)
+      + "];\n"
+        "};\n"
+        "struct __align__("
+      + std::to_string(output_it.value_type.alignment)
+      + ") output_storage_t {\n"
+        "  char data["
+      + std::to_string(output_it.value_type.size)
+      + "];\n"
+        "};\n"
+      + input1_iterator_src + "\n" + input2_iterator_src + "\n" + output_iterator_src
+      + "\n"
+        "struct prefetch_policy_t {\n"
+        "  static constexpr int block_threads = "
+      + std::to_string(policy.block_threads)
+      + ";\n"
+        "  static constexpr int items_per_thread_no_input = "
+      + std::to_string(policy.items_per_thread_no_input)
+      + ";\n"
+        "  static constexpr int min_items_per_thread = "
+      + std::to_string(policy.min_items_per_thread)
+      + ";\n"
+        "  static constexpr int max_items_per_thread = "
+      + std::to_string(policy.max_items_per_thread)
+      + ";\n"
+        "};\n"
+        "struct device_transform_policy {\n"
+        "  struct ActivePolicy {\n"
+        "    static constexpr auto algorithm = cub::detail::transform::Algorithm::prefetch;\n"
+        "    using algo_policy = prefetch_policy_t;\n"
+        "  };\n"
+        "};\n"
+      + op_src + "\n";
 
 #if false // CCCL_DEBUGGING_SWITCH
     fflush(stderr);
@@ -465,7 +512,7 @@ struct device_transform_policy {{
     std::string kernel_name = transform::get_kernel_name(input1_it, input2_it, output_it, op);
     std::string kernel_lowered_name;
 
-    const std::string arch = std::format("-arch=sm_{0}{1}", cc_major, cc_minor);
+    const std::string arch = "-arch=sm_" + std::to_string(cc_major) + std::to_string(cc_minor);
 
     constexpr size_t num_args  = 8;
     const char* args[num_args] = {

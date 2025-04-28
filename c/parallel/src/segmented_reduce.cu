@@ -14,7 +14,7 @@
 #include <cub/thread/thread_load.cuh> // cub::LoadModifier
 
 #include <exception> // std::exception
-#include <format> // std::format
+// #include <format> // std::format
 #include <string> // std::string
 #include <string_view> // std::string_view
 #include <type_traits> // std::is_same_v
@@ -200,17 +200,9 @@ std::string get_device_segmented_reduce_kernel_name(
             typename AccumT>               // 8
    DeviceSegmentedReduceKernel(...);
   */
-  return std::format(
-    "cub::detail::reduce::DeviceSegmentedReduceKernel<{0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}>",
-    chained_policy_t, // 0
-    input_iterator_t, // 1
-    output_iterator_t, // 2
-    start_offset_iterator_t, // 3
-    end_offset_iterator_t, // 4
-    offset_t, // 5
-    reduction_op_t, // 6
-    init_t, // 7
-    accum_t); // 8
+  return "cub::detail::reduce::DeviceSegmentedReduceKernel<" + chained_policy_t + ", " + input_iterator_t + ", "
+       + output_iterator_t + ", " + start_offset_iterator_t + ", " + end_offset_iterator_t + ", " + offset_t + ", "
+       + reduction_op_t + ", " + init_t + ", " + accum_t + ">";
 }
 
 template <auto* GetPolicy>
@@ -312,25 +304,24 @@ struct device_segmented_reduce_policy {{
 {6}
 )XXX";
 
-    std::string src = std::format(
-      program_preamble_template,
-      input_it.value_type.size, // 0
-      input_it.value_type.alignment, // 1
-      policy.items_per_thread, // 2
-      policy.block_size, // 3
-      input_iterator_src, // 4
-      output_iterator_src, // 5
-      op_src, // 6
-      policy.vector_load_length, // 7
-      start_offset_iterator_src, // 8
-      end_offset_iterator_src // 9
-    );
+    std::string src =
+      std::string(program_preamble_template)
+        .replace(program_preamble_template.find("{0}"), 3, std::to_string(input_it.value_type.size))
+        .replace(program_preamble_template.find("{1}"), 3, std::to_string(input_it.value_type.alignment))
+        .replace(program_preamble_template.find("{2}"), 3, std::to_string(policy.items_per_thread))
+        .replace(program_preamble_template.find("{3}"), 3, std::to_string(policy.block_size))
+        .replace(program_preamble_template.find("{4}"), 3, input_iterator_src)
+        .replace(program_preamble_template.find("{5}"), 3, output_iterator_src)
+        .replace(program_preamble_template.find("{6}"), 3, op_src)
+        .replace(program_preamble_template.find("{7}"), 3, std::to_string(policy.vector_load_length))
+        .replace(program_preamble_template.find("{8}"), 3, start_offset_iterator_src)
+        .replace(program_preamble_template.find("{9}"), 3, end_offset_iterator_src);
 
     std::string segmented_reduce_kernel_name = segmented_reduce::get_device_segmented_reduce_kernel_name(
       op, input_it, output_it, start_offset_it, end_offset_it, init);
     std::string segmented_reduce_kernel_lowered_name;
 
-    const std::string arch = std::format("-arch=sm_{0}{1}", cc_major, cc_minor);
+    const std::string arch = "-arch=sm_" + std::to_string(cc_major) + std::to_string(cc_minor);
 
     constexpr size_t num_args  = 8;
     const char* args[num_args] = {

@@ -8,7 +8,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include <format>
+// #include <format>
+#include <iostream>
 #include <string_view>
 
 #include "cccl/c/types.h"
@@ -35,43 +36,49 @@ constexpr std::string_view binary_op_template = R"XXX(
 
 constexpr std::string_view stateless_binary_op_template = R"XXX(
 extern "C" __device__ {0} OP_NAME(LHS_T lhs, RHS_T rhs);
-struct op_wrapper {{
-  __device__ {0} operator()(LHS_T lhs, RHS_T rhs) const {{
+struct op_wrapper {
+  __device__ {0} operator()(LHS_T lhs, RHS_T rhs) const {
     return OP_NAME(lhs, rhs);
-  }}
-}};
+  }
+};
 )XXX";
 
 constexpr std::string_view stateful_binary_op_template = R"XXX(
-struct __align__(OP_ALIGNMENT) op_state {{
+struct __align__(OP_ALIGNMENT) op_state {
   char data[OP_SIZE];
-}};
+};
 extern "C" __device__ {0} OP_NAME(op_state *state, LHS_T lhs, RHS_T rhs);
-struct op_wrapper {{
+struct op_wrapper {
   op_state state;
-  __device__ {0} operator()(LHS_T lhs, RHS_T rhs) {{
+  __device__ {0} operator()(LHS_T lhs, RHS_T rhs) {
     return OP_NAME(&state, lhs, rhs);
-  }}
-}};
+  }
+};
 )XXX";
 
 std::string make_kernel_binary_operator_full_source(
   std::string_view lhs_t, std::string_view rhs_t, cccl_op_t operation, std::string_view return_type)
 {
   const std::string op_alignment =
-    operation.type == cccl_op_kind_t::CCCL_STATELESS ? "" : std::format("{}", operation.alignment);
-  const std::string op_size = operation.type == cccl_op_kind_t::CCCL_STATELESS ? "" : std::format("{}", operation.size);
+    operation.type == cccl_op_kind_t::CCCL_STATELESS ? "" : std::to_string(operation.alignment);
+  const std::string op_size = operation.type == cccl_op_kind_t::CCCL_STATELESS ? "" : std::to_string(operation.size);
 
-  return std::format(
-    binary_op_template,
-    lhs_t,
-    rhs_t,
-    operation.name,
-    op_alignment,
-    op_size,
-    operation.type == cccl_op_kind_t::CCCL_STATELESS
-      ? std::format(stateless_binary_op_template, return_type)
-      : std::format(stateful_binary_op_template, return_type));
+  std::string source = std::string(binary_op_template);
+  source.replace(source.find("{0}"), 3, std::string(lhs_t));
+  source.replace(source.find("{1}"), 3, std::string(rhs_t));
+  source.replace(source.find("{2}"), 3, std::string(operation.name));
+  source.replace(source.find("{3}"), 3, op_alignment);
+  source.replace(source.find("{4}"), 3, op_size);
+
+  std::string op_source =
+    (operation.type == cccl_op_kind_t::CCCL_STATELESS)
+      ? std::string(stateless_binary_op_template)
+      : std::string(stateful_binary_op_template);
+  op_source.replace(op_source.find("{0}"), 3, std::string(return_type));
+  op_source.replace(op_source.find("{0}"), 3, std::string(return_type));
+
+  source.replace(source.find("{5}"), 3, op_source);
+  return source;
 }
 
 std::string make_kernel_user_binary_operator(
@@ -129,8 +136,18 @@ struct op_wrapper
 
 )XXX";
 
-  return (operation.type == cccl_op_kind_t::CCCL_STATELESS)
-         ? std::format(unary_op_template, input_t, output_t, operation.name, "", "", stateless_op)
-         : std::format(
-             unary_op_template, input_t, output_t, operation.name, operation.alignment, operation.size, stateful_op);
+  std::string source = std::string(unary_op_template);
+  source.replace(source.find("{0}"), 3, std::string(input_t));
+  source.replace(source.find("{1}"), 3, std::string(output_t));
+  source.replace(source.find("{2}"), 3, std::string(operation.name));
+  source.replace(source.find("{3}"),
+                 3,
+                 (operation.type == cccl_op_kind_t::CCCL_STATELESS) ? "" : std::to_string(operation.alignment));
+  source.replace(
+    source.find("{4}"), 3, (operation.type == cccl_op_kind_t::CCCL_STATELESS) ? "" : std::to_string(operation.size));
+  source.replace(
+    source.find("{5}"),
+    3,
+    (operation.type == cccl_op_kind_t::CCCL_STATELESS) ? std::string(stateless_op) : std::string(stateful_op));
+  return source;
 }

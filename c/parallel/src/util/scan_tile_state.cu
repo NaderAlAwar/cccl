@@ -8,7 +8,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include <format>
+// #include <format>
+#include <optional>
 #include <regex>
 
 #include "scan_tile_state.h"
@@ -20,11 +21,14 @@
 // information. If/when NVRTC adds these features, we can remove this
 // extra compilation step and get the information directly from the
 // LTO-IR.
-static constexpr auto ptx_u64_assignment_regex = R"(\.visible\s+\.global\s+\.align\s+\d+\s+\.u64\s+{}\s*=\s*(\d+);)";
+static const std::string ptx_u64_assignment_regex =
+  std::string(R"(\.visible\s+\.global\s+\.align\s+\d+\s+\.u64\s+{}\s*=\s*(\d+);)");
 
 std::optional<size_t> find_size_t(char* ptx, std::string_view name)
 {
-  std::regex regex(std::format(ptx_u64_assignment_regex, name));
+  std::string regex_pattern =
+    std::string(ptx_u64_assignment_regex).replace(ptx_u64_assignment_regex.find("{}"), 2, name);
+  std::regex regex(regex_pattern);
   std::cmatch match;
   if (std::regex_search(ptx, match, regex))
   {
@@ -47,14 +51,18 @@ std::pair<size_t, size_t> get_tile_state_bytes_per_tile(
   constexpr std::string_view ptx_src_template = R"XXX(
         #include <cub/agent/single_pass_scan_operators.cuh>
         #include <cub/util_type.cuh>
-        struct __align__({1}) storage_t {{
+        struct __align__({1}) storage_t {
            char data[{0}];
-        }};
+        };
         __device__ size_t description_bytes_per_tile = cub::ScanTileState<{2}>::description_bytes_per_tile;
         __device__ size_t payload_bytes_per_tile = cub::ScanTileState<{2}>::payload_bytes_per_tile;
         )XXX";
 
-  const std::string ptx_src = std::format(ptx_src_template, accum_t.size, accum_t.alignment, accum_cpp);
+  std::string ptx_src = std::string(ptx_src_template);
+  ptx_src.replace(ptx_src.find("{0}"), 3, std::to_string(accum_t.size));
+  ptx_src.replace(ptx_src.find("{1}"), 3, std::to_string(accum_t.alignment));
+  ptx_src.replace(ptx_src.find("{2}"), 3, accum_cpp);
+  ptx_src.replace(ptx_src.find("{2}"), 3, accum_cpp);
   auto compile_result =
     make_nvrtc_command_list()
       .add_program(nvrtc_translation_unit{ptx_src.c_str(), "tile_state_info"})
