@@ -564,7 +564,6 @@ struct {26} {
     src.replace(src.find("{13}"), 4, std::to_string(policy.onesweep.radix_bits));
     src.replace(src.find("{14}"), 4, std::to_string(policy.scan.items_per_thread));
     src.replace(src.find("{15}"), 4, std::to_string(policy.scan.block_threads));
-    src.replace(src.find("{16}"), 4, offset_t);
     src.replace(src.find("{17}"), 4, std::to_string(policy.downsweep.items_per_thread));
     src.replace(src.find("{18}"), 4, std::to_string(policy.downsweep.block_threads));
     src.replace(src.find("{19}"), 4, std::to_string(policy.downsweep.radix_bits));
