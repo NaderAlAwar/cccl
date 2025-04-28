@@ -121,15 +121,19 @@ std::string get_iterator_name(cccl_iterator_t iterator, merge_sort_iterator_t wh
 
 merge_sort_runtime_tuning_policy get_policy(int cc, int key_size)
 {
-  merge_sort_tuning_t chain[] = {
-    {60, 256, nominal_4b_items_to_items(17, key_size)}, {35, 256, nominal_4b_items_to_items(11, key_size)}};
-  auto [_, block_size, items_per_thread] = find_tuning(cc, chain);
-  // TODO: we hardcode this value in order to make sure that the merge_sort test does not fail due to the memory op
-  // assertions. This currently happens when we pass in items and keys of type uint8_t or int16_t, and for the custom
-  // types test as well. This will be fixed after https://github.com/NVIDIA/cccl/issues/3570 is resolved.
-  items_per_thread = 2;
+  // merge_sort_tuning_t chain[] = {
+  //   {60, 256, nominal_4b_items_to_items(17, key_size)}, {35, 256, nominal_4b_items_to_items(11, key_size)}};
+  // auto [_, block_size, items_per_thread] = find_tuning(cc, chain);
+  // // TODO: we hardcode this value in order to make sure that the merge_sort test does not fail due to the memory op
+  // // assertions. This currently happens when we pass in items and keys of type uint8_t or int16_t, and for the custom
+  // // types test as well. This will be fixed after https://github.com/NVIDIA/cccl/issues/3570 is resolved.
+  // items_per_thread = 2;
 
+  // return {block_size, items_per_thread, block_size * items_per_thread};
+  int block_size       = 256;
+  int items_per_thread = cub::Nominal4BItemsToItems<float>(17);
   return {block_size, items_per_thread, block_size * items_per_thread};
+  // return {block_size, items_per_thread, block_size * items_per_thread};
 }
 
 std::string get_merge_sort_kernel_name(
@@ -339,9 +343,9 @@ struct __align__({3}) items_storage_t {{
 {9}
 {10}
 struct agent_policy_t {{
-  static constexpr int ITEMS_PER_TILE = {6};
-  static constexpr int ITEMS_PER_THREAD = {5};
-  static constexpr int BLOCK_THREADS = {4};
+  static constexpr int ITEMS_PER_THREAD = cub::Nominal4BItemsToItems<float>(17); // {5};
+  static constexpr int BLOCK_THREADS = 256;// {4};
+  static constexpr int ITEMS_PER_TILE = ITEMS_PER_THREAD * BLOCK_THREADS; // {6};
   static constexpr cub::BlockLoadAlgorithm LOAD_ALGORITHM = cub::BLOCK_LOAD_WARP_TRANSPOSE;
   static constexpr cub::CacheLoadModifier LOAD_MODIFIER = cub::LOAD_LDG;
   static constexpr cub::BlockStoreAlgorithm STORE_ALGORITHM = cub::BLOCK_STORE_WARP_TRANSPOSE;

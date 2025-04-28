@@ -101,7 +101,9 @@ scan_runtime_tuning_policy get_policy(int /*cc*/, cccl_type_info /*accumulator_t
   // TODO: we should update this once we figure out a way to reuse
   // tuning logic from C++. Alternately, we should implement
   // something better than a hardcoded default:
-  return {128, 4, cub::LOAD_DEFAULT};
+  return {cub::detail::MemBoundScaling<288, 8, float>::BLOCK_THREADS,
+          cub::detail::MemBoundScaling<288, 8, float>::ITEMS_PER_THREAD,
+          cub::LOAD_DEFAULT};
 }
 
 static cccl_type_info get_accumulator_type(cccl_op_t /*op*/, cccl_iterator_t /*input_it*/, cccl_value_t init)
@@ -164,7 +166,8 @@ std::string get_scan_kernel_name(
     input_iterator_t, // 1
     output_iterator_t, // 2
     tile_state_t, // 3
-    scan_op_t, // 4
+    // scan_op_t, // 4
+    "::cuda::std::plus<>", // 4
     init_t, // 5
     offset_t, // 6
     accum_cpp_t, // 7
@@ -253,14 +256,14 @@ struct __align__({1}) storage_t {{
 {4}
 {5}
 struct agent_policy_t {{
-  static constexpr int ITEMS_PER_THREAD = {2};
-  static constexpr int BLOCK_THREADS = {3};
+  static constexpr int ITEMS_PER_THREAD = cub::detail::MemBoundScaling<288, 8, float>::ITEMS_PER_THREAD; //{2};
+  static constexpr int BLOCK_THREADS = cub::detail::MemBoundScaling<288, 8, float>::BLOCK_THREADS; //{3};
   static constexpr cub::BlockLoadAlgorithm LOAD_ALGORITHM = cub::BLOCK_LOAD_WARP_TRANSPOSE;
   static constexpr cub::CacheLoadModifier LOAD_MODIFIER = cub::LOAD_DEFAULT;
   static constexpr cub::BlockStoreAlgorithm STORE_ALGORITHM = cub::BLOCK_STORE_WARP_TRANSPOSE;
   static constexpr cub::BlockScanAlgorithm SCAN_ALGORITHM = cub::BLOCK_SCAN_WARP_SCANS;
   struct detail {{
-    using delay_constructor_t = cub::detail::default_delay_constructor_t<{7}>;
+    using delay_constructor_t = cub::detail::fixed_delay_constructor_t<724, 1050>; // <{7}>;
   }};
 }};
 struct device_scan_policy {{
