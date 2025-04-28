@@ -253,10 +253,10 @@ struct agent_policy_t {
   static constexpr cub::CacheLoadModifier LOAD_MODIFIER = cub::LOAD_DEFAULT;
   static constexpr cub::BlockStoreAlgorithm STORE_ALGORITHM = cub::BLOCK_STORE_WARP_TRANSPOSE;
   static constexpr cub::BlockScanAlgorithm SCAN_ALGORITHM = cub::BLOCK_SCAN_WARP_SCANS;
-  struct detail {{
+  struct detail {
     using delay_constructor_t = cub::detail::fixed_delay_constructor_t<688, 1140>; // <{7}>;
-  }};
-}};
+  };
+};
 struct device_scan_policy {
   struct ActivePolicy {
     using ScanPolicyT = agent_policy_t;
