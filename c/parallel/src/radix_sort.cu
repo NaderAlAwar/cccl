@@ -14,6 +14,9 @@
 
 // #include <format>
 
+#include <filesystem>
+#include <fstream>
+
 #include "cccl/c/types.h"
 #include "cub/util_type.cuh"
 #include "kernels/operators.h"
@@ -438,6 +441,56 @@ struct radix_sort_kernel_source
 
 } // namespace radix_sort
 
+static std::string inspect_sass(const void* cubin, size_t cubin_size)
+{
+  namespace fs = std::filesystem;
+
+  fs::path temp_dir = fs::temp_directory_path();
+
+  fs::path temp_in_filename  = temp_dir / "temp_in_file.cubin";
+  fs::path temp_out_filename = temp_dir / "temp_out_file.sass";
+
+  std::ofstream temp_in_file(temp_in_filename, std::ios::binary);
+  if (!temp_in_file)
+  {
+    throw std::runtime_error("Failed to create temporary file.");
+  }
+
+  temp_in_file.write(static_cast<const char*>(cubin), cubin_size);
+  temp_in_file.close();
+
+  std::string command = "nvdisasm -gi ";
+  command += temp_in_filename;
+  command += " > ";
+  command += temp_out_filename;
+
+  int exec_code = std::system(command.c_str());
+
+  if (!fs::remove(temp_in_filename))
+  {
+    throw std::runtime_error("Failed to remove temporary file.");
+  }
+
+  if (exec_code != 0)
+  {
+    throw std::runtime_error("Failed to execute command.");
+  }
+
+  std::ifstream temp_out_file(temp_out_filename, std::ios::binary);
+  if (!temp_out_file)
+  {
+    throw std::runtime_error("Failed to create temporary file.");
+  }
+
+  const std::string sass{std::istreambuf_iterator<char>(temp_out_file), std::istreambuf_iterator<char>()};
+  if (!fs::remove(temp_out_filename))
+  {
+    throw std::runtime_error("Failed to remove temporary file.");
+  }
+
+  return sass;
+}
+
 CUresult cccl_device_radix_sort_build(
   cccl_device_radix_sort_build_result_t* build_ptr,
   cccl_sort_order_t sort_order,
@@ -680,6 +733,8 @@ struct {26} {
     build_ptr->cc         = cc;
     build_ptr->cubin      = (void*) result.data.release();
     build_ptr->cubin_size = result.size;
+
+    std::cout << inspect_sass(build_ptr->cubin, build_ptr->cubin_size) << std::endl;
     build_ptr->key_type   = input_keys_it.value_type;
     build_ptr->value_type = input_values_it.value_type;
     build_ptr->order      = sort_order;
