@@ -562,6 +562,7 @@ struct DispatchRadixSort
   template <typename ActivePolicyT>
   CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE cudaError_t InvokeOnesweep(ActivePolicyT policy = {})
   {
+    printf("in InvokeOnesweep\n");
     // PortionOffsetT is used for offsets within a portion, and must be signed.
     using PortionOffsetT = int;
     using AtomicOffsetT  = PortionOffsetT;
@@ -593,6 +594,7 @@ struct DispatchRadixSort
       // counters
       num_portions * num_passes * sizeof(AtomicOffsetT),
     };
+    printf("in InvokeOnesweep 2\n");
     constexpr int NUM_ALLOCATIONS      = sizeof(allocation_sizes) / sizeof(allocation_sizes[0]);
     void* allocations[NUM_ALLOCATIONS] = {};
     detail::AliasTemporaries<NUM_ALLOCATIONS>(d_temp_storage, temp_storage_bytes, allocations, allocation_sizes);
@@ -604,6 +606,8 @@ struct DispatchRadixSort
       return error;
     }
 
+    printf("in InvokeOnesweep 3\n");
+
     OffsetT* d_bins           = (OffsetT*) allocations[0];
     AtomicOffsetT* d_lookback = (AtomicOffsetT*) allocations[1];
     KeyT* d_keys_tmp2         = (KeyT*) allocations[2];
@@ -613,6 +617,7 @@ struct DispatchRadixSort
     do
     {
       // initialization
+      printf("in InvokeOnesweep 4\n");
       error = CubDebug(cudaMemsetAsync(d_ctrs, 0, num_portions * num_passes * sizeof(AtomicOffsetT), stream));
       if (cudaSuccess != error)
       {
@@ -620,6 +625,7 @@ struct DispatchRadixSort
       }
 
       // compute num_passes histograms with RADIX_DIGITS bins each
+      printf("in InvokeOnesweep 5\n");
       error = CubDebug(cudaMemsetAsync(d_bins, 0, num_passes * RADIX_DIGITS * sizeof(OffsetT), stream));
       if (cudaSuccess != error)
       {
@@ -628,12 +634,14 @@ struct DispatchRadixSort
       int device  = -1;
       int num_sms = 0;
 
+      printf("in InvokeOnesweep 6\n");
       error = CubDebug(cudaGetDevice(&device));
       if (cudaSuccess != error)
       {
         break;
       }
 
+      printf("in InvokeOnesweep 7\n");
       error = CubDebug(cudaDeviceGetAttribute(&num_sms, cudaDevAttrMultiProcessorCount, device));
       if (cudaSuccess != error)
       {
@@ -644,6 +652,7 @@ struct DispatchRadixSort
       int histo_blocks_per_sm       = 1;
       auto histogram_kernel         = kernel_source.RadixSortHistogramKernel();
 
+      printf("in InvokeOnesweep 8\n");
       error = CubDebug(
         cudaOccupancyMaxActiveBlocksPerMultiprocessor(&histo_blocks_per_sm, histogram_kernel, HISTO_BLOCK_THREADS, 0));
       if (cudaSuccess != error)
@@ -1131,7 +1140,7 @@ struct DispatchRadixSort
 #ifdef CCCL_C_EXPERIMENTAL
     else if (wrapped_policy.IsOnesweep())
     {
-      printf("invoking onesweep\n");
+      printf("invoking onesweep outside\n");
       // Regular size
       return InvokeManyTiles(detail::bool_constant_v<true>, wrapped_policy);
     }
