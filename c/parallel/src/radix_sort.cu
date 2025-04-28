@@ -223,12 +223,13 @@ radix_sort_runtime_tuning_policy get_policy(int /*cc*/, int key_size)
   constexpr int onesweep_radix_bits = 8;
   const int primary_radix_bits      = (key_size > 1) ? 7 : 5;
   const int single_tile_radix_bits  = (key_size > 1) ? 6 : 5;
+  // const bool offset_64bit           = sizeof(OffsetT) == 8;
 
   const agent_radix_sort_histogram_policy histogram_policy{
-    256, 8, std::max(1, 1 * 4 / std::max(key_size, 4)), onesweep_radix_bits};
+    128, 16, std::max(1, 1 * 4 / std::max(key_size, 4)), onesweep_radix_bits};
   constexpr agent_radix_sort_exclusive_sum_policy exclusive_sum_policy{256, onesweep_radix_bits};
 
-  const auto [onesweep_items_per_thread, onesweep_block_threads] = reg_bound_scaling(256, 21, key_size);
+  const auto [onesweep_items_per_thread, onesweep_block_threads] = reg_bound_scaling(384, 21, key_size);
   // const auto [scan_items_per_thread, scan_block_threads]         = mem_bound_scaling(512, 23, key_size);
   const int scan_items_per_thread = 5;
   const int scan_block_threads    = 512;
@@ -240,7 +241,7 @@ radix_sort_runtime_tuning_policy get_policy(int /*cc*/, int key_size)
   const int alt_downsweep_block_threads                                = 256;
   const auto [single_tile_items_per_thread, single_tile_block_threads] = mem_bound_scaling(256, 19, key_size);
 
-  constexpr bool is_onesweep = false;
+  const bool is_onesweep = key_size >= static_cast<int>(sizeof(uint32_t));
 
   return {histogram_policy,
           exclusive_sum_policy,
