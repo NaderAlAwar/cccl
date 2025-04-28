@@ -229,7 +229,7 @@ radix_sort_runtime_tuning_policy get_policy(int /*cc*/, int key_size)
     128, 16, std::max(1, 1 * 4 / std::max(key_size, 4)), onesweep_radix_bits};
   constexpr agent_radix_sort_exclusive_sum_policy exclusive_sum_policy{256, onesweep_radix_bits};
 
-  const auto [onesweep_items_per_thread, onesweep_block_threads] = reg_bound_scaling(384, 21, key_size);
+  const auto [onesweep_items_per_thread, onesweep_block_threads] = reg_bound_scaling(384, 18, key_size);
   // const auto [scan_items_per_thread, scan_block_threads]         = mem_bound_scaling(512, 23, key_size);
   const int scan_items_per_thread = 5;
   const int scan_block_threads    = 512;
@@ -564,7 +564,6 @@ struct {26} {
     src.replace(src.find("{13}"), 4, std::to_string(policy.onesweep.radix_bits));
     src.replace(src.find("{14}"), 4, std::to_string(policy.scan.items_per_thread));
     src.replace(src.find("{15}"), 4, std::to_string(policy.scan.block_threads));
-    src.replace(src.find("{16}"), 4, offset_t);
     src.replace(src.find("{17}"), 4, std::to_string(policy.downsweep.items_per_thread));
     src.replace(src.find("{18}"), 4, std::to_string(policy.downsweep.block_threads));
     src.replace(src.find("{19}"), 4, std::to_string(policy.downsweep.radix_bits));
