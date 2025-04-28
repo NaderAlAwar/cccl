@@ -660,6 +660,8 @@ struct {26} {
         .add_link_list(ltoir_list)
         .finalize_program(num_lto_args, lopts);
 
+    std::cout << "histogram_kernel_lowered_name: " << histogram_kernel_lowered_name << std::endl;
+
     cuLibraryLoadData(&build_ptr->library, result.data.get(), nullptr, nullptr, 0, nullptr, nullptr, 0);
     check(
       cuLibraryGetKernel(&build_ptr->single_tile_kernel, build_ptr->library, single_tile_kernel_lowered_name.c_str()));
