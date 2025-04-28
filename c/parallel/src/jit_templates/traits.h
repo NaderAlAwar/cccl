@@ -12,7 +12,7 @@
 
 #include <cuda/std/type_traits>
 
-#include <format>
+// #include <format>
 #include <string>
 
 #include "../util/errors.h"
@@ -49,6 +49,12 @@ specialization get_specialization(template_id<Traits> id, Args... args)
   std::string tag_name;
   check(nvrtcGetTypeName<Tag>(&tag_name));
 
-  return {std::format("{}<{}{}>", Traits::name, tag_name, ((", " + parameter_mapping<Args>::map(id, args)) + ...)),
-          std::format("struct {};", tag_name) + (parameter_mapping<Args>::aux(id, args) + ...)};
+  std::string type_name = std::string(Traits::name) + "<" + tag_name;
+  ((type_name += ", " + parameter_mapping<Args>::map(id, args)), ...);
+  type_name += ">";
+
+  std::string aux_code = "struct " + tag_name + ";";
+  ((aux_code += parameter_mapping<Args>::aux(id, args)), ...);
+
+  return {type_name, aux_code};
 }

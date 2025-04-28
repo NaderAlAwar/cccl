@@ -32,21 +32,19 @@ struct parameter_mapping<cccl_op_t>
   template <typename Traits>
   static std::string map(template_id<Traits>, cccl_op_t op)
   {
-    return std::format(
-      "cccl_op_t_mapping{{.is_stateless = {}, .size = {}, .alignment = {}, .operation = {}}}",
-      op.type == cccl_op_kind_t::CCCL_STATELESS,
-      op.size,
-      op.alignment,
-      op.name);
+    std::string result = "cccl_op_t_mapping{";
+    result += ".is_stateless = " + std::string(op.type == cccl_op_kind_t::CCCL_STATELESS ? "true" : "false") + ", ";
+    result += ".size = " + std::to_string(op.size) + ", ";
+    result += ".alignment = " + std::to_string(op.alignment) + ", ";
+    result += std::string(".operation = ") + op.name;
+    result += "}";
+    return result;
   }
 
   template <typename Traits>
   static std::string aux(template_id<Traits>, cccl_op_t op)
   {
-    return std::format(R"(
-        extern "C" __device__ void {}();
-        )",
-                       op.name);
+    return std::string("extern \"C\" __device__ void ") + op.name + "();\n";
   }
 };
 #endif

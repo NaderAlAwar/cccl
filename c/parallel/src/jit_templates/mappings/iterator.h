@@ -40,15 +40,22 @@ struct parameter_mapping<cccl_iterator_t>
   template <typename Traits>
   static std::string map(template_id<Traits>, cccl_iterator_t arg)
   {
-    return std::format(
-      "cccl_iterator_t_mapping<{}>{{.is_pointer = {}, .size = {}, .alignment = {}, .advance = {}, .{} = {}}}",
-      cccl_type_enum_to_name(arg.value_type.type),
-      arg.type == cccl_iterator_kind_t::CCCL_POINTER,
-      arg.size,
-      arg.alignment,
-      arg.advance.name,
-      std::is_same_v<Traits, output_iterator_traits> ? "assign" : "dereference",
-      arg.dereference.name);
+    std::string result = "cccl_iterator_t_mapping<";
+    result += cccl_type_enum_to_name(arg.value_type.type);
+    result += ">{.is_pointer = ";
+    result += (arg.type == cccl_iterator_kind_t::CCCL_POINTER) ? "true" : "false";
+    result += ", .size = ";
+    result += std::to_string(arg.size);
+    result += ", .alignment = ";
+    result += std::to_string(arg.alignment);
+    result += ", .advance = ";
+    result += arg.advance.name;
+    result += ", .";
+    result += std::is_same_v<Traits, output_iterator_traits> ? "assign" : "dereference";
+    result += " = ";
+    result += arg.dereference.name;
+    result += "}";
+    return result;
   }
 
   template <typename Traits>
@@ -56,26 +63,14 @@ struct parameter_mapping<cccl_iterator_t>
   {
     if constexpr (std::is_same_v<Traits, output_iterator_traits>)
     {
-      return std::format(
-        R"output(
-extern "C" __device__ void {0}(void *, {1});
-extern "C" __device__ void {2}(const void *, {3});
-)output",
-        arg.advance.name,
-        cccl_type_enum_to_name(cccl_type_enum::CCCL_UINT64),
-        arg.dereference.name,
-        cccl_type_enum_to_name(arg.value_type.type));
+      return std::string("extern \"C\" __device__ void ") + arg.advance.name + "(void *, "
+           + cccl_type_enum_to_name(cccl_type_enum::CCCL_UINT64) + ");\n" + "extern \"C\" __device__ void "
+           + arg.dereference.name + "(const void *, " + cccl_type_enum_to_name(arg.value_type.type) + ");\n";
     }
 
-    return std::format(
-      R"input(
-extern "C" __device__ void {0}(void *, {1});
-extern "C" __device__ {3} {2}(const void *);
-)input",
-      arg.advance.name,
-      cccl_type_enum_to_name(cccl_type_enum::CCCL_UINT64),
-      arg.dereference.name,
-      cccl_type_enum_to_name(arg.value_type.type));
+    return std::string("extern \"C\" __device__ void ") + arg.advance.name + "(void *, "
+         + cccl_type_enum_to_name(cccl_type_enum::CCCL_UINT64) + ");\n" + "extern \"C\" __device__ "
+         + cccl_type_enum_to_name(arg.value_type.type) + " " + arg.dereference.name + "(const void *);\n";
   }
 };
 #endif

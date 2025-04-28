@@ -19,7 +19,7 @@
 #include <cuda/std/functional> // ::cuda::std::identity
 #include <cuda/std/variant>
 
-#include <format>
+// #include <format>
 #include <memory>
 
 #include "jit_templates/templates/input_iterator.h"
@@ -139,15 +139,22 @@ std::string get_single_tile_kernel_name(
     check(nvrtcGetTypeName<OffsetT>(&offset_t));
   }
 
-  return std::format(
-    "cub::detail::reduce::DeviceReduceSingleTileKernel<{0}, {1}, {2}, {3}, {4}, {5}, {6}>",
-    chained_policy_t,
-    input_iterator_t,
-    output_iterator_t,
-    offset_t,
-    reduction_op_t,
-    init_t,
-    accum_cpp_t);
+  std::string result = "cub::detail::reduce::DeviceReduceSingleTileKernel<";
+  result += chained_policy_t;
+  result += ", ";
+  result += input_iterator_t;
+  result += ", ";
+  result += output_iterator_t;
+  result += ", ";
+  result += offset_t;
+  result += ", ";
+  result += reduction_op_t;
+  result += ", ";
+  result += init_t;
+  result += ", ";
+  result += accum_cpp_t;
+  result += ">";
+  return result;
 }
 
 std::string get_device_reduce_kernel_name(
@@ -162,14 +169,20 @@ std::string get_device_reduce_kernel_name(
   std::string transform_op_t;
   check(nvrtcGetTypeName<cuda::std::__identity>(&transform_op_t));
 
-  return std::format(
-    "cub::detail::reduce::DeviceReduceKernel<{0}, {1}, {2}, {3}, {4}, {5}>",
-    chained_policy_t,
-    input_iterator_t,
-    offset_t,
-    reduction_op_t,
-    accum_t,
-    transform_op_t);
+  std::string result = "cub::detail::reduce::DeviceReduceKernel<";
+  result += chained_policy_t;
+  result += ", ";
+  result += input_iterator_t;
+  result += ", ";
+  result += offset_t;
+  result += ", ";
+  result += reduction_op_t;
+  result += ", ";
+  result += accum_t;
+  result += ", ";
+  result += transform_op_t;
+  result += ">";
+  return result;
 }
 
 template <auto* GetPolicy>
@@ -244,40 +257,40 @@ CUresult cccl_device_reduce_build(
     const auto [op_name, op_src] =
       get_specialization<reduction_operation_tag>(template_id<binary_user_operation_traits>(), op, accum_t);
 
-    const std::string src = std::format(
+    std::string src =
       R"XXX(
-#include <cub/block/block_reduce.cuh>
-#include <cub/device/dispatch/kernels/reduce.cuh>
-{8}
-struct __align__({1}) storage_t {{
-  char data[{0}];
-}};
-{4}
-{5}
-struct agent_policy_t {{
-  static constexpr int ITEMS_PER_THREAD = {2};
-  static constexpr int BLOCK_THREADS = {3};
-  static constexpr int VECTOR_LOAD_LENGTH = {7};
-  static constexpr cub::BlockReduceAlgorithm BLOCK_ALGORITHM = cub::BLOCK_REDUCE_WARP_REDUCTIONS;
-  static constexpr cub::CacheLoadModifier LOAD_MODIFIER = cub::LOAD_LDG;
-}};
-struct device_reduce_policy {{
-  struct ActivePolicy {{
+  #include <cub/block/block_reduce.cuh>
+  #include <cub/device/dispatch/kernels/reduce.cuh>
+  {8}
+  struct __align__({1}) storage_t {
+    char data[{0}];
+  };
+  {4}
+  {5}
+  struct agent_policy_t {
+    static constexpr int ITEMS_PER_THREAD = {2};
+    static constexpr int BLOCK_THREADS = {3};
+    static constexpr int VECTOR_LOAD_LENGTH = {7};
+    static constexpr cub::BlockReduceAlgorithm BLOCK_ALGORITHM = cub::BLOCK_REDUCE_WARP_REDUCTIONS;
+    static constexpr cub::CacheLoadModifier LOAD_MODIFIER = cub::LOAD_LDG;
+  };
+  struct device_reduce_policy {
+    struct ActivePolicy {
     using ReducePolicy = agent_policy_t;
     using SingleTilePolicy = agent_policy_t;
-  }};
-}};
-{6}
-)XXX",
-      input_it.value_type.size, // 0
-      input_it.value_type.alignment, // 1
-      policy.items_per_thread, // 2
-      policy.block_size, // 3
-      input_iterator_src, // 4
-      output_iterator_src, // 5
-      op_src, // 6
-      policy.vector_load_length, // 7
-      jit_template_header_contents); // 8
+    };
+  };
+  {6}
+  )XXX";
+    src.replace(src.find("{0}"), 3, std::to_string(input_it.value_type.size));
+    src.replace(src.find("{1}"), 3, std::to_string(input_it.value_type.alignment));
+    src.replace(src.find("{2}"), 3, std::to_string(policy.items_per_thread));
+    src.replace(src.find("{3}"), 3, std::to_string(policy.block_size));
+    src.replace(src.find("{4}"), 3, input_iterator_src);
+    src.replace(src.find("{5}"), 3, output_iterator_src);
+    src.replace(src.find("{6}"), 3, op_src);
+    src.replace(src.find("{7}"), 3, std::to_string(policy.vector_load_length));
+    src.replace(src.find("{8}"), 3, jit_template_header_contents);
 
 #if false // CCCL_DEBUGGING_SWITCH
     fflush(stderr);
@@ -294,7 +307,7 @@ struct device_reduce_policy {{
     std::string single_tile_second_kernel_lowered_name;
     std::string reduction_kernel_lowered_name;
 
-    const std::string arch = std::format("-arch=sm_{0}{1}", cc_major, cc_minor);
+    const std::string arch = "-arch=sm_" + std::to_string(cc_major) + std::to_string(cc_minor);
 
     constexpr size_t num_args  = 9;
     const char* args[num_args] = {
