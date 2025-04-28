@@ -494,20 +494,12 @@ struct agent_onesweep_policy_t {
   static constexpr int RANK_NUM_PARTS = {12};
   static constexpr int RADIX_BITS = {13};
   static constexpr cub::RadixRankAlgorithm RANK_ALGORITHM       = cub::RADIX_RANK_MATCH_EARLY_COUNTS_ANY;
-  static constexpr cub::BlockScanAlgorithm SCAN_ALGORITHM       = cub::BLOCK_SCAN_WARP_SCANS;
+  static constexpr cub::BlockScanAlgorithm SCAN_ALGORITHM       = cub::BLOCK_SCAN_RAKING_MEMOIZE;
   static constexpr cub::RadixSortStoreAlgorithm STORE_ALGORITHM = cub::RADIX_SORT_STORE_DIRECT;
 };
 struct agent_scan_policy_t {
   static constexpr int ITEMS_PER_THREAD = {14};
   static constexpr int BLOCK_THREADS = {15};
-  static constexpr cub::BlockLoadAlgorithm LOAD_ALGORITHM   = cub::BLOCK_LOAD_WARP_TRANSPOSE;
-  static constexpr cub::CacheLoadModifier LOAD_MODIFIER     = cub::LOAD_DEFAULT;
-  static constexpr cub::BlockStoreAlgorithm STORE_ALGORITHM = cub::BLOCK_STORE_WARP_TRANSPOSE;
-  static constexpr cub::BlockScanAlgorithm SCAN_ALGORITHM   = cub::BLOCK_SCAN_RAKING_MEMOIZE;
-  struct detail
-  {
-    using delay_constructor_t = cub::detail::default_delay_constructor_t<{16}>;
-  };
 };
 struct agent_downsweep_policy_t {
   static constexpr int ITEMS_PER_THREAD = {17};
