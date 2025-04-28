@@ -706,6 +706,7 @@ CUresult cccl_device_radix_sort_impl(
   int* selector,
   CUstream stream)
 {
+  printf("in second one\n");
   if (cccl_iterator_kind_t::CCCL_POINTER != d_keys_in.type || cccl_iterator_kind_t::CCCL_POINTER != d_values_in.type
       || cccl_iterator_kind_t::CCCL_POINTER != d_keys_out.type
       || cccl_iterator_kind_t::CCCL_POINTER != d_values_out.type)
@@ -717,23 +718,30 @@ CUresult cccl_device_radix_sort_impl(
   }
 
   CUresult error = CUDA_SUCCESS;
-  bool pushed    = false;
+  printf("in third one\n");
+  bool pushed = false;
   try
   {
+    printf("in fourth one\n");
     pushed = try_push_context();
 
     CUdevice cu_device;
     check(cuCtxGetDevice(&cu_device));
+    printf("in fifth one\n");
 
     indirect_arg_t key_arg_in{d_keys_in};
     indirect_arg_t key_arg_out{d_keys_out};
     cub::DoubleBuffer<indirect_arg_t> d_keys_buffer(
       *static_cast<indirect_arg_t**>(&key_arg_in), *static_cast<indirect_arg_t**>(&key_arg_out));
 
+    printf("in sixth one\n");
+
     indirect_arg_t val_arg_in{d_values_in};
     indirect_arg_t val_arg_out{d_values_out};
     cub::DoubleBuffer<indirect_arg_t> d_values_buffer(
       *static_cast<indirect_arg_t**>(&val_arg_in), *static_cast<indirect_arg_t**>(&val_arg_out));
+
+    printf("in seventh one\n");
 
     auto exec_status = cub::DispatchRadixSort<
       Order,
@@ -758,6 +766,8 @@ CUresult cccl_device_radix_sort_impl(
         {build},
         cub::detail::CudaDriverLauncherFactory{cu_device, build.cc},
         {d_keys_in.value_type.size});
+
+    printf("in eighth one\n");
 
     *selector = d_keys_buffer.selector;
     error     = static_cast<CUresult>(exec_status);
@@ -795,6 +805,7 @@ CUresult cccl_device_radix_sort(
   int* selector,
   CUstream stream)
 {
+  printf("in this one\n");
   return cccl_device_radix_sort_impl<cub::SortOrder::Ascending>(
     build,
     d_temp_storage,
