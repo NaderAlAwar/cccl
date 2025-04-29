@@ -27,6 +27,7 @@ class _Reduce:
         "h_init_cccl",
         "op_wrapper",
         "build_result",
+        "kernel_call",
     ]
 
     # TODO: constructor shouldn't require concrete `d_in`, `d_out`:
