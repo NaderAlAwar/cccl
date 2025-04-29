@@ -562,7 +562,6 @@ struct DispatchRadixSort
   template <typename ActivePolicyT>
   CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE cudaError_t InvokeOnesweep(ActivePolicyT policy = {})
   {
-    printf("in InvokeOnesweep\n");
     // PortionOffsetT is used for offsets within a portion, and must be signed.
     using PortionOffsetT = int;
     using AtomicOffsetT  = PortionOffsetT;
@@ -594,7 +593,6 @@ struct DispatchRadixSort
       // counters
       num_portions * num_passes * sizeof(AtomicOffsetT),
     };
-    printf("in InvokeOnesweep 2\n");
     constexpr int NUM_ALLOCATIONS      = sizeof(allocation_sizes) / sizeof(allocation_sizes[0]);
     void* allocations[NUM_ALLOCATIONS] = {};
     detail::AliasTemporaries<NUM_ALLOCATIONS>(d_temp_storage, temp_storage_bytes, allocations, allocation_sizes);
@@ -606,8 +604,6 @@ struct DispatchRadixSort
       return error;
     }
 
-    printf("in InvokeOnesweep 3\n");
-
     OffsetT* d_bins           = (OffsetT*) allocations[0];
     AtomicOffsetT* d_lookback = (AtomicOffsetT*) allocations[1];
     KeyT* d_keys_tmp2         = (KeyT*) allocations[2];
@@ -617,7 +613,6 @@ struct DispatchRadixSort
     do
     {
       // initialization
-      printf("in InvokeOnesweep 4\n");
       error = CubDebug(cudaMemsetAsync(d_ctrs, 0, num_portions * num_passes * sizeof(AtomicOffsetT), stream));
       if (cudaSuccess != error)
       {
@@ -625,7 +620,6 @@ struct DispatchRadixSort
       }
 
       // compute num_passes histograms with RADIX_DIGITS bins each
-      printf("in InvokeOnesweep 5\n");
       error = CubDebug(cudaMemsetAsync(d_bins, 0, num_passes * RADIX_DIGITS * sizeof(OffsetT), stream));
       if (cudaSuccess != error)
       {
@@ -634,14 +628,12 @@ struct DispatchRadixSort
       int device  = -1;
       int num_sms = 0;
 
-      printf("in InvokeOnesweep 6\n");
       error = CubDebug(cudaGetDevice(&device));
       if (cudaSuccess != error)
       {
         break;
       }
 
-      printf("in InvokeOnesweep 7\n");
       error = CubDebug(cudaDeviceGetAttribute(&num_sms, cudaDevAttrMultiProcessorCount, device));
       if (cudaSuccess != error)
       {
@@ -652,7 +644,6 @@ struct DispatchRadixSort
       int histo_blocks_per_sm       = 1;
       auto histogram_kernel         = kernel_source.RadixSortHistogramKernel();
 
-      printf("in InvokeOnesweep 8\n");
       error = CubDebug(launcher_factory.MaxSmOccupancy(histo_blocks_per_sm, histogram_kernel, HISTO_BLOCK_THREADS, 0));
       if (cudaSuccess != error)
       {
@@ -671,8 +662,6 @@ struct DispatchRadixSort
               policy.RadixBits(policy.Histogram()));
 #endif
 
-      printf("invokinh histogram\n");
-
       error = launcher_factory(histo_blocks_per_sm * num_sms, HISTO_BLOCK_THREADS, 0, stream)
                 .doit(histogram_kernel, d_bins, d_keys.Current(), num_items, begin_bit, end_bit, decomposer);
       error = CubDebug(error);
@@ -680,14 +669,12 @@ struct DispatchRadixSort
       {
         break;
       }
-      printf("invokinh histogram 1\n");
 
       error = CubDebug(detail::DebugSyncStream(stream));
       if (cudaSuccess != error)
       {
         break;
       }
-      printf("invokinh histogram 2\n");
 
       // exclusive sums to determine starts
       const int SCAN_BLOCK_THREADS = policy.BlockThreads(policy.ExclusiveSum());
@@ -701,8 +688,6 @@ struct DispatchRadixSort
               policy.RadixBits(policy.ExclusiveSum()));
 #endif
 
-      printf("invokinh exc sum\n");
-
       error = launcher_factory(num_passes, SCAN_BLOCK_THREADS, 0, stream)
                 .doit(kernel_source.RadixSortExclusiveSumKernel(), d_bins);
       error = CubDebug(error);
@@ -711,15 +696,11 @@ struct DispatchRadixSort
         break;
       }
 
-      printf("1\n");
-
       error = CubDebug(detail::DebugSyncStream(stream));
       if (cudaSuccess != error)
       {
         break;
       }
-
-      printf("2\n");
 
       // use the other buffer if no overwrite is allowed
       KeyT* d_keys_tmp     = d_keys.Alternate();
@@ -762,7 +743,6 @@ struct DispatchRadixSort
 
           auto onesweep_kernel = kernel_source.RadixSortOnesweepKernel();
 
-          printf("invoking onesweep\n");
           error =
             launcher_factory(num_blocks, ONESWEEP_BLOCK_THREADS, 0, stream)
               .doit(onesweep_kernel,
@@ -784,23 +764,17 @@ struct DispatchRadixSort
             break;
           }
 
-          printf("1\n");
-
           error = CubDebug(detail::DebugSyncStream(stream));
           if (cudaSuccess != error)
           {
             break;
           }
-          printf("2\n");
         }
 
-        printf("close to end\n");
         if (error != cudaSuccess)
         {
           break;
         }
-
-        printf("done\n");
 
         // use the temporary buffers if no overwrite is allowed
         if (!is_overwrite_okay && pass == 0)
@@ -1139,7 +1113,6 @@ struct DispatchRadixSort
 #ifdef CCCL_C_EXPERIMENTAL
     else if (wrapped_policy.IsOnesweep())
     {
-      printf("invoking onesweep outside\n");
       // Regular size
       return InvokeManyTiles(detail::bool_constant_v<true>, wrapped_policy);
     }
@@ -1209,20 +1182,17 @@ struct DispatchRadixSort
     KernelLauncherFactory launcher_factory = {},
     MaxPolicyT max_policy                  = {})
   {
-    printf("in dispatch 1\n");
     cudaError_t error;
     do
     {
       // Get PTX version
       int ptx_version = 0;
 
-      printf("in dispatch 2\n");
       error = CubDebug(launcher_factory.PtxVersion(ptx_version));
       if (cudaSuccess != error)
       {
         break;
       }
-      printf("in dispatch 3\n");
 
       // Create dispatch functor
       DispatchRadixSort dispatch(
@@ -1240,14 +1210,12 @@ struct DispatchRadixSort
         kernel_source,
         launcher_factory);
 
-      printf("in dispatch 4\n");
       // Dispatch to chained policy
       error = CubDebug(max_policy.Invoke(ptx_version, dispatch));
       if (cudaSuccess != error)
       {
         break;
       }
-      printf("in dispatch 5\n");
     } while (0);
 
     return error;
