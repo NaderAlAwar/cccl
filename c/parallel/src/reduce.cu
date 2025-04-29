@@ -116,7 +116,7 @@ static cccl_type_info get_accumulator_type(cccl_op_t /*op*/, cccl_iterator_t /*i
 std::string get_single_tile_kernel_name(
   std::string_view input_iterator_t,
   std::string_view output_iterator_t,
-  std::string_view reduction_op_t,
+  [[maybe_unused]] std::string_view reduction_op_t,
   cccl_value_t init,
   std::string_view accum_cpp_t,
   bool is_second_kernel)
@@ -148,7 +148,8 @@ std::string get_single_tile_kernel_name(
   result += ", ";
   result += offset_t;
   result += ", ";
-  result += reduction_op_t;
+  // result += reduction_op_t;
+  result += "::cuda::std::plus<>";
   result += ", ";
   result += init_t;
   result += ", ";
@@ -158,7 +159,7 @@ std::string get_single_tile_kernel_name(
 }
 
 std::string get_device_reduce_kernel_name(
-  std::string_view reduction_op_t, std::string_view input_iterator_t, std::string_view accum_t)
+  [[maybe_unused]] std::string_view reduction_op_t, std::string_view input_iterator_t, std::string_view accum_t)
 {
   std::string chained_policy_t;
   check(nvrtcGetTypeName<device_reduce_policy>(&chained_policy_t));
@@ -176,7 +177,8 @@ std::string get_device_reduce_kernel_name(
   result += ", ";
   result += offset_t;
   result += ", ";
-  result += reduction_op_t;
+  // result += reduction_op_t;
+  result += "::cuda::std::plus<>";
   result += ", ";
   result += accum_t;
   result += ", ";
