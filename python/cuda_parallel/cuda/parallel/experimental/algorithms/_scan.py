@@ -62,10 +62,6 @@ class _Scan:
             else self.build_result.compute_exclusive
         )
 
-    def initialize(self, d_in, d_out):
-        set_cccl_iterator_state(self.d_out_cccl, d_out)
-        set_cccl_iterator_state(self.d_in_cccl, d_out)
-
     def __call__(
         self,
         temp_storage_bytes,
@@ -81,6 +77,9 @@ class _Scan:
         if d_temp_storage is None:
             temp_storage_bytes = 0
             d_temp_storage = 0
+            set_cccl_iterator_state(self.d_out_cccl, d_out)
+            set_cccl_iterator_state(self.d_in_cccl, d_out)
+            self.h_init_cccl.state = h_init.data.cast("B")
 
         return self.device_scan_fn(
             d_temp_storage,
