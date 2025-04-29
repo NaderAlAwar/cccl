@@ -74,9 +74,9 @@ class _Reduce:
 
     def __call__(
         self,
-        d_in_data_ptr,
+        d_in,
     ):
-        self.d_in_cccl.state = d_in_data_ptr
+        self.d_in_cccl.state = d_in.data_ptr()
 
         self.kernel_call()
 
