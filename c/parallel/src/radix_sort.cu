@@ -441,56 +441,6 @@ struct radix_sort_kernel_source
 
 } // namespace radix_sort
 
-static std::string inspect_sass(const void* cubin, size_t cubin_size)
-{
-  namespace fs = std::filesystem;
-
-  fs::path temp_dir = fs::temp_directory_path();
-
-  fs::path temp_in_filename  = temp_dir / "temp_in_file.cubin";
-  fs::path temp_out_filename = temp_dir / "temp_out_file.sass";
-
-  std::ofstream temp_in_file(temp_in_filename, std::ios::binary);
-  if (!temp_in_file)
-  {
-    throw std::runtime_error("Failed to create temporary file.");
-  }
-
-  temp_in_file.write(static_cast<const char*>(cubin), cubin_size);
-  temp_in_file.close();
-
-  std::string command = "nvdisasm -gi ";
-  command += temp_in_filename;
-  command += " > ";
-  command += temp_out_filename;
-
-  int exec_code = std::system(command.c_str());
-
-  if (!fs::remove(temp_in_filename))
-  {
-    throw std::runtime_error("Failed to remove temporary file.");
-  }
-
-  if (exec_code != 0)
-  {
-    throw std::runtime_error("Failed to execute command.");
-  }
-
-  std::ifstream temp_out_file(temp_out_filename, std::ios::binary);
-  if (!temp_out_file)
-  {
-    throw std::runtime_error("Failed to create temporary file.");
-  }
-
-  const std::string sass{std::istreambuf_iterator<char>(temp_out_file), std::istreambuf_iterator<char>()};
-  if (!fs::remove(temp_out_filename))
-  {
-    throw std::runtime_error("Failed to remove temporary file.");
-  }
-
-  return sass;
-}
-
 CUresult cccl_device_radix_sort_build(
   cccl_device_radix_sort_build_result_t* build_ptr,
   cccl_sort_order_t sort_order,
@@ -639,7 +589,7 @@ struct {26} {
     src.replace(src.find("{25}"), 4, std::to_string(policy.single_tile.radix_bits));
     src.replace(src.find("{26}"), 4, std::string(chained_policy_t));
     src.replace(src.find("{27}"), 4, op_src);
-#if true // CCCL_DEBUGGING_SWITCH
+#if false // CCCL_DEBUGGING_SWITCH
     fflush(stderr);
     printf("\nCODE4NVRTC BEGIN\n%sCODE4NVRTC END\n", src.c_str());
     fflush(stdout);
@@ -713,8 +663,6 @@ struct {26} {
         .add_link_list(ltoir_list)
         .finalize_program(num_lto_args, lopts);
 
-    std::cout << "histogram_kernel_lowered_name: " << histogram_kernel_lowered_name << std::endl;
-
     cuLibraryLoadData(&build_ptr->library, result.data.get(), nullptr, nullptr, 0, nullptr, nullptr, 0);
     check(
       cuLibraryGetKernel(&build_ptr->single_tile_kernel, build_ptr->library, single_tile_kernel_lowered_name.c_str()));
@@ -733,8 +681,6 @@ struct {26} {
     build_ptr->cc         = cc;
     build_ptr->cubin      = (void*) result.data.release();
     build_ptr->cubin_size = result.size;
-
-    std::cout << inspect_sass(build_ptr->cubin, build_ptr->cubin_size) << std::endl;
     build_ptr->key_type   = input_keys_it.value_type;
     build_ptr->value_type = input_values_it.value_type;
     build_ptr->order      = sort_order;
@@ -767,7 +713,6 @@ CUresult cccl_device_radix_sort_impl(
   int* selector,
   CUstream stream)
 {
-  printf("in second one\n");
   if (cccl_iterator_kind_t::CCCL_POINTER != d_keys_in.type || cccl_iterator_kind_t::CCCL_POINTER != d_values_in.type
       || cccl_iterator_kind_t::CCCL_POINTER != d_keys_out.type
       || cccl_iterator_kind_t::CCCL_POINTER != d_values_out.type)
@@ -779,30 +724,23 @@ CUresult cccl_device_radix_sort_impl(
   }
 
   CUresult error = CUDA_SUCCESS;
-  printf("in third one\n");
-  bool pushed = false;
+  bool pushed    = false;
   try
   {
-    printf("in fourth one\n");
     pushed = try_push_context();
 
     CUdevice cu_device;
     check(cuCtxGetDevice(&cu_device));
-    printf("in fifth one\n");
 
     indirect_arg_t key_arg_in{d_keys_in};
     indirect_arg_t key_arg_out{d_keys_out};
     cub::DoubleBuffer<indirect_arg_t> d_keys_buffer(
       *static_cast<indirect_arg_t**>(&key_arg_in), *static_cast<indirect_arg_t**>(&key_arg_out));
 
-    printf("in sixth one\n");
-
     indirect_arg_t val_arg_in{d_values_in};
     indirect_arg_t val_arg_out{d_values_out};
     cub::DoubleBuffer<indirect_arg_t> d_values_buffer(
       *static_cast<indirect_arg_t**>(&val_arg_in), *static_cast<indirect_arg_t**>(&val_arg_out));
-
-    printf("in seventh one\n");
 
     auto exec_status = cub::DispatchRadixSort<
       Order,
@@ -827,8 +765,6 @@ CUresult cccl_device_radix_sort_impl(
         {build},
         cub::detail::CudaDriverLauncherFactory{cu_device, build.cc},
         {d_keys_in.value_type.size});
-
-    printf("in eighth one\n");
 
     *selector = d_keys_buffer.selector;
     error     = static_cast<CUresult>(exec_status);
@@ -866,7 +802,6 @@ CUresult cccl_device_radix_sort(
   int* selector,
   CUstream stream)
 {
-  printf("in this one\n");
   return cccl_device_radix_sort_impl<cub::SortOrder::Ascending>(
     build,
     d_temp_storage,
