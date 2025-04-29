@@ -37,7 +37,7 @@
 
 struct op_wrapper;
 struct device_scan_policy;
-using OffsetT = unsigned long long;
+using OffsetT = uint32_t;
 static_assert(std::is_same_v<cub::detail::choose_offset_t<OffsetT>, OffsetT>, "OffsetT must be size_t");
 
 struct input_iterator_state_t;
@@ -367,7 +367,7 @@ CUresult cccl_device_scan(
       indirect_arg_t,
       indirect_arg_t,
       indirect_arg_t,
-      ::cuda::std::size_t,
+      OffsetT,
       void,
       EnforceInclusive,
       scan::dynamic_scan_policy_t<&scan::get_policy>,
