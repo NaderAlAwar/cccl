@@ -159,7 +159,7 @@ std::string get_single_tile_kernel_name(
 }
 
 std::string get_device_reduce_kernel_name(
-  std::string_view reduction_op_t, std::string_view input_iterator_t, std::string_view accum_t)
+  [[maybe_unused]] std::string_view reduction_op_t, std::string_view input_iterator_t, std::string_view accum_t)
 {
   std::string chained_policy_t;
   check(nvrtcGetTypeName<device_reduce_policy>(&chained_policy_t));
