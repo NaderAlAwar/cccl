@@ -653,8 +653,7 @@ struct DispatchRadixSort
       auto histogram_kernel         = kernel_source.RadixSortHistogramKernel();
 
       printf("in InvokeOnesweep 8\n");
-      error = CubDebug(
-        cudaOccupancyMaxActiveBlocksPerMultiprocessor(&histo_blocks_per_sm, histogram_kernel, HISTO_BLOCK_THREADS, 0));
+      error = CubDebug(launcher_factory.MaxSmOccupancy(histo_blocks_per_sm, histogram_kernel, HISTO_BLOCK_THREADS, 0));
       if (cudaSuccess != error)
       {
         break;
