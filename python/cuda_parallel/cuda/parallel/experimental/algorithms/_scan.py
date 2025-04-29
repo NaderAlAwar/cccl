@@ -74,14 +74,10 @@ class _Scan:
         set_cccl_iterator_state(self.d_in_cccl, d_in)
         set_cccl_iterator_state(self.d_out_cccl, d_out)
 
-        if temp_storage is None:
-            temp_storage_bytes = 0
-            d_temp_storage = 0
-        else:
-            temp_storage_bytes = temp_storage.nbytes
-            d_temp_storage = temp_storage.data.ptr
+        temp_storage_bytes = temp_storage.nbytes
+        d_temp_storage = temp_storage.data.ptr
 
-        return self.device_scan_fn(
+        self.device_scan_fn(
             d_temp_storage,
             temp_storage_bytes,
             self.d_in_cccl,
