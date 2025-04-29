@@ -64,6 +64,7 @@ class _Scan:
 
     def initialize(self, d_in, d_out):
         set_cccl_iterator_state(self.d_out_cccl, d_out)
+        set_cccl_iterator_state(self.d_in_cccl, d_out)
 
     def __call__(
         self,
@@ -75,7 +76,7 @@ class _Scan:
         h_init: np.ndarray | GpuStruct,
         stream=None,
     ):
-        set_cccl_iterator_state(self.d_in_cccl, d_in)
+        self.d_in_cccl.state = d_in.data_ptr()
 
         self.device_scan_fn(
             d_temp_storage,
