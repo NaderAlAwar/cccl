@@ -64,7 +64,7 @@ class _Reduce:
             temp_storage_ptr=d_temp_storage.data.ptr,
             temp_storage_nbytes=d_temp_storage.nbytes,
             d_in=self.d_in_cccl,
-            d_out=self.d_out.cccl,
+            d_out=self.d_out_cccl,
             num_items=num_items,
             binary_op=self.op_wrapper,
             h_init=self.h_init_cccl,
