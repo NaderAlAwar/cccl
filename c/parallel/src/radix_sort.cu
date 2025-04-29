@@ -621,8 +621,6 @@ struct {26} {
     std::string exclusive_sum_kernel_lowered_name;
     std::string onesweep_kernel_lowered_name;
 
-    std::cout << "histogram_kernel_name: " << histogram_kernel_name << std::endl;
-
     const std::string arch = "-arch=sm_" + std::to_string(cc_major) + std::to_string(cc_minor);
 
     constexpr size_t num_args  = 8;
