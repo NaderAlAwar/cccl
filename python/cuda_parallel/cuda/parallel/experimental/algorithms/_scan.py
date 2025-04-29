@@ -89,7 +89,7 @@ class _Scan:
             num_items,
             self.op_wrapper,
             self.h_init_cccl,
-            None,
+            stream,
         )
 
 
