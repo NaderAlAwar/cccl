@@ -81,7 +81,7 @@ class _Scan:
             temp_storage_bytes = temp_storage.nbytes
             d_temp_storage = temp_storage.data.ptr
 
-        self.device_scan_fn(
+        return self.device_scan_fn(
             d_temp_storage,
             temp_storage_bytes,
             self.d_in_cccl,
