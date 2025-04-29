@@ -62,14 +62,14 @@ class _Reduce:
 
         self.kernel_call = functools.partial(
             self.build_result.compute,
-            temp_storage_ptr=d_temp_storage.data.ptr,
-            temp_storage_nbytes=d_temp_storage.nbytes,
-            d_in=self.d_in_cccl,
-            d_out=self.d_out_cccl,
-            num_items=num_items,
-            binary_op=self.op_wrapper,
-            h_init=self.h_init_cccl,
-            stream=None,
+            d_temp_storage.data.ptr,
+            d_temp_storage.nbytes,
+            self.d_in_cccl,
+            self.d_out_cccl,
+            num_items,
+            self.op_wrapper,
+            self.h_init_cccl,
+            None,
         )
 
     def __call__(
