@@ -78,7 +78,11 @@ class _Scan:
     ):
         self.d_in_cccl.state = d_in.data_ptr()
 
-        self.device_scan_fn(
+        if d_temp_storage is None:
+            temp_storage_bytes = 0
+            d_temp_storage = 0
+
+        return self.device_scan_fn(
             d_temp_storage,
             temp_storage_bytes,
             self.d_in_cccl,
