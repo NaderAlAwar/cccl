@@ -5,7 +5,6 @@
 
 from __future__ import annotations  # TODO: required for Python 3.7 docs env
 
-import functools
 from typing import Callable
 
 import numba
@@ -82,8 +81,9 @@ class _Scan:
             set_cccl_iterator_state(self.d_out_cccl, d_out)
             set_cccl_iterator_state(self.d_in_cccl, d_out)
             self.h_init_cccl.state = h_init.data.cast("B")
-            self.kernel_call = functools.partial(
-                self.device_scan_fn,
+            self.kernel_call = self.device_scan_fn  # will be speciailized later
+
+            return self.device_scan_fn(
                 d_temp_storage,
                 temp_storage_bytes,
                 self.d_in_cccl,
@@ -93,7 +93,6 @@ class _Scan:
                 self.h_init_cccl,
                 stream,
             )
-            return self.kernel_call()
 
         self.kernel_call()
 
