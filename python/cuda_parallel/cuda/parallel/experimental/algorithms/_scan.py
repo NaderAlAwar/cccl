@@ -62,9 +62,13 @@ class _Scan:
             else self.build_result.compute_exclusive
         )
 
+    def initialize(self, d_in, d_out):
+        set_cccl_iterator_state(self.d_out_cccl, d_out)
+
     def __call__(
         self,
-        temp_storage,
+        temp_storage_bytes,
+        d_temp_storage,
         d_in,
         d_out,
         num_items: int,
@@ -72,10 +76,6 @@ class _Scan:
         stream=None,
     ):
         set_cccl_iterator_state(self.d_in_cccl, d_in)
-        set_cccl_iterator_state(self.d_out_cccl, d_out)
-
-        temp_storage_bytes = temp_storage.nbytes
-        d_temp_storage = temp_storage.data.ptr
 
         self.device_scan_fn(
             d_temp_storage,
