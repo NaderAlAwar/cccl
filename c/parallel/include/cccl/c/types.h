@@ -35,9 +35,10 @@ typedef enum cccl_type_enum
   CCCL_UINT16  = 5,
   CCCL_UINT32  = 6,
   CCCL_UINT64  = 7,
-  CCCL_FLOAT32 = 8,
-  CCCL_FLOAT64 = 9,
-  CCCL_STORAGE = 10,
+  CCCL_FLOAT16 = 8,
+  CCCL_FLOAT32 = 9,
+  CCCL_FLOAT64 = 10,
+  CCCL_STORAGE = 11,
 } cccl_type_enum;
 
 typedef struct cccl_type_info

@@ -53,6 +53,9 @@ std::string cccl_type_enum_to_name(cccl_type_enum type, bool is_pointer = false)
     case cccl_type_enum::CCCL_UINT64:
       result = "::cuda::std::uint64_t";
       break;
+    case cccl_type_enum::CCCL_FLOAT16:
+      result = "__half";
+      break;
     case cccl_type_enum::CCCL_FLOAT32:
       result = "float";
       break;
