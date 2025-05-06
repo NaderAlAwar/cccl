@@ -84,7 +84,7 @@ struct transform_runtime_tuning_policy
   {
     return max_items_per_thread;
   }
-  static constexpr int min_bif = 1024 * 12;
+  static constexpr int min_bif = 1024 * 16;
 };
 
 transform_runtime_tuning_policy get_policy()
@@ -441,7 +441,7 @@ struct __align__({5}) output_storage_t {{
 
 struct prefetch_policy_t {{
   static constexpr int block_threads = {6};
-  static constexpr int items_per_thread_no_input = {7};
+//  static constexpr int items_per_thread_no_input = {7};
   static constexpr int min_items_per_thread      = {8};
   static constexpr int max_items_per_thread      = {9};
 }};
