@@ -71,6 +71,7 @@ struct CudaDriverLauncher
 
 struct CudaDriverLauncherFactory
 {
+  using Launcher = CudaDriverLauncher;
   CudaDriverLauncher
   operator()(dim3 grid, dim3 block, _CUDA_VSTD::size_t shared_mem, CUstream stream, bool dependent_launch = false) const
   {

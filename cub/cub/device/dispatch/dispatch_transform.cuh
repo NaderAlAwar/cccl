@@ -178,7 +178,8 @@ struct dispatch_t<StableAddress,
   // on?
   template <typename ActivePolicy>
   CUB_RUNTIME_FUNCTION _CCCL_VISIBILITY_HIDDEN _CCCL_FORCEINLINE auto configure_ublkcp_kernel(ActivePolicy policy)
-    -> cuda_expected<::cuda::std::tuple<KernelLauncherFactory, decltype(kernel_source.TransformKernel()), int>>
+    -> cuda_expected<
+      ::cuda::std::tuple<typename KernelLauncherFactory::Launcher, decltype(kernel_source.TransformKernel()), int>>
   {
     const int block_dim = policy.BlockThreads();
     // static_assert(block_dim % bulk_copy_alignment == 0,
