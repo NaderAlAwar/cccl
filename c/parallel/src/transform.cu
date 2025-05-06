@@ -497,7 +497,7 @@ struct device_transform_policy {{
         "};\n"
         "struct device_transform_policy {\n"
         "  struct ActivePolicy {\n"
-        "    static constexpr auto algorithm = cub::detail::transform::Algorithm::prefetch;\n"
+        "    static constexpr auto algorithm = cub::detail::transform::Algorithm::ublkcp;\n"
         "    using algo_policy = prefetch_policy_t;\n"
         "  };\n"
         "};\n"
