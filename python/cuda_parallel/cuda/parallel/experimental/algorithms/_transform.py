@@ -71,6 +71,7 @@ class _BinaryTransform:
         "d_out_cccl",
         "op_wrapper",
         "build_result",
+        "first_call",
     ]
 
     def __init__(
@@ -101,6 +102,7 @@ class _BinaryTransform:
             self.d_out_cccl,
             self.op_wrapper,
         )
+        self.first_call = True
 
     def __call__(
         self,
@@ -110,17 +112,21 @@ class _BinaryTransform:
         num_items: int,
         stream=None,
     ):
-        set_cccl_iterator_state(self.d_in1_cccl, d_in1)
-        set_cccl_iterator_state(self.d_in2_cccl, d_in2)
-        set_cccl_iterator_state(self.d_out_cccl, d_out)
-        stream_handle = protocols.validate_and_get_stream(stream)
+        self.d_in1_cccl.state = d_in1.data_ptr()
+        self.d_in2_cccl.state = d_in2.data_ptr()
+
+        if self.first_call:
+            set_cccl_iterator_state(self.d_in1_cccl, d_in1)
+            set_cccl_iterator_state(self.d_in2_cccl, d_in2)
+            set_cccl_iterator_state(self.d_out_cccl, d_out)
+            self.first_call = False
         self.build_result.compute(
             self.d_in1_cccl,
             self.d_in2_cccl,
             self.d_out_cccl,
             num_items,
             self.op_wrapper,
-            stream_handle,
+            stream,
         )
         return None
 
