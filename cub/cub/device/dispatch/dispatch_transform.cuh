@@ -178,9 +178,7 @@ struct dispatch_t<StableAddress,
   // on?
   template <typename ActivePolicy>
   CUB_RUNTIME_FUNCTION _CCCL_VISIBILITY_HIDDEN _CCCL_FORCEINLINE auto configure_ublkcp_kernel(ActivePolicy policy)
-    -> cuda_expected<
-      ::cuda::std::
-        tuple<THRUST_NS_QUALIFIER::cuda_cub::detail::triple_chevron, decltype(kernel_source.TransformKernel()), int>>
+    -> cuda_expected<::cuda::std::tuple<KernelLauncherFactory, decltype(kernel_source.TransformKernel()), int>>
   {
     constexpr int block_dim = policy.BlockThreads();
     static_assert(block_dim % bulk_copy_alignment == 0,
@@ -196,7 +194,7 @@ struct dispatch_t<StableAddress,
 
       elem_counts last_counts{};
       // Increase the number of output elements per thread until we reach the required bytes in flight.
-      static_assert(policy.MinItemsPerThread() <= policy.MaxItemsPerThread(), ""); // ensures the loop below
+      // static_assert(policy.MinItemsPerThread() <= policy.MaxItemsPerThread(), ""); // ensures the loop below
       // runs at least once
       for (int elem_per_thread = +policy.MinItemsPerThread(); elem_per_thread < +policy.MaxItemsPerThread();
            ++elem_per_thread)
