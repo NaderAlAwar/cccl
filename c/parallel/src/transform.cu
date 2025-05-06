@@ -84,7 +84,7 @@ struct transform_runtime_tuning_policy
   {
     return max_items_per_thread;
   }
-  static constexpr int min_bif = 1024 * 12;
+  static constexpr int min_bif = 1024 * 32;
 };
 
 transform_runtime_tuning_policy get_policy()
@@ -439,17 +439,17 @@ struct __align__({5}) output_storage_t {{
 {11}
 {12}
 
-struct prefetch_policy_t {{
+struct async_copy_policy_t {{
   static constexpr int block_threads = {6};
-  static constexpr int items_per_thread_no_input = {7};
+  // static constexpr int items_per_thread_no_input = {7};
   static constexpr int min_items_per_thread      = {8};
   static constexpr int max_items_per_thread      = {9};
 }};
 
 struct device_transform_policy {{
   struct ActivePolicy {{
-    static constexpr auto algorithm = cub::detail::transform::Algorithm::prefetch;
-    using algo_policy = prefetch_policy_t;
+    static constexpr auto algorithm = cub::detail::transform::Algorithm::ublkcp;
+    using algo_policy = async_copy_policy_t;
   }};
 }};
 
