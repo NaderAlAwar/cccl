@@ -10,6 +10,7 @@
 #include <cub/detail/choose_offset.cuh>
 #include <cub/detail/launcher/cuda_driver.cuh>
 #include <cub/device/dispatch/dispatch_transform.cuh>
+#include <cub/device/dispatch/kernels/transform.cuh>
 #include <cub/device/dispatch/tuning/tuning_transform.cuh> // cub::detail::transform::Algorithm
 #include <cub/util_arch.cuh>
 #include <cub/util_temporary_storage.cuh>
@@ -174,8 +175,9 @@ struct transform_kernel_source
   }
 
   template <typename It>
-  constexpr It MakeAlignedBasePtrKernelArg(It it, int /*alignment*/)
+  constexpr It MakeAlignedBasePtrKernelArg(It it, int alignment)
   {
+    it.ptr = cub::detail::transform::make_aligned_base_ptr(it.ptr, alignment);
     return it;
   }
 };
