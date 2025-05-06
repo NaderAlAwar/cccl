@@ -428,7 +428,7 @@ CUresult cccl_device_binary_transform_build(
       make_kernel_user_binary_operator(input1_it_value_t, input2_it_value_t, output_it_value_t, op);
 
     [[maybe_unused]] constexpr std::string_view src_template = R"XXX(
-#define _CUB_HAS_TRANSFORM_UBLKCP 0
+#define _CUB_HAS_TRANSFORM_UBLKCP 1
 #include <cub/device/dispatch/kernels/transform.cuh>
 struct __align__({1}) input1_storage_t {{
   char data[{0}];
@@ -462,7 +462,7 @@ struct device_transform_policy {{
 {13}
 )XXX";
     const std::string src =
-      "#define _CUB_HAS_TRANSFORM_UBLKCP 0\n"
+      "#define _CUB_HAS_TRANSFORM_UBLKCP 1\n"
       "#include <cub/device/dispatch/kernels/transform.cuh>\n"
       "struct __align__("
       + std::to_string(input1_it.value_type.alignment)
