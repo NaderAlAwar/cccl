@@ -349,7 +349,8 @@ struct dispatch_t<StableAddress,
 #ifdef _CUB_HAS_TRANSFORM_UBLKCP
     if constexpr (Algorithm::ublkcp == wrapped_policy.GetAlgorithm())
     {
-      return invoke_ublkcp_algorithm<ActivePolicyT>(::cuda::std::index_sequence_for<RandomAccessIteratorsIn...>{});
+      return invoke_ublkcp_algorithm<ActivePolicyT>(
+        ::cuda::std::index_sequence_for<RandomAccessIteratorsIn...>{}, wrapped_policy);
     }
     else
 #endif // _CUB_HAS_TRANSFORM_UBLKCP
