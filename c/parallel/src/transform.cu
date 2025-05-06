@@ -62,7 +62,7 @@ struct transform_runtime_tuning_policy
   // be able to keep this constexpr:
   static constexpr cub::detail::transform::Algorithm GetAlgorithm()
   {
-    return cub::detail::transform::Algorithm::prefetch;
+    return cub::detail::transform::Algorithm::ublkcp;
   }
 
   int BlockThreads()
@@ -206,7 +206,7 @@ CUresult cccl_device_unary_transform_build(
     const std::string op_src = make_kernel_user_unary_operator(input_it_value_t, output_it_value_t, op);
 
     [[maybe_unused]] constexpr std::string_view src_template = R"XXX(
-#define _CUB_HAS_TRANSFORM_UBLKCP 0
+#define _CUB_HAS_TRANSFORM_UBLKCP 1
 #include <cub/device/dispatch/kernels/transform.cuh>
 struct __align__({1}) input_storage_t {{
   char data[{0}];
@@ -232,7 +232,7 @@ struct device_transform_policy {{
 )XXX";
 
     const std::string src =
-      "#define _CUB_HAS_TRANSFORM_UBLKCP 0\n"
+      "#define _CUB_HAS_TRANSFORM_UBLKCP 1\n"
       "#include <cub/device/dispatch/kernels/transform.cuh>\n"
       "struct __align__("
       + std::to_string(input_it.value_type.alignment)
