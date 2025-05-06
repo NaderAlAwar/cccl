@@ -117,8 +117,8 @@ std::string get_kernel_name(cccl_iterator_t input_it, cccl_iterator_t output_it,
   std::string transform_op_t;
   check(nvrtcGetTypeName<op_wrapper>(&transform_op_t));
 
-  return "cub::detail::transform::transform_kernel<" + chained_policy_t + ", " + offset_t + ", " + transform_op_t + ", "
-       + output_iterator_t + ", " + input_iterator_t + ">";
+  return "cub::detail::transform::transform_kernel<" + chained_policy_t + ", " + offset_t + ", " + "::cuda::std::plus<>"
+       + ", " + output_iterator_t + ", " + input_iterator_t + ">";
 }
 
 std::string
@@ -137,8 +137,8 @@ get_kernel_name(cccl_iterator_t input1_it, cccl_iterator_t input2_it, cccl_itera
   std::string transform_op_t;
   check(nvrtcGetTypeName<op_wrapper>(&transform_op_t));
 
-  return "cub::detail::transform::transform_kernel<" + chained_policy_t + ", " + offset_t + ", " + transform_op_t + ", "
-       + output_iterator_t + ", " + input1_iterator_t + ", " + input2_iterator_t + ">";
+  return "cub::detail::transform::transform_kernel<" + chained_policy_t + ", " + offset_t + ", " + "::cuda::std::plus<>"
+       + ", " + output_iterator_t + ", " + input1_iterator_t + ", " + input2_iterator_t + ">";
 }
 
 template <auto* GetPolicy>
