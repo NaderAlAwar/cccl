@@ -174,7 +174,7 @@ struct transform_kernel_source
   }
 
   template <typename It>
-  constexpr It MakeAlignedBasePtrKernelArg(It it)
+  constexpr It MakeAlignedBasePtrKernelArg(It it, int /*alignment*/)
   {
     return it;
   }

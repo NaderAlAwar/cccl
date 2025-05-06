@@ -89,9 +89,9 @@ struct TransformKernelSource<Offset,
   }
 
   template <typename It>
-  CUB_RUNTIME_FUNCTION constexpr kernel_arg<It> MakeAlignedBasePtrKernelArg(It it)
+  CUB_RUNTIME_FUNCTION constexpr kernel_arg<It> MakeAlignedBasePtrKernelArg(It it, int alignment)
   {
-    return detail::transform::make_aligned_base_ptr_kernel_arg(it);
+    return detail::transform::make_aligned_base_ptr_kernel_arg(it, alignment);
   }
 };
 
