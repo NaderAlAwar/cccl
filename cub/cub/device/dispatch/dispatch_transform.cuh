@@ -177,12 +177,12 @@ struct dispatch_t<StableAddress,
   // TODO(bgruber): I want to write tests for this but those are highly depending on the architecture we are running
   // on?
   template <typename ActivePolicy>
-  CUB_RUNTIME_FUNCTION _CCCL_VISIBILITY_HIDDEN _CCCL_FORCEINLINE auto configure_ublkcp_kernel() -> cuda_expected<
-    ::cuda::std::
-      tuple<THRUST_NS_QUALIFIER::cuda_cub::detail::triple_chevron, decltype(kernel_source.TransformKernel()), int>>
+  CUB_RUNTIME_FUNCTION _CCCL_VISIBILITY_HIDDEN _CCCL_FORCEINLINE auto configure_ublkcp_kernel(ActivePolicy policy)
+    -> cuda_expected<
+      ::cuda::std::
+        tuple<THRUST_NS_QUALIFIER::cuda_cub::detail::triple_chevron, decltype(kernel_source.TransformKernel()), int>>
   {
-    using policy_t          = typename ActivePolicy::algo_policy;
-    constexpr int block_dim = policy_t::block_threads;
+    constexpr int block_dim = policy.BlockThreads();
     static_assert(block_dim % bulk_copy_alignment == 0,
                   "block_threads needs to be a multiple of bulk_copy_alignment (128)"); // then tile_size is a multiple
                                                                                         // of 128-byte
@@ -196,9 +196,9 @@ struct dispatch_t<StableAddress,
 
       elem_counts last_counts{};
       // Increase the number of output elements per thread until we reach the required bytes in flight.
-      static_assert(policy_t::min_items_per_thread <= policy_t::max_items_per_thread, ""); // ensures the loop below
+      static_assert(policy.MinItemsPerThread() <= policy.MaxItemsPerThread(), ""); // ensures the loop below
       // runs at least once
-      for (int elem_per_thread = +policy_t::min_items_per_thread; elem_per_thread < +policy_t::max_items_per_thread;
+      for (int elem_per_thread = +policy.MinItemsPerThread(); elem_per_thread < +policy.MaxItemsPerThread();
            ++elem_per_thread)
       {
         const int tile_size = block_dim * elem_per_thread;
@@ -216,8 +216,8 @@ struct dispatch_t<StableAddress,
         }
 
         int max_occupancy = 0;
-        const auto error =
-          CubDebug(MaxSmOccupancy(max_occupancy, kernel_source.TransformKernel(), block_dim, smem_size));
+        const auto error  = CubDebug(
+          launcher_factory.MaxSmOccupancy(max_occupancy, kernel_source.TransformKernel(), block_dim, smem_size));
         if (error != cudaSuccess)
         {
           return ::cuda::std::unexpected<cudaError_t /* nvcc 12.0 with GCC 7 fails CTAD here */>(error);
@@ -257,9 +257,10 @@ struct dispatch_t<StableAddress,
   }
 
   template <typename ActivePolicy, size_t... Is>
-  CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE cudaError_t invoke_ublkcp_algorithm(::cuda::std::index_sequence<Is...>)
+  CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE cudaError_t
+  invoke_ublkcp_algorithm(::cuda::std::index_sequence<Is...>, ActivePolicy policy)
   {
-    auto ret = configure_ublkcp_kernel<ActivePolicy>();
+    auto ret = configure_ublkcp_kernel<ActivePolicy>(policy);
     if (!ret)
     {
       return ret.error();
