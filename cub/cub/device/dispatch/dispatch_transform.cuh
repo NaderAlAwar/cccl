@@ -87,6 +87,12 @@ struct TransformKernelSource<Offset,
   {
     return detail::transform::make_iterator_kernel_arg(it);
   }
+
+  template <typename It>
+  CUB_RUNTIME_FUNCTION constexpr kernel_arg<It> MakeAlignedBasePtrKernelArg(It it)
+  {
+    return detail::transform::make_aligned_base_ptr_kernel_arg(it);
+  }
 };
 
 enum class requires_stable_address
@@ -272,7 +278,7 @@ struct dispatch_t<StableAddress,
       elem_per_thread,
       op,
       out,
-      make_aligned_base_ptr_kernel_arg(
+      kernel_source.MakeAlignedBasePtrKernelArg(
         THRUST_NS_QUALIFIER::try_unwrap_contiguous_iterator(::cuda::std::get<Is>(in)), bulk_copy_alignment)...);
   }
 #endif // _CUB_HAS_TRANSFORM_UBLKCP

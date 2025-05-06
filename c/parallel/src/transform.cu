@@ -172,6 +172,12 @@ struct transform_kernel_source
   {
     return it;
   }
+
+  template <typename It>
+  constexpr It MakeAlignedBasePtrKernelArg(It it)
+  {
+    return it;
+  }
 };
 
 } // namespace transform
