@@ -175,10 +175,9 @@ struct transform_kernel_source
   }
 
   template <typename It>
-  constexpr It MakeAlignedBasePtrKernelArg(It it, int alignment)
+  constexpr cub::detail::transform::aligned_base_ptr<__half> MakeAlignedBasePtrKernelArg(It it, int alignment)
   {
-    it.ptr = cub::detail::transform::make_aligned_base_ptr(it.ptr, alignment);
-    return it;
+    return cub::detail::transform::make_aligned_base_ptr(it.ptr, alignment);
   }
 };
 
