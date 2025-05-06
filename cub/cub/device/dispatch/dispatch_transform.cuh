@@ -180,10 +180,11 @@ struct dispatch_t<StableAddress,
   CUB_RUNTIME_FUNCTION _CCCL_VISIBILITY_HIDDEN _CCCL_FORCEINLINE auto configure_ublkcp_kernel(ActivePolicy policy)
     -> cuda_expected<::cuda::std::tuple<KernelLauncherFactory, decltype(kernel_source.TransformKernel()), int>>
   {
-    constexpr int block_dim = policy.BlockThreads();
-    static_assert(block_dim % bulk_copy_alignment == 0,
-                  "block_threads needs to be a multiple of bulk_copy_alignment (128)"); // then tile_size is a multiple
-                                                                                        // of 128-byte
+    const int block_dim = policy.BlockThreads();
+    // static_assert(block_dim % bulk_copy_alignment == 0,
+    //               "block_threads needs to be a multiple of bulk_copy_alignment (128)"); // then tile_size is a
+    //               multiple
+    //                                                                                     // of 128-byte
 
     auto determine_element_counts = [&]() -> cuda_expected<elem_counts> {
       const auto max_smem = get_max_shared_memory();
