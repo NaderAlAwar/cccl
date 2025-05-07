@@ -448,7 +448,7 @@ struct async_copy_policy_t {{
 
 struct device_transform_policy {{
   struct ActivePolicy {{
-    static constexpr auto algorithm = cub::detail::transform::Algorithm::ublkcp;
+    static constexpr auto algorithm = cub::detail::transform::Algorithm::prefetch;
     using algo_policy = async_copy_policy_t;
   }};
 }};
