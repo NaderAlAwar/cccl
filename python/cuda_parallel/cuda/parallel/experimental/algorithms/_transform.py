@@ -109,12 +109,13 @@ class _BinaryTransform:
     ):
         self.d_in1_cccl.state = d_in1.data_ptr()
         self.d_in2_cccl.state = d_in2.data_ptr()
+        self.d_out_cccl.state = d_out.data_ptr()
 
         if self.first_call:
             set_cccl_iterator_state(self.d_in1_cccl, d_in1)
             set_cccl_iterator_state(self.d_in2_cccl, d_in2)
             set_cccl_iterator_state(self.d_out_cccl, d_out)
-            # self.first_call = False
+            self.first_call = False
         self.build_result.compute(
             self.d_in1_cccl,
             self.d_in2_cccl,
