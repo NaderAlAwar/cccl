@@ -124,7 +124,6 @@ class _BinaryTransform:
             self.op_wrapper,
             stream,
         )
-        return None
 
 
 def make_unary_transform_cache_key(
