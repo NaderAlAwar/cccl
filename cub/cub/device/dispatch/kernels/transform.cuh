@@ -14,6 +14,8 @@
 #endif // no system header
 
 #include <cub/device/dispatch/tuning/tuning_transform.cuh>
+#include <cub/iterator/cache_modified_input_iterator.cuh>
+#include <cub/thread/thread_load.cuh>
 #include <cub/util_vsmem.cuh>
 
 #include <thrust/detail/raw_reference_cast.h>
@@ -71,9 +73,148 @@ _CCCL_DEVICE _CCCL_FORCEINLINE void prefetch_tile(It begin, int tile_size)
   }
 }
 
+template <typename PrefetchPolicy,
+          typename F,
+          typename Offset,
+          typename RandomAccessIteratorOut,
+          typename... RandomAccessIteratorIn>
+_CCCL_DEVICE _CCCL_FORCEINLINE void process_tile(
+  ::cuda::std::true_type /*is_full_tile*/,
+  ::cuda::std::false_type /*can_vectorize*/,
+  Offset /*offset*/,
+  int num_elem_per_thread,
+  int block_dim,
+  int /*tile_size*/,
+  F f,
+  RandomAccessIteratorOut out,
+  RandomAccessIteratorIn... ins)
+{
+  for (int j = 0; j < num_elem_per_thread; ++j)
+  {
+    const int idx = j * block_dim + threadIdx.x;
+    // we have to unwrap Thrust's proxy references here for backward compatibility (try zip_iterator.cu test)
+    out[idx] = f(THRUST_NS_QUALIFIER::raw_reference_cast(ins[idx])...);
+  }
+}
+
+template <typename PrefetchPolicy,
+          typename F,
+          typename Offset,
+          typename RandomAccessIteratorOut,
+          typename... RandomAccessIteratorIn>
+_CCCL_DEVICE _CCCL_FORCEINLINE void process_tile(
+  ::cuda::std::false_type /*is_full_tile*/,
+  ::cuda::std::false_type /*can_vectorize*/,
+  Offset /*offset*/,
+  int num_elem_per_thread,
+  int block_dim,
+  int tile_size,
+  F f,
+  RandomAccessIteratorOut out,
+  RandomAccessIteratorIn... ins)
+{
+  for (int j = 0; j < num_elem_per_thread; ++j)
+  {
+    const int idx = j * block_dim + threadIdx.x;
+    if (idx < tile_size)
+    {
+      // we have to unwrap Thrust's proxy references here for backward compatibility (try zip_iterator.cu test)
+      out[idx] = f(THRUST_NS_QUALIFIER::raw_reference_cast(ins[idx])...);
+    }
+  }
+}
+
+template <typename PrefetchPolicy,
+          typename F,
+          typename Offset,
+          typename RandomAccessIteratorOut,
+          typename... RandomAccessIteratorIn>
+_CCCL_DEVICE _CCCL_FORCEINLINE void process_tile(
+  ::cuda::std::true_type /*is_full_tile*/,
+  ::cuda::std::true_type /*can_vectorize*/,
+  Offset offset,
+  int num_elem_per_thread,
+  int block_dim,
+  int /*tile_size*/,
+  F f,
+  RandomAccessIteratorOut out,
+  RandomAccessIteratorIn... ins)
+{
+  using InputT                     = it_value_t<RandomAccessIteratorOut>;
+  constexpr int ITEMS_PER_VEC      = 4;
+  constexpr int VECTOR_LOAD_LENGTH = sizeof(InputT) * 8 * ITEMS_PER_VEC;
+
+  /// Vector type of InputT for data movement
+  using VectorT = typename CubVector<InputT, ITEMS_PER_VEC>::Type;
+
+  auto process_single_in = [&](auto input_ptr) {
+    const int lane_id = threadIdx.x;
+
+    // Fabricate a vectorized input iterator
+    auto d_in_unqualified = const_cast<decltype(input_ptr)>(input_ptr) + offset + (lane_id * VECTOR_LOAD_LENGTH);
+    CacheModifiedInputIterator<cub::CacheLoadModifier::LOAD_DEFAULT, VectorT, Offset> d_vec_in(
+      reinterpret_cast<VectorT*>(d_in_unqualified));
+
+    // Load items as vector items
+    ::cuda::std::array<InputT, PrefetchPolicy::max_items_per_thread> input_items;
+    // InputT input_items[PrefetchPolicy::max_items_per_thread];
+    VectorT* vec_items = reinterpret_cast<VectorT*>(input_items.data());
+
+    _CCCL_PRAGMA_UNROLL_FULL()
+    for (int i = 0; i < num_elem_per_thread / ITEMS_PER_VEC; ++i)
+    {
+      vec_items[i] = d_vec_in[ITEMS_PER_VEC * i];
+    }
+
+    return input_items;
+  };
+
+  auto processed_inputs = std::tuple{process_single_in(ins)...};
+
+  for (int j = 0; j < num_elem_per_thread; ++j)
+  {
+    [[maybe_unused]] const int idx = j * block_dim + threadIdx.x;
+
+    // // Access the j-th element from each processed input array
+    // out[idx] = ::cuda::std::apply(
+    //   [&](const auto&... processed_arrays) {
+    //     return f(processed_arrays[j]...);
+    //   },
+    //   processed_inputs);
+  }
+}
+
+template <typename PrefetchPolicy,
+          typename F,
+          typename Offset,
+          typename RandomAccessIteratorOut,
+          typename... RandomAccessIteratorIn>
+_CCCL_DEVICE _CCCL_FORCEINLINE void process_tile(
+  ::cuda::std::false_type /*is_full_tile*/,
+  ::cuda::std::true_type /*can_vectorize*/,
+  Offset offset,
+  int num_elem_per_thread,
+  int block_dim,
+  int tile_size,
+  F f,
+  RandomAccessIteratorOut out,
+  RandomAccessIteratorIn... ins)
+{
+  // Not vectorized for now
+  for (int j = 0; j < num_elem_per_thread; ++j)
+  {
+    const int idx = j * block_dim + threadIdx.x;
+    if (idx < tile_size)
+    {
+      // we have to unwrap Thrust's proxy references here for backward compatibility (try zip_iterator.cu test)
+      out[idx] = f(THRUST_NS_QUALIFIER::raw_reference_cast(ins[idx])...);
+    }
+  }
+}
+
 // This kernel guarantees that objects passed as arguments to the user-provided transformation function f reside in
-// global memory. No intermediate copies are taken. If the parameter type of f is a reference, taking the address of the
-// parameter yields a global memory address.
+// global memory. No intermediate copies are taken. If the parameter type of f is a reference, taking the address of
+// the parameter yields a global memory address.
 template <typename PrefetchPolicy,
           typename Offset,
           typename F,
@@ -100,27 +241,46 @@ _CCCL_DEVICE void transform_kernel_impl(
 
   (..., prefetch_tile<block_dim>(THRUST_NS_QUALIFIER::raw_reference_cast(ins), tile_size));
 
-  auto process_tile = [&](auto full_tile, auto... ins2 /* nvcc fails to compile when just using the captured ins */) {
-    // ahendriksen: various unrolling yields less <1% gains at much higher compile-time cost
-    // bgruber: but A6000 and H100 show small gains without pragma
-    // _CCCL_PRAGMA_NOUNROLL()
-    for (int j = 0; j < num_elem_per_thread; ++j)
-    {
-      const int idx = j * block_dim + threadIdx.x;
-      if (full_tile || idx < tile_size)
-      {
-        // we have to unwrap Thrust's proxy references here for backward compatibility (try zip_iterator.cu test)
-        out[idx] = f(THRUST_NS_QUALIFIER::raw_reference_cast(ins2[idx])...);
-      }
-    }
-  };
+  // auto process_tile = [&](auto full_tile, auto... ins2 /* nvcc fails to compile when just using the captured ins */)
+  // {
+  //   // ahendriksen: various unrolling yields less <1% gains at much higher compile-time cost
+  //   // bgruber: but A6000 and H100 show small gains without pragma
+  //   // _CCCL_PRAGMA_NOUNROLL()
+  //   for (int j = 0; j < num_elem_per_thread; ++j)
+  //   {
+  //     const int idx = j * block_dim + threadIdx.x;
+  //     if (full_tile || idx < tile_size)
+  //     {
+  //       // we have to unwrap Thrust's proxy references here for backward compatibility (try zip_iterator.cu test)
+  //       out[idx] = f(THRUST_NS_QUALIFIER::raw_reference_cast(ins2[idx])...);
+  //     }
+  //   }
+  // };
   if (tile_stride == tile_size)
   {
-    process_tile(::cuda::std::true_type{}, ins...);
+    process_tile<PrefetchPolicy, F, Offset, RandomAccessIteratorOut, RandomAccessIteratorIn...>(
+      ::cuda::std::true_type{},
+      ::cuda::std::true_type{},
+      num_items,
+      num_elem_per_thread,
+      block_dim,
+      tile_size,
+      f,
+      out,
+      ins...);
   }
   else
   {
-    process_tile(::cuda::std::false_type{}, ins...);
+    process_tile<PrefetchPolicy, F, Offset, RandomAccessIteratorOut, RandomAccessIteratorIn...>(
+      ::cuda::std::false_type{},
+      ::cuda::std::true_type{},
+      num_items,
+      num_elem_per_thread,
+      block_dim,
+      tile_size,
+      f,
+      out,
+      ins...);
   }
 }
 
