@@ -169,7 +169,7 @@ _CCCL_DEVICE _CCCL_FORCEINLINE void process_tile(
     return input_items;
   };
 
-  auto processed_inputs = std::tuple{process_single_in(ins)...};
+  auto processed_inputs = ::cuda::std::tuple{process_single_in(ins)...};
 
   for (int j = 0; j < num_elem_per_thread; ++j)
   {
