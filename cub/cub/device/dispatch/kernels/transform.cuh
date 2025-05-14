@@ -128,37 +128,38 @@ template <typename PrefetchPolicy,
           typename F,
           typename Offset,
           typename RandomAccessIteratorOut,
-          typename... RandomAccessIteratorIn>
+          typename RandomAccessIteratorIn>
 _CCCL_DEVICE _CCCL_FORCEINLINE void process_tile(
   ::cuda::std::true_type /*is_full_tile*/,
   ::cuda::std::true_type /*can_vectorize*/,
-  Offset offset,
   int num_elem_per_thread,
   int block_dim,
   int /*tile_size*/,
   F f,
   RandomAccessIteratorOut out,
-  RandomAccessIteratorIn... ins)
+  RandomAccessIteratorIn in1,
+  RandomAccessIteratorIn in2,
+  RandomAccessIteratorIn... /*rest*/)
 {
   using InputT                     = it_value_t<RandomAccessIteratorOut>;
   constexpr int items_per_vec      = 4; // How many elements in single load instruction
-  constexpr int VECTORS_PER_THREAD = 4;
-  constexpr int VECTOR_LOAD_LENGTH = sizeof(InputT) * VECTORS_PER_THREAD * ITEMS_PER_VEC; // number of elements a given
+  constexpr int vectors_per_thread = 4;
+  constexpr int vector_load_length = sizeof(InputT) * vectors_per_thread * items_per_vec; // number of elements a given
                                                                                           // thread is going to read.
                                                                                           // Each thread will read 16
                                                                                           // elements, which means 4
                                                                                           // vectors.
 
   /// Vector type of InputT for data movement
-  using VectorT = typename CubVector<InputT, ITEMS_PER_VEC>::Type;
+  using VectorT = typename CubVector<InputT, items_per_vec>::Type;
 
   auto process_single_in = [&](auto input_ptr) {
-    const int lane_id = threadIdx.x;
+    // const int lane_id = threadIdx.x;
     // offset assume to be blockIdx.x
 
     // Fabricate a vectorized input iterator
-    auto d_in_unqualified = const_cast<decltype(input_ptr)>(input_ptr) + offset; // Make sure what offset is, then
-                                                                                 // rename it properly
+    auto d_in_unqualified = const_cast<decltype(input_ptr)>(input_ptr); // Make sure what offset is, then
+                                                                        // rename it properly
     CacheModifiedInputIterator<cub::CacheLoadModifier::LOAD_DEFAULT, VectorT, Offset> d_vec_in(
       reinterpret_cast<VectorT*>(d_in_unqualified));
 
@@ -169,11 +170,11 @@ _CCCL_DEVICE _CCCL_FORCEINLINE void process_tile(
 
     constexpr int NUM_THREADS_PER_BLOCK = 0; // TODO: might be known at compile time
     _CCCL_PRAGMA_UNROLL_FULL()
-    for (int vec_idx = 0; vec_idx < VECTORS_PER_THREAD; ++vec_idx)
+    for (int vec_idx = 0; vec_idx < vectors_per_thread; ++vec_idx)
     {
-      vec_items[vec_idx] = d_vec_in[threadIdx.x + vec_idx]; // This will load 4 elements, so we have 4 vector loads. //
-                                                            // Calculate it, threadIdx.x is not right. Adjacent threads
-                                                            // much
+      vec_items[vec_idx] = d_vec_in[threadIdx.x]; // This will load 4 elements, so we have 4 vector loads. //
+                                                  // Calculate it, threadIdx.x is not right. Adjacent threads
+                                                  // much
     }
 
     return input_items; // Compiler should optimize copy away, if not, pass array by reference or something.
@@ -181,7 +182,9 @@ _CCCL_DEVICE _CCCL_FORCEINLINE void process_tile(
 
   // For now, throw away variadic part, hardoce two iterators. Then we can
   // generalize.
-  auto processed_inputs = ::cuda::std::tuple{process_single_in(ins)...};
+  // auto processed_inputs = ::cuda::std::tuple{process_single_in(ins)...};
+  auto processed_input_1 = process_single_in(in1);
+  auto processed_input_2 = process_single_in(in2);
 
   for (int j = 0; j < num_elem_per_thread; ++j)
   {
@@ -272,7 +275,7 @@ _CCCL_DEVICE void transform_kernel_impl(
   // };
   if (tile_stride == tile_size)
   {
-    process_tile<PrefetchPolicy, F, Offset, RandomAccessIteratorOut, RandomAccessIteratorIn...>(
+    process_tile<PrefetchPolicy, F, Offset, RandomAccessIteratorOut, RandomAccessIteratorIn>(
       ::cuda::std::true_type{},
       ::cuda::std::true_type{},
       num_items,
