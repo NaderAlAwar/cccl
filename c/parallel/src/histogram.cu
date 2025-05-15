@@ -186,7 +186,7 @@ CUresult cccl_device_histogram_build(
   int num_output_levels_val,
   cccl_iterator_t d_output_histograms,
   cccl_value_t d_levels,
-  int64_t num_rows,
+  [[maybe_unused]] int64_t num_rows,
   int64_t row_stride_samples,
   bool is_evenly_segmented,
   int cc_major,
@@ -208,10 +208,13 @@ CUresult cccl_device_histogram_build(
     const auto counter_cpp = cccl_type_enum_to_name(d_output_histograms.value_type.type);
     const auto level_cpp   = cccl_type_enum_to_name(d_levels.type.type);
 
-    const std::string offset_cpp =
-      ((unsigned long long) (num_rows * row_stride_samples * d_samples.value_type.size) < (unsigned long long) INT_MAX)
-        ? "int"
-        : "long long";
+    // const std::string offset_cpp =
+    //   ((unsigned long long) (num_rows * row_stride_samples * d_samples.value_type.size) < (unsigned long long)
+    //   INT_MAX)
+    //     ? "int"
+    //     : "long long";
+
+    const std::string offset_cpp = "int";
 
     std::string samples_iterator_name;
     check(nvrtcGetTypeName<samples_iterator_t>(&samples_iterator_name));
