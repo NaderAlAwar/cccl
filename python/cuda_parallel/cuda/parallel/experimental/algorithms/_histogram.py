@@ -9,7 +9,7 @@ from .. import _bindings
 from .. import _cccl_interop as cccl
 from .._caching import cache_with_key
 from .._cccl_interop import call_build, set_cccl_iterator_state, to_cccl_value_state
-from .._utils.protocols import get_data_pointer, get_dtype, validate_and_get_stream
+from .._utils.protocols import get_data_pointer, get_dtype
 from ..iterators._iterators import IteratorBase
 from ..typing import DeviceArrayLike
 
@@ -94,16 +94,17 @@ class _Histogram:
         num_samples: int,
         stream=None,
     ):
-        set_cccl_iterator_state(self.d_samples_cccl, d_samples)
-        set_cccl_iterator_state(self.d_histogram_cccl, d_histogram)
-        self.h_num_output_levels_cccl.state = to_cccl_value_state(h_num_output_levels)
-        self.h_lower_level_cccl.state = to_cccl_value_state(h_lower_level)
-        self.h_upper_level_cccl.state = to_cccl_value_state(h_upper_level)
-
-        stream_handle = validate_and_get_stream(stream)
         if temp_storage is None:
             temp_storage_bytes = 0
             d_temp_storage = 0
+            set_cccl_iterator_state(self.d_samples_cccl, d_samples)
+            set_cccl_iterator_state(self.d_histogram_cccl, d_histogram)
+            self.h_num_output_levels_cccl.state = to_cccl_value_state(
+                h_num_output_levels
+            )
+            self.h_lower_level_cccl.state = to_cccl_value_state(h_lower_level)
+            self.h_upper_level_cccl.state = to_cccl_value_state(h_upper_level)
+
         else:
             temp_storage_bytes = temp_storage.nbytes
             # Note: this is slightly slower, but supports all ndarray-like objects as long as they support CAI
@@ -121,7 +122,7 @@ class _Histogram:
             num_samples,
             self.num_rows,
             num_samples,
-            stream_handle,
+            stream,
         )
 
         return temp_storage_bytes
