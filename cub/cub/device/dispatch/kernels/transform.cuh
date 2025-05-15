@@ -275,7 +275,7 @@ _CCCL_DEVICE void transform_kernel_impl(
   // };
   if (tile_stride == tile_size)
   {
-    process_tile<PrefetchPolicy, F, Offset, RandomAccessIteratorOut, RandomAccessIteratorIn>(
+    process_tile<PrefetchPolicy, F, Offset, RandomAccessIteratorOut, RandomAccessIteratorIn...>(
       ::cuda::std::true_type{},
       ::cuda::std::true_type{},
       num_items,
