@@ -31,7 +31,7 @@ using OffsetT = int64_t;
 // Largest type we support for now. Tricky to make this an indirect_arg_t since
 // we are passing in cuda::std::arrays holding the values of the levels which
 // are used to do host computation.
-using LevelT = double;
+using LevelT = int;
 
 struct samples_iterator_t;
 
@@ -391,7 +391,7 @@ CUresult cccl_device_histogram_even_impl(
       indirect_arg_t,
       cub::detail::histogram::Transforms<LevelT, // LevelT
                                          OffsetT, // OffsetT
-                                         float // SampleT
+                                         int // SampleT
                                          >>::
       DispatchEven(
         d_temp_storage,
