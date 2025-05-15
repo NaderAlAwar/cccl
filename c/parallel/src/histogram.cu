@@ -27,7 +27,7 @@
 // int32_t is generally faster. Depending on the number of samples we
 // instantiate the kernels below with int32 or int64, but we set this to int64
 // here because it's needed for host computation as well.
-using OffsetT = int64_t;
+using OffsetT = int32_t;
 // Largest type we support for now. Tricky to make this an indirect_arg_t since
 // we are passing in cuda::std::arrays holding the values of the levels which
 // are used to do host computation.
@@ -208,10 +208,13 @@ CUresult cccl_device_histogram_build(
     const auto counter_cpp = cccl_type_enum_to_name(d_output_histograms.value_type.type);
     const auto level_cpp   = cccl_type_enum_to_name(d_levels.type.type);
 
-    const std::string offset_cpp =
-      ((unsigned long long) (num_rows * row_stride_samples * d_samples.value_type.size) < (unsigned long long) INT_MAX)
-        ? "int"
-        : "long long";
+    // const std::string offset_cpp =
+    //   ((unsigned long long) (num_rows * row_stride_samples * d_samples.value_type.size) < (unsigned long long)
+    //   INT_MAX)
+    //     ? "int"
+    //     : "long long";
+
+    const std::string offset_cpp = "int";
 
     std::string samples_iterator_name;
     check(nvrtcGetTypeName<samples_iterator_t>(&samples_iterator_name));
