@@ -31,7 +31,7 @@ using OffsetT = int32_t;
 // Largest type we support for now. Tricky to make this an indirect_arg_t since
 // we are passing in cuda::std::arrays holding the values of the levels which
 // are used to do host computation.
-using LevelT = uint8_t;
+using LevelT = uint16_t;
 
 struct samples_iterator_t;
 
