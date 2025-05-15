@@ -187,7 +187,7 @@ CUresult cccl_device_histogram_build(
   cccl_iterator_t d_output_histograms,
   cccl_value_t d_levels,
   [[maybe_unused]] int64_t num_rows,
-  int64_t row_stride_samples,
+  [[maybe_unused]] int64_t row_stride_samples,
   bool is_evenly_segmented,
   int cc_major,
   int cc_minor,
