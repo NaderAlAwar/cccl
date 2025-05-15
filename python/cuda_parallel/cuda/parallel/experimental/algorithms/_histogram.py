@@ -86,7 +86,7 @@ class _Histogram:
     def __call__(
         self,
         temp_storage,
-        d_samples: DeviceArrayLike | IteratorBase,
+        d_samples,
         d_histogram: DeviceArrayLike,
         h_num_output_levels: np.ndarray,
         h_lower_level: np.ndarray,
@@ -94,6 +94,8 @@ class _Histogram:
         num_samples: int,
         stream=None,
     ):
+        self.d_samples_cccl.state = d_samples.data_ptr()
+
         if temp_storage is None:
             temp_storage_bytes = 0
             d_temp_storage = 0
