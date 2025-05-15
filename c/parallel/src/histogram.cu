@@ -226,11 +226,11 @@ CUresult cccl_device_histogram_build(
 #include <cub/block/block_load.cuh>
 #include <cub/device/dispatch/kernels/histogram.cuh>
 
-struct __align__({1}) storage_t {{
+struct __align__({1}) storage_t {
   char data[{0}];
-}};
+};
 {2}
-struct agent_policy_t {{
+struct agent_policy_t {
   static constexpr int BLOCK_THREADS = {3};
   static constexpr int PIXELS_PER_THREAD = {4};
   static constexpr bool IS_RLE_COMPRESS = true;
@@ -239,12 +239,12 @@ struct agent_policy_t {{
   static constexpr int VEC_SIZE = 4;
   static constexpr cub::BlockLoadAlgorithm LOAD_ALGORITHM = cub::BLOCK_LOAD_DIRECT;
   static constexpr cub::CacheLoadModifier LOAD_MODIFIER = cub::LOAD_LDG;
-}};
-struct {5} {{
-  struct ActivePolicy {{
+};
+struct {5} {
+  struct ActivePolicy {
     using AgentHistogramPolicyT = agent_policy_t;
-  }};
-}};
+  };
+};
 )XXX";
 
     std::string src = std::string(src_template);
