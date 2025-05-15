@@ -13,7 +13,7 @@
 
 #include <cuda/std/__algorithm_>
 
-#include <format>
+// #include <format>
 
 #include "cccl/c/types.h"
 #include "cub/util_type.cuh"
@@ -102,8 +102,11 @@ histogram_runtime_tuning_policy get_policy(int /*cc*/, cccl_type_info sample_t, 
 
 std::string get_init_kernel_name(int num_active_channels, std::string_view counter_t, std::string_view offset_t)
 {
-  return std::format(
-    "cub::detail::histogram::DeviceHistogramInitKernel<{0}, {1}, {2}>", num_active_channels, counter_t, offset_t);
+  std::string result = "cub::detail::histogram::DeviceHistogramInitKernel<";
+  result += std::to_string(num_active_channels) + ", ";
+  result += std::string(counter_t) + ", ";
+  result += std::string(offset_t) + ">";
+  return result;
 }
 
 std::string get_sweep_kernel_name(
@@ -126,34 +129,51 @@ std::string get_sweep_kernel_name(
       ? cccl_type_enum_to_name(d_samples.value_type.type, true) //
       : samples_iterator_name;
 
-  const std::string transforms_t = std::format(
-    "cub::detail::histogram::Transforms<{0}, {1}, {2}>",
-    level_t,
-    offset_t,
-    cccl_type_enum_to_name(d_samples.value_type.type));
+  std::string transforms_t = "cub::detail::histogram::Transforms<";
+  transforms_t += std::string(level_t) + ", ";
+  transforms_t += std::string(offset_t) + ", ";
+  transforms_t += cccl_type_enum_to_name(d_samples.value_type.type) + ">";
+  // const std::string transforms_t = std::format(
+  //   "cub::detail::histogram::Transforms<{0}, {1}, {2}>",
+  //   level_t,
+  //   offset_t,
+  //   cccl_type_enum_to_name(d_samples.value_type.type));
 
-  std::string privatized_decode_op_t = std::format("{0}::PassThruTransform", transforms_t);
+  // std::string privatized_decode_op_t = std::format("{0}::PassThruTransform", transforms_t);
+  std::string privatized_decode_op_t = transforms_t + "::PassThruTransform";
   std::string output_decode_op_t =
     is_evenly_segmented
-      ? std::format("{0}::ScaleTransform", transforms_t)
-      : std::format("{0}::SearchTransform<const {1}*>", transforms_t, level_t);
+      ? transforms_t + "::ScaleTransform" // std::format("{0}::ScaleTransform", transforms_t)
+      : transforms_t + "::SearchTransform<const " + std::string(level_t) + "*>"; //, transforms_t, level_t);
 
   if (!is_byte_sample)
   {
     std::swap(privatized_decode_op_t, output_decode_op_t);
   }
 
-  return std::format(
-    "cub::detail::histogram::DeviceHistogramSweepKernel<{0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}>",
-    chained_policy_t,
-    privatized_smem_bins,
-    num_channels,
-    num_active_channels,
-    samples_iterator_t,
-    counter_t,
-    privatized_decode_op_t,
-    output_decode_op_t,
-    offset_t);
+  std::string result = "cub::detail::histogram::DeviceHistogramSweepKernel<";
+  result += std::string(chained_policy_t) + ", ";
+  result += std::to_string(privatized_smem_bins) + ", ";
+  result += std::to_string(num_channels) + ", ";
+  result += std::to_string(num_active_channels) + ", ";
+  result += std::string(samples_iterator_t) + ", ";
+  result += std::string(counter_t) + ", ";
+  result += std::string(privatized_decode_op_t) + ", ";
+  result += std::string(output_decode_op_t) + ", ";
+  result += std::string(offset_t) + ">";
+  return result;
+
+  // return std::format(
+  //   "cub::detail::histogram::DeviceHistogramSweepKernel<{0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}>",
+  //   chained_policy_t,
+  //   privatized_smem_bins,
+  //   num_channels,
+  //   num_active_channels,
+  //   samples_iterator_t,
+  //   counter_t,
+  //   privatized_decode_op_t,
+  //   output_decode_op_t,
+  //   offset_t);
 }
 
 } // namespace histogram
@@ -227,15 +247,23 @@ struct {5} {{
 }};
 )XXX";
 
-    const std::string src = std::format(
-      src_template,
-      d_samples.value_type.size, // 0
-      d_samples.value_type.alignment, // 1
-      samples_iterator_src, // 2
-      policy.block_threads, // 3
-      policy.pixels_per_thread, // 4
-      chained_policy_t // 5
-    );
+    std::string src = std::string(src_template);
+    src.replace(src.find("{0}"), 3, std::to_string(d_samples.value_type.size));
+    src.replace(src.find("{1}"), 3, std::to_string(d_samples.value_type.alignment));
+    src.replace(src.find("{2}"), 3, samples_iterator_src);
+    src.replace(src.find("{3}"), 3, std::to_string(policy.block_threads));
+    src.replace(src.find("{4}"), 3, std::to_string(policy.pixels_per_thread));
+    src.replace(src.find("{5}"), 3, chained_policy_t);
+
+    // const std::string src = std::format(
+    //   src_template,
+    //   d_samples.value_type.size, // 0
+    //   d_samples.value_type.alignment, // 1
+    //   samples_iterator_src, // 2
+    //   policy.block_threads, // 3
+    //   policy.pixels_per_thread, // 4
+    //   chained_policy_t // 5
+    // );
 
 #if false // CCCL_DEBUGGING_SWITCH
     fflush(stderr);
@@ -267,7 +295,8 @@ struct {5} {{
     std::string init_kernel_lowered_name;
     std::string sweep_kernel_lowered_name;
 
-    const std::string arch = std::format("-arch=sm_{0}{1}", cc_major, cc_minor);
+    // const std::string arch = std::format("-arch=sm_{0}{1}", cc_major, cc_minor);
+    const std::string arch = "-arch=sm_" + std::to_string(cc_major) + std::to_string(cc_minor);
 
     constexpr size_t num_args  = 8;
     const char* args[num_args] = {
