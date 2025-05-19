@@ -280,7 +280,8 @@ struct dispatch_t<StableAddress,
   CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE cudaError_t
   invoke_prefetch_algorithm(::cuda::std::index_sequence<Is...>, ActivePolicy policy)
   {
-    const int block_dim = policy.BlockThreads();
+    // const int block_dim = policy.BlockThreads();
+    const int block_dim = 64;
 
     auto determine_config = [&]() -> cuda_expected<prefetch_config> {
       int max_occupancy = 0;
@@ -316,20 +317,30 @@ struct dispatch_t<StableAddress,
     }
 
     auto loaded_bytes_per_iter = kernel_source.LoadedBytesPerIteration();
+    printf("loaded bytes per iter %d %d %d\n",
+           loaded_bytes_per_iter,
+           +policy.ItemsPerThreadNoInput(),
+           ::cuda::ceil_div(policy.min_bif, config->max_occupancy * block_dim * loaded_bytes_per_iter));
     // choose items per thread to reach minimum bytes in flight
     const int items_per_thread =
       loaded_bytes_per_iter == 0
         ? +policy.ItemsPerThreadNoInput()
         : ::cuda::ceil_div(policy.min_bif, config->max_occupancy * block_dim * loaded_bytes_per_iter);
 
+    printf("items per thread %d or other %d\n",
+           items_per_thread,
+           num_items / (config->sm_count * block_dim * config->max_occupancy));
     // but also generate enough blocks for full occupancy to optimize small problem sizes, e.g., 2^16 or 2^20 elements
     const int items_per_thread_evenly_spread = static_cast<int>(
       (::cuda::std::min)(Offset{items_per_thread}, num_items / (config->sm_count * block_dim * config->max_occupancy)));
 
-    const int items_per_thread_clamped =
-      ::cuda::std::clamp(items_per_thread_evenly_spread, +policy.MinItemsPerThread(), +policy.MaxItemsPerThread());
-    const int tile_size = block_dim * items_per_thread_clamped;
+    // const int items_per_thread_clamped =
+    //   ::cuda::std::clamp(items_per_thread_evenly_spread, +policy.MinItemsPerThread(), +policy.MaxItemsPerThread());
+    const int items_per_thread_clamped = 16;
+    const int tile_size                = block_dim * items_per_thread_clamped;
+    printf("items per thread clamped %d\n", items_per_thread_clamped);
     const auto grid_dim = static_cast<unsigned int>(::cuda::ceil_div(num_items, Offset{tile_size}));
+    printf("num items %d grid_dim %u block_dim %d\n", num_items, grid_dim, block_dim);
     return CubDebug(
       launcher_factory(grid_dim, block_dim, 0, stream)
         .doit(kernel_source.TransformKernel(),

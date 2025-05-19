@@ -124,31 +124,36 @@ _CCCL_DEVICE _CCCL_FORCEINLINE void process_tile(
   }
 }
 
+// New implementation for exactly 2 iterators
 template <typename PrefetchPolicy,
           typename F,
           typename Offset,
           typename RandomAccessIteratorOut,
-          typename RandomAccessIteratorIn>
-_CCCL_DEVICE _CCCL_FORCEINLINE void process_tile(
-  ::cuda::std::true_type /*is_full_tile*/,
-  ::cuda::std::true_type /*can_vectorize*/,
+          typename RandomAccessIteratorIn1,
+          typename RandomAccessIteratorIn2>
+_CCCL_DEVICE _CCCL_FORCEINLINE void process_tile_dispatch(
+  ::cuda::std::true_type is_full_tile,
+  ::cuda::std::true_type can_vectorize,
+  Offset offset,
   int num_elem_per_thread,
   int block_dim,
-  int /*tile_size*/,
+  int tile_size,
   F f,
   RandomAccessIteratorOut out,
-  RandomAccessIteratorIn in1,
-  RandomAccessIteratorIn in2,
-  RandomAccessIteratorIn... /*rest*/)
+  RandomAccessIteratorIn1 in1,
+  RandomAccessIteratorIn2 in2,
+  ::cuda::std::true_type /* is_exactly_two_iterators */)
 {
-  using InputT                     = it_value_t<RandomAccessIteratorOut>;
-  constexpr int items_per_vec      = 4; // How many elements in single load instruction
-  constexpr int vectors_per_thread = 4;
-  constexpr int vector_load_length = sizeof(InputT) * vectors_per_thread * items_per_vec; // number of elements a given
-                                                                                          // thread is going to read.
-                                                                                          // Each thread will read 16
-                                                                                          // elements, which means 4
-                                                                                          // vectors.
+  // using InputT                     = it_value_t<RandomAccessIteratorOut>;
+  using InputT                 = __half;
+  constexpr int dtype_size     = 16; // for __half
+  constexpr int items_per_vec  = 4; // How many elements in single load instruction
+  const int vectors_per_thread = num_elem_per_thread / items_per_vec;
+  const int vector_load_length = dtype_size * vectors_per_thread * items_per_vec; // number of elements a given
+                                                                                  // thread is going to read.
+                                                                                  // Each thread will read 16
+                                                                                  // elements, which means 4
+                                                                                  // vectors.
 
   /// Vector type of InputT for data movement
   using VectorT = typename CubVector<InputT, items_per_vec>::Type;
@@ -158,23 +163,21 @@ _CCCL_DEVICE _CCCL_FORCEINLINE void process_tile(
     // offset assume to be blockIdx.x
 
     // Fabricate a vectorized input iterator
-    auto d_in_unqualified = const_cast<decltype(input_ptr)>(input_ptr); // Make sure what offset is, then
-                                                                        // rename it properly
+    // auto d_in_unqualified = const_cast<InputT*>(input_ptr + (blockIdx.x * vector_load_length * blockDim.x));
+    auto d_in_unqualified = const_cast<InputT*>(input_ptr);
     CacheModifiedInputIterator<cub::CacheLoadModifier::LOAD_DEFAULT, VectorT, Offset> d_vec_in(
       reinterpret_cast<VectorT*>(d_in_unqualified));
 
     // Load items as vector items
-    ::cuda::std::array<InputT, PrefetchPolicy::max_items_per_thread> input_items;
+    ::cuda::std::array<InputT, 16> input_items;
     // InputT input_items[PrefetchPolicy::max_items_per_thread];
     VectorT* vec_items = reinterpret_cast<VectorT*>(input_items.data());
 
-    constexpr int NUM_THREADS_PER_BLOCK = 0; // TODO: might be known at compile time
+    // constexpr int NUM_THREADS_PER_BLOCK = 0; // TODO: might be known at compile time
     _CCCL_PRAGMA_UNROLL_FULL()
     for (int vec_idx = 0; vec_idx < vectors_per_thread; ++vec_idx)
     {
-      vec_items[vec_idx] = d_vec_in[threadIdx.x]; // This will load 4 elements, so we have 4 vector loads. //
-                                                  // Calculate it, threadIdx.x is not right. Adjacent threads
-                                                  // much
+      vec_items[vec_idx] = d_vec_in[(vec_idx * blockDim.x) + threadIdx.x];
     }
 
     return input_items; // Compiler should optimize copy away, if not, pass array by reference or something.
@@ -185,20 +188,107 @@ _CCCL_DEVICE _CCCL_FORCEINLINE void process_tile(
   // auto processed_inputs = ::cuda::std::tuple{process_single_in(ins)...};
   auto processed_input_1 = process_single_in(in1);
   auto processed_input_2 = process_single_in(in2);
+  // auto processed_output  = process_single_in(out);
 
-  for (int j = 0; j < num_elem_per_thread; ++j)
+  for (int vec_idx = 0; vec_idx < vectors_per_thread; ++vec_idx)
   {
-    [[maybe_unused]] const int idx = j * block_dim + threadIdx.x;
-
-    // // Access the j-th element from each processed input array
-    // out[idx] = ::cuda::std::apply(
-    //   [&](const auto&... processed_arrays) {
-    //     return f(processed_arrays[j]...);
-    //   },
-    //   processed_inputs);
+    // const int vector_location = (vec_idx * blockDim.x * items_per_vec) + (threadIdx.x * items_per_vec)
+    //                           + (blockIdx.x * blockDim.x * items_per_vec * vectors_per_thread);
+    const int vector_location = threadIdx.x * items_per_vec + (vec_idx * blockDim.x * items_per_vec);
+    for (int i = 0; i < items_per_vec; i++)
+    {
+      const int vec_index = vector_location + i;
+      // if (vec_index < tile_size)
+      // {
+      out[vec_index] = f(THRUST_NS_QUALIFIER::raw_reference_cast(processed_input_1[i + (vec_idx * items_per_vec)]),
+                         processed_input_2[i + (vec_idx * items_per_vec)]);
+      // out[vec_index] =
+      //   f(THRUST_NS_QUALIFIER::raw_reference_cast(processed_input_1[vec_index]), processed_input_2[vec_index]);
+      // }
+    }
   }
 
+  // for (int j = 0; j < num_elem_per_thread; ++j)
+  // {
+  //   const int idx = j * block_dim + threadIdx.x;
+  //   if (idx < tile_size)
+  //   {
+  //     // we have to unwrap Thrust's proxy references here for backward compatibility (try zip_iterator.cu test)
+  //     out[idx] = f(THRUST_NS_QUALIFIER::raw_reference_cast(processed_input_1[idx]), processed_input_2[idx]);
+  //   }
+  // }
+
   // Try to vectorize stores after we vectorize loads (and benchmark + test)
+}
+
+// Original implementation for any other number of iterators
+template <typename PrefetchPolicy,
+          typename F,
+          typename Offset,
+          typename RandomAccessIteratorOut,
+          typename... RandomAccessIteratorIn>
+_CCCL_DEVICE _CCCL_FORCEINLINE void process_tile_dispatch(
+  ::cuda::std::true_type is_full_tile,
+  ::cuda::std::true_type can_vectorize,
+  Offset offset,
+  int num_elem_per_thread,
+  int block_dim,
+  int tile_size,
+  F f,
+  RandomAccessIteratorOut out,
+  RandomAccessIteratorIn... ins,
+  ::cuda::std::false_type /* is_exactly_two_iterators */)
+{
+  // Original implementation for any other number of iterators
+  // Here you'd put your legacy implementation that handles variable numbers of iterators
+  // ...
+
+  // ahendriksen: various unrolling yields less <1% gains at much higher compile-time cost
+  // bgruber: but A6000 and H100 show small gains without pragma
+  // _CCCL_PRAGMA_NOUNROLL()
+  for (int j = 0; j < num_elem_per_thread; ++j)
+  {
+    const int idx = j * block_dim + threadIdx.x;
+    if (idx < tile_size)
+    {
+      // we have to unwrap Thrust's proxy references here for backward compatibility (try zip_iterator.cu test)
+      out[idx] = f(THRUST_NS_QUALIFIER::raw_reference_cast(ins[idx])...);
+    }
+  }
+}
+
+// Primary template - dispatches to the appropriate implementation based on parameter count
+template <typename PrefetchPolicy,
+          typename F,
+          typename Offset,
+          typename RandomAccessIteratorOut,
+          typename... RandomAccessIteratorIn>
+_CCCL_DEVICE _CCCL_FORCEINLINE void process_tile(
+  ::cuda::std::true_type is_full_tile,
+  ::cuda::std::true_type can_vectorize,
+  Offset num_items,
+  int num_elem_per_thread,
+  Offset offset,
+  int block_dim,
+  int tile_size,
+  F f,
+  RandomAccessIteratorOut out,
+  RandomAccessIteratorIn... ins)
+{
+  // Dispatch to either the new implementation (exactly 2 iterators)
+  // or the original implementation (any other number of iterators)
+  process_tile_dispatch<PrefetchPolicy, F, Offset, RandomAccessIteratorOut, RandomAccessIteratorIn...>(
+    is_full_tile,
+    can_vectorize,
+    offset,
+    num_elem_per_thread,
+    block_dim,
+    tile_size,
+    f,
+    out,
+    ins...,
+    ::cuda::std::integral_constant < bool,
+    sizeof...(ins) == 2 > {});
 }
 
 template <typename PrefetchPolicy,
@@ -245,10 +335,10 @@ _CCCL_DEVICE void transform_kernel_impl(
   RandomAccessIteratorOut out,
   RandomAccessIteratorIn... ins)
 {
-  constexpr int block_dim = PrefetchPolicy::block_threads;
-  const int tile_stride   = block_dim * num_elem_per_thread;
-  const Offset offset     = static_cast<Offset>(blockIdx.x) * tile_stride;
-  const int tile_size     = static_cast<int>((::cuda::std::min)(num_items - offset, Offset{tile_stride}));
+  [[maybe_unused]] constexpr int block_dim = PrefetchPolicy::block_threads;
+  [[maybe_unused]] const int tile_stride   = block_dim * num_elem_per_thread;
+  [[maybe_unused]] const Offset offset     = static_cast<Offset>(blockIdx.x) * tile_stride;
+  [[maybe_unused]] const int tile_size = static_cast<int>((::cuda::std::min)(num_items - offset, Offset{tile_stride}));
 
   // move index and iterator domain to the block/thread index, to reduce arithmetic in the loops below
   {
@@ -258,46 +348,86 @@ _CCCL_DEVICE void transform_kernel_impl(
 
   (..., prefetch_tile<block_dim>(THRUST_NS_QUALIFIER::raw_reference_cast(ins), tile_size));
 
-  // auto process_tile = [&](auto full_tile, auto... ins2 /* nvcc fails to compile when just using the captured ins */)
-  // {
-  //   // ahendriksen: various unrolling yields less <1% gains at much higher compile-time cost
-  //   // bgruber: but A6000 and H100 show small gains without pragma
-  //   // _CCCL_PRAGMA_NOUNROLL()
-  //   for (int j = 0; j < num_elem_per_thread; ++j)
-  //   {
-  //     const int idx = j * block_dim + threadIdx.x;
-  //     if (full_tile || idx < tile_size)
-  //     {
-  //       // we have to unwrap Thrust's proxy references here for backward compatibility (try zip_iterator.cu test)
-  //       out[idx] = f(THRUST_NS_QUALIFIER::raw_reference_cast(ins2[idx])...);
-  //     }
-  //   }
-  // };
-  if (tile_stride == tile_size)
+  auto process_tile_old =
+    [&](auto full_tile, auto... ins2 /* nvcc fails to compile when just using the captured ins */) {
+      // ahendriksen: various unrolling yields less <1% gains at much higher compile-time cost
+      // bgruber: but A6000 and H100 show small gains without pragma
+      // _CCCL_PRAGMA_NOUNROLL()
+      for (int j = 0; j < num_elem_per_thread; ++j)
+      {
+        const int idx = j * block_dim + threadIdx.x;
+        if (full_tile || idx < tile_size)
+        {
+          // we have to unwrap Thrust's proxy references here for backward compatibility (try zip_iterator.cu test)
+          out[idx] = f(THRUST_NS_QUALIFIER::raw_reference_cast(ins2[idx])...);
+        }
+      }
+    };
+  if (true)
   {
-    process_tile<PrefetchPolicy, F, Offset, RandomAccessIteratorOut, RandomAccessIteratorIn...>(
-      ::cuda::std::true_type{},
-      ::cuda::std::true_type{},
-      num_items,
-      num_elem_per_thread,
-      block_dim,
-      tile_size,
-      f,
-      out,
-      ins...);
+    // Can vectorize according to the policy if the input iterator is a native
+    // pointer to a primitive type
+    static constexpr bool ATTEMPT_VECTORIZATION =
+      (::cuda::std::is_pointer_v<RandomAccessIteratorOut>) && is_primitive<it_value_t<RandomAccessIteratorOut>>::value;
+    // if constexpr (ATTEMPT_VECTORIZATION)
+    if constexpr (ATTEMPT_VECTORIZATION)
+    {
+      constexpr int items_per_vec = 4; // How many elements in single load instruction
+      if (num_elem_per_thread % items_per_vec == 0)
+      {
+        if (threadIdx.x + blockIdx.x == 0)
+        {
+          printf("WE CAN VECTORIZE %d\n", blockDim.x);
+        }
+        process_tile<PrefetchPolicy, F, Offset, RandomAccessIteratorOut, RandomAccessIteratorIn...>(
+          ::cuda::std::true_type{},
+          ::cuda::std::true_type{},
+          num_items,
+          num_elem_per_thread,
+          offset,
+          block_dim,
+          tile_size,
+          f,
+          out,
+          ins...);
+        // process_tile_old(::cuda::std::true_type{}, ins...);
+      }
+      else
+      {
+        if (threadIdx.x + blockIdx.x == 0)
+        {
+          printf("doing old %d\n", blockDim.x);
+        }
+        process_tile_old(::cuda::std::true_type{}, ins...);
+      }
+    }
+    else
+    {
+      if (threadIdx.x + blockIdx.x == 0)
+      {
+        printf("Cant vect %d\n", blockDim.x);
+      }
+      process_tile_old(::cuda::std::true_type{}, ins...);
+    }
   }
   else
   {
-    process_tile<PrefetchPolicy, F, Offset, RandomAccessIteratorOut, RandomAccessIteratorIn...>(
-      ::cuda::std::false_type{},
-      ::cuda::std::true_type{},
-      num_items,
-      num_elem_per_thread,
-      block_dim,
-      tile_size,
-      f,
-      out,
-      ins...);
+    if (threadIdx.x + blockIdx.x == 0)
+    {
+      printf("not full %d\n", blockDim.x);
+    }
+    process_tile_old(::cuda::std::false_type{}, ins...);
+
+    //   process_tile_old<PrefetchPolicy, F, Offset, RandomAccessIteratorOut, RandomAccessIteratorIn...>(
+    //     ::cuda::std::false_type{},
+    //     ::cuda::std::true_type{},
+    //     num_items,
+    //     num_elem_per_thread,
+    //     block_dim,
+    //     tile_size,
+    //     f,
+    //     out,
+    //     ins...);
   }
 }
 
