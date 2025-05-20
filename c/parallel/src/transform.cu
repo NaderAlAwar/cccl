@@ -169,6 +169,7 @@ struct transform_kernel_source
 {
   cccl_device_transform_build_result_t& build;
   cccl_type_enum type;
+  bool binary_transform;
 
   CUkernel TransformKernel() const
   {
@@ -188,7 +189,7 @@ struct transform_kernel_source
 
   bool CanVectorize()
   {
-    // Here we just need to check that the data type is a primitive
+    // Here we just need to check that the data type is a primitive and this is a binary transform
     return type != CCCL_STORAGE;
   }
 };
@@ -271,7 +272,7 @@ struct device_transform_policy {{
         "};\n"
       + input_iterator_src + "\n" + output_iterator_src
       + "\n"
-        "struct prefetch_policy_t {\n"
+        "struct vectorized_policy_t {\n"
         "  static constexpr int block_threads = "
       + std::to_string(policy.block_threads)
       + ";\n"
@@ -393,7 +394,7 @@ CUresult cccl_device_unary_transform(
                                                         num_items,
                                                         op,
                                                         stream,
-                                                        {build, d_out.value_type.type},
+                                                        {build, d_out.value_type.type, false},
                                                         cub::detail::CudaDriverLauncherFactory{cu_device, build.cc});
     if (cuda_error != cudaSuccess)
     {
@@ -513,7 +514,7 @@ struct device_transform_policy {{
         "};\n"
       + input1_iterator_src + "\n" + input2_iterator_src + "\n" + output_iterator_src
       + "\n"
-        "struct prefetch_policy_t {\n"
+        "struct vectorized_policy_t {\n"
         "  static constexpr int block_threads = "
       + std::to_string(policy.block_threads)
       + ";\n"
@@ -526,11 +527,16 @@ struct device_transform_policy {{
         "  static constexpr int max_items_per_thread = "
       + std::to_string(policy.max_items_per_thread)
       + ";\n"
-        "};\n"
+        "  static constexpr int items_per_thread_vectorized = "
+      + std::to_string(policy.items_per_thread_vectorized)
+      + "};\n"
+        "  static constexpr int vector_load_length = "
+      + std::to_string(policy.vector_load_length)
+      + "};\n"
         "struct device_transform_policy {\n"
         "  struct ActivePolicy {\n"
-        "    static constexpr auto algorithm = cub::detail::transform::Algorithm::prefetch;\n"
-        "    using algo_policy = prefetch_policy_t;\n"
+        "    static constexpr auto algorithm = cub::detail::transform::Algorithm::vectorized;\n"
+        "    using algo_policy = vectorized_policy_t;\n"
         "  };\n"
         "};\n";
     // + op_src + "\n";
@@ -623,7 +629,7 @@ CUresult cccl_device_binary_transform(
                num_items,
                op,
                stream,
-               {build},
+               {build, d_out.value_type.type, true},
                cub::detail::CudaDriverLauncherFactory{cu_device, build.cc});
 
     error = static_cast<CUresult>(exec_status);

@@ -91,7 +91,7 @@ struct TransformKernelSource<Offset,
   _CCCL_HOST_DEVICE static constexpr bool CanVectorize()
   {
     return (::cuda::std::is_pointer_v<RandomAccessIteratorsIn> && ...)
-        && is_primitive<it_value_t<RandomAccessIteratorOut>>::value;
+        && is_primitive<it_value_t<RandomAccessIteratorOut>>::value && (sizeof...(RandomAccessIteratorsIn) == 2);
   }
 };
 
