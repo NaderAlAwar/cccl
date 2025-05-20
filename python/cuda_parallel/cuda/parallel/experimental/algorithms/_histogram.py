@@ -53,14 +53,14 @@ class _Histogram:
         d_histogram: DeviceArrayLike,
         h_num_output_levels: np.ndarray,
         h_levels: np.ndarray,
-        num_samples: int,
     ):
         num_channels = 1
         num_active_channels = 1
         is_evenly_segmented = True
         self.num_rows = 1
         num_levels = h_num_output_levels[0]
-        row_stride_samples = num_samples
+        # row_stride_samples = num_samples
+        row_stride_samples = 0  # doesn't matter for build
 
         self.d_samples_cccl = cccl.to_cccl_iter(d_samples)
         self.d_histogram_cccl = cccl.to_cccl_iter(d_histogram)
@@ -134,8 +134,5 @@ def histogram(
     d_histogram: DeviceArrayLike,
     h_num_output_levels: np.ndarray,
     h_levels: np.ndarray,
-    num_samples: int,
 ):
-    return _Histogram(
-        d_samples, d_histogram, h_num_output_levels, h_levels, num_samples
-    )
+    return _Histogram(d_samples, d_histogram, h_num_output_levels, h_levels)
