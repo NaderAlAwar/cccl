@@ -151,7 +151,10 @@ _CCCL_DEVICE _CCCL_FORCEINLINE void process_tile_dispatch(
   /// Vector type of InputT for data movement
   using VectorT = typename CubVector<InputT, items_per_vec>::Type;
 
-  auto process_single_in = [&](auto input_ptr) {
+  ::cuda::std::array<InputT, 16> processed_input_1;
+  ::cuda::std::array<InputT, 16> processed_input_2;
+
+  auto process_single_in = [&](auto input_ptr, auto& input_items) {
     // const int lane_id = threadIdx.x;
     // offset assume to be blockIdx.x
 
@@ -161,7 +164,6 @@ _CCCL_DEVICE _CCCL_FORCEINLINE void process_tile_dispatch(
       reinterpret_cast<VectorT*>(d_in_unqualified));
 
     // Load items as vector items
-    ::cuda::std::array<InputT, 16> input_items;
     // InputT input_items[PrefetchPolicy::max_items_per_thread];
     VectorT* vec_items = reinterpret_cast<VectorT*>(input_items.data());
 
@@ -172,14 +174,14 @@ _CCCL_DEVICE _CCCL_FORCEINLINE void process_tile_dispatch(
       vec_items[vec_idx] = d_vec_in[(vec_idx * blockDim.x) + threadIdx.x];
     }
 
-    return input_items; // Compiler should optimize copy away, if not, pass array by reference or something.
+    // return input_items; // Compiler should optimize copy away, if not, pass array by reference or something.
   };
 
   // For now, throw away variadic part, hardoce two iterators. Then we can
   // generalize.
   // auto processed_inputs = ::cuda::std::tuple{process_single_in(ins)...};
-  auto processed_input_1 = process_single_in(in1);
-  auto processed_input_2 = process_single_in(in2);
+  process_single_in(in1, processed_input_1);
+  process_single_in(in2, processed_input_2);
   // auto processed_output  = process_single_in(out);
 
   for (int vec_idx = 0; vec_idx < vectors_per_thread; ++vec_idx)
