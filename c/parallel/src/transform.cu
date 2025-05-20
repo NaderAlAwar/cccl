@@ -57,6 +57,8 @@ struct transform_runtime_tuning_policy
   int items_per_thread_no_input;
   int min_items_per_thread;
   int max_items_per_thread;
+  int items_per_thread_vectorized;
+  int vector_load_length;
 
   // Note: when we extend transform to support UBLKCP, we may no longer
   // be able to keep this constexpr:
@@ -75,6 +77,11 @@ struct transform_runtime_tuning_policy
     return items_per_thread_no_input;
   }
 
+  int ItemsPerThreadVectorized()
+  {
+    return items_per_thread_no_input;
+  }
+
   int MinItemsPerThread()
   {
     return min_items_per_thread;
@@ -84,13 +91,18 @@ struct transform_runtime_tuning_policy
   {
     return max_items_per_thread;
   }
+
+  int VectorLoadLength()
+  {
+    return vector_load_length;
+  }
   static constexpr int min_bif = 1024 * 16;
 };
 
 transform_runtime_tuning_policy get_policy()
 {
   // return prefetch policy defaults:
-  return {256, 2, 1, 32};
+  return {256, 2, 1, 32, 16, 4};
 }
 
 template <typename StorageT>
@@ -156,6 +168,7 @@ struct dynamic_transform_policy_t
 struct transform_kernel_source
 {
   cccl_device_transform_build_result_t& build;
+  cccl_type_enum type;
 
   CUkernel TransformKernel() const
   {
@@ -171,6 +184,12 @@ struct transform_kernel_source
   constexpr It MakeIteratorKernelArg(It it)
   {
     return it;
+  }
+
+  bool CanVectorize()
+  {
+    // Here we just need to check that the data type is a primitive
+    return type != CCCL_STORAGE;
   }
 };
 
@@ -216,16 +235,18 @@ struct __align__({3}) output_storage_t {{
 }};
 {8}
 {9}
-struct prefetch_policy_t {{
+struct vectorized_policy_t {{
   static constexpr int block_threads = {4};
-  static constexpr int items_per_thread_no_input = {5};
-  static constexpr int min_items_per_thread      = {6};
-  static constexpr int max_items_per_thread      = {7};
+  static constexpr int items_per_thread_no_input        = {5};
+  static constexpr int min_items_per_thread             = {6};
+  static constexpr int max_items_per_thread             = {7};
+  static constexpr int items_per_thread_vectorized      = {8};
+  static constexpr int vector_load_length               = {9};
 }};
 struct device_transform_policy {{
   struct ActivePolicy {{
-    static constexpr auto algorithm = cub::detail::transform::Algorithm::prefetch;
-    using algo_policy = prefetch_policy_t;
+    static constexpr auto algorithm = cub::detail::transform::Algorithm::vectorized;
+    using algo_policy = vectorized_policy_t;
   }};
 }};
 {10}
@@ -263,11 +284,16 @@ struct device_transform_policy {{
         "  static constexpr int max_items_per_thread = "
       + std::to_string(policy.max_items_per_thread)
       + ";\n"
-        "};\n"
+        "  static constexpr int items_per_thread_vectorized = "
+      + std::to_string(policy.items_per_thread_vectorized)
+      + "};\n"
+        "  static constexpr int vector_load_length = "
+      + std::to_string(policy.vector_load_length)
+      + "};\n"
         "struct device_transform_policy {\n"
         "  struct ActivePolicy {\n"
-        "    static constexpr auto algorithm = cub::detail::transform::Algorithm::prefetch;\n"
-        "    using algo_policy = prefetch_policy_t;\n"
+        "    static constexpr auto algorithm = cub::detail::transform::Algorithm::vectorized;\n"
+        "    using algo_policy = vectorized_policy_t;\n"
         "  };\n"
         "};\n";
     // + op_src + "\n";
@@ -362,8 +388,13 @@ CUresult cccl_device_unary_transform(
       indirect_arg_t,
       transform::dynamic_transform_policy_t<&transform::get_policy>,
       transform::transform_kernel_source,
-      cub::detail::CudaDriverLauncherFactory>::
-      dispatch(d_in, d_out, num_items, op, stream, {build}, cub::detail::CudaDriverLauncherFactory{cu_device, build.cc});
+      cub::detail::CudaDriverLauncherFactory>::dispatch(d_in,
+                                                        d_out,
+                                                        num_items,
+                                                        op,
+                                                        stream,
+                                                        {build, d_out.value_type.type},
+                                                        cub::detail::CudaDriverLauncherFactory{cu_device, build.cc});
     if (cuda_error != cudaSuccess)
     {
       const char* errorString = cudaGetErrorString(cuda_error); // Get the error string
@@ -402,6 +433,7 @@ CUresult cccl_device_binary_transform_build(
 
   try
   {
+    std::cout << "cub path " << cub_path << '\n';
     const char* name = "test";
 
     const int cc                 = cc_major * 10 + cc_minor;
