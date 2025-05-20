@@ -351,7 +351,7 @@ struct dispatch_t<StableAddress,
   CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE cudaError_t
   invoke_vectorized_algorithm(::cuda::std::index_sequence<Is...>, ActivePolicy policy)
   {
-    if (policy.ItemsPerThread() % policy.VectorLoadLength() != 0 || !kernel_source.CanVectorize())
+    if (policy.ItemsPerThreadVectorized() % policy.VectorLoadLength() != 0)
     {
       return invoke_prefetch_algorithm(::cuda::std::index_sequence_for<RandomAccessIteratorsIn...>{}, policy);
     }
@@ -410,10 +410,9 @@ struct dispatch_t<StableAddress,
   CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE cudaError_t Invoke(ActivePolicyT active_policy = {})
   {
     auto wrapped_policy = detail::transform::MakeTransformPolicyWrapper(active_policy);
-    if constexpr (Algorithm::vectorized == wrapped_policy.GetAlgorithm())
+    if constexpr (Algorithm::vectorized == wrapped_policy.GetAlgorithm() && kernel_source.CanVectorize())
     {
-      return invoke_vectorized_algorithm<ActivePolicyT>(
-        ::cuda::std::index_sequence_for<RandomAccessIteratorsIn...>{}, wrapped_policy);
+      return invoke_vectorized_algorithm(::cuda::std::index_sequence_for<RandomAccessIteratorsIn...>{}, wrapped_policy);
     }
 #ifdef _CUB_HAS_TRANSFORM_UBLKCP
     else if constexpr (Algorithm::ublkcp == wrapped_policy.GetAlgorithm())

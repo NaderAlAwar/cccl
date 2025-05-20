@@ -64,7 +64,7 @@ struct transform_runtime_tuning_policy
   // be able to keep this constexpr:
   static constexpr cub::detail::transform::Algorithm GetAlgorithm()
   {
-    return cub::detail::transform::Algorithm::prefetch;
+    return cub::detail::transform::Algorithm::vectorized;
   }
 
   int BlockThreads()
@@ -79,7 +79,7 @@ struct transform_runtime_tuning_policy
 
   int ItemsPerThreadVectorized()
   {
-    return items_per_thread_no_input;
+    return items_per_thread_vectorized;
   }
 
   int MinItemsPerThread()
@@ -187,10 +187,11 @@ struct transform_kernel_source
     return it;
   }
 
-  bool CanVectorize()
+  static constexpr bool CanVectorize()
   {
     // Here we just need to check that the data type is a primitive and this is a binary transform
-    return type != CCCL_STORAGE;
+    // return type != CCCL_STORAGE;
+    return true;
   }
 };
 
@@ -434,7 +435,6 @@ CUresult cccl_device_binary_transform_build(
 
   try
   {
-    std::cout << "cub path " << cub_path << '\n';
     const char* name = "test";
 
     const int cc                 = cc_major * 10 + cc_minor;
@@ -529,10 +529,10 @@ struct device_transform_policy {{
       + ";\n"
         "  static constexpr int items_per_thread_vectorized = "
       + std::to_string(policy.items_per_thread_vectorized)
-      + "};\n"
+      + ";\n"
         "  static constexpr int vector_load_length = "
       + std::to_string(policy.vector_load_length)
-      + "};\n"
+      + ";};\n"
         "struct device_transform_policy {\n"
         "  struct ActivePolicy {\n"
         "    static constexpr auto algorithm = cub::detail::transform::Algorithm::vectorized;\n"

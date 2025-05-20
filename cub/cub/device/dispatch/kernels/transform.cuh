@@ -145,7 +145,6 @@ _CCCL_DEVICE _CCCL_FORCEINLINE void process_tile_dispatch(
   ::cuda::std::true_type /* is_exactly_two_iterators */)
 {
   using InputT                 = it_value_t<RandomAccessIteratorOut>;
-  constexpr int dtype_size     = sizeof(InputT); // for __half
   constexpr int items_per_vec  = VectorizedPolicy::vector_load_length; // How many elements in single load instruction
   const int vectors_per_thread = num_elem_per_thread / items_per_vec;
 
