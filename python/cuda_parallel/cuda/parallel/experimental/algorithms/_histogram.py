@@ -19,7 +19,6 @@ def make_cache_key(
     d_histogram: DeviceArrayLike,
     d_num_output_levels: DeviceArrayLike,
     h_levels: np.ndarray,
-    num_samples: int,
 ):
     d_samples_key = (
         d_samples.kind if isinstance(d_samples, IteratorBase) else get_dtype(d_samples)
@@ -34,7 +33,6 @@ def make_cache_key(
         d_histogram_key,
         d_num_output_levels_key,
         d_levels_key,
-        num_samples,
     )
 
 
