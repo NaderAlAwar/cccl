@@ -399,7 +399,6 @@ struct dispatch_t<StableAddress,
       launcher_factory(grid_dim, block_dim, 0, stream)
         .doit(kernel_source.TransformKernel(),
               num_items,
-              items_per_thread,
               op,
               out,
               kernel_source.MakeIteratorKernelArg(
