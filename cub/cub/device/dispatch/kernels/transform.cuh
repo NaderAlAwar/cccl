@@ -340,6 +340,7 @@ template <typename VectorizedPolicy,
 _CCCL_DEVICE void transform_kernel_impl(
   ::cuda::std::integral_constant<Algorithm, Algorithm::vectorized>,
   Offset num_items,
+  int /*num_elem_per_thread*/,
   F f,
   RandomAccessIteratorOut out,
   RandomAccessIteratorIn... ins)
