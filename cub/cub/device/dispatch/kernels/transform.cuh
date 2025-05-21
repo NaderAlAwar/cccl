@@ -376,23 +376,8 @@ _CCCL_DEVICE void transform_kernel_impl(
     out += offset;
   }
 
+  // Disabling prefetching is better on the A100
   // (..., prefetch_tile<block_dim>(THRUST_NS_QUALIFIER::raw_reference_cast(ins), tile_size));
-
-  auto process_tile_old =
-    [&](auto full_tile, auto... ins2 /* nvcc fails to compile when just using the captured ins */) {
-      // ahendriksen: various unrolling yields less <1% gains at much higher compile-time cost
-      // bgruber: but A6000 and H100 show small gains without pragma
-      // _CCCL_PRAGMA_NOUNROLL()
-      for (int j = 0; j < num_elem_per_thread; ++j)
-      {
-        const int idx = j * block_dim + threadIdx.x;
-        if (full_tile || idx < tile_size)
-        {
-          // we have to unwrap Thrust's proxy references here for backward compatibility (try zip_iterator.cu test)
-          out[idx] = f(THRUST_NS_QUALIFIER::raw_reference_cast(ins2[idx])...);
-        }
-      }
-    };
 
   if (num_valid == tile_size)
   {
@@ -410,6 +395,22 @@ _CCCL_DEVICE void transform_kernel_impl(
   }
   else
   {
+    auto process_tile_old =
+      [&](auto full_tile, auto... ins2 /* nvcc fails to compile when just using the captured ins */) {
+        // ahendriksen: various unrolling yields less <1% gains at much higher compile-time cost
+        // bgruber: but A6000 and H100 show small gains without pragma
+        // _CCCL_PRAGMA_NOUNROLL()
+        for (int j = 0; j < num_elem_per_thread; ++j)
+        {
+          const int idx = j * block_dim + threadIdx.x;
+          if (full_tile || idx < tile_size)
+          {
+            // we have to unwrap Thrust's proxy references here for backward compatibility (try zip_iterator.cu test)
+            out[idx] = f(THRUST_NS_QUALIFIER::raw_reference_cast(ins2[idx])...);
+          }
+        }
+      };
+
     process_tile_old(::cuda::std::true_type{}, ins...);
   }
 }
