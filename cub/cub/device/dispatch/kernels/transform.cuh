@@ -144,15 +144,17 @@ _CCCL_DEVICE _CCCL_FORCEINLINE void process_tile_dispatch(
   RandomAccessIteratorIn2 in2,
   ::cuda::std::true_type /* is_exactly_two_iterators */)
 {
-  using InputT                = it_value_t<RandomAccessIteratorOut>;
-  constexpr int items_per_vec = VectorizedPolicy::vector_load_length; // How many elements in single load instruction
-  constexpr int vectors_per_thread = VectorizedPolicy::items_per_thread_vectorized / items_per_vec;
+  using InputT                   = it_value_t<RandomAccessIteratorOut>;
+  constexpr int items_per_vec    = VectorizedPolicy::vector_load_length; // How many elements in single load instruction
+  constexpr int items_per_thread = VectorizedPolicy::items_per_thread_vectorized;
+  constexpr int vectors_per_thread = items_per_thread / items_per_vec;
   /// Vector type of InputT for data movement
   // using VectorT = typename CubVector<InputT, items_per_vec>::Type;
   using VectorT = uint64_t;
 
-  ::cuda::std::array<InputT, 16> processed_input_1;
-  ::cuda::std::array<InputT, 16> processed_input_2;
+  ::cuda::std::array<InputT, items_per_thread> processed_input_1;
+  ::cuda::std::array<InputT, items_per_thread> processed_input_2;
+  ::cuda::std::array<InputT, items_per_thread> processed_output;
 
   auto process_single_in = [&](auto input_ptr, auto& input_items) {
     // tile size has to be multiple of items per vector
@@ -179,18 +181,21 @@ _CCCL_DEVICE _CCCL_FORCEINLINE void process_tile_dispatch(
   process_single_in(in1, processed_input_1);
   process_single_in(in2, processed_input_2);
 
+  _CCCL_PRAGMA_UNROLL_FULL()
+  for (int i = 0; i < items_per_thread; ++i)
+  {
+    processed_output[i] = f(processed_input_1[i], processed_input_2[i]);
+  }
+
+  auto vec_items                 = reinterpret_cast<VectorT*>(processed_output.data());
+  VectorT* d_out_unqualified_vec = reinterpret_cast<VectorT*>(const_cast<InputT*>(out));
+
+  _CCCL_PRAGMA_UNROLL_FULL()
   for (int vec_idx = 0; vec_idx < vectors_per_thread; ++vec_idx)
   {
-    const int out_vector_location =
-      threadIdx.x * items_per_vec + (vec_idx * VectorizedPolicy::block_threads * items_per_vec);
-    const int in_vector_location = vec_idx * items_per_vec;
-    for (int i = 0; i < items_per_vec; i++)
-    {
-      out[out_vector_location + i] =
-        f(processed_input_1[i + in_vector_location], processed_input_2[i + in_vector_location]);
-    }
+    // need to see LDG.64 (4 elements)
+    d_out_unqualified_vec[(vec_idx * VectorizedPolicy::block_threads) + threadIdx.x] = vec_items[vec_idx];
   }
-  // Try to vectorize stores after we vectorize loads (and benchmark + test)
 }
 
 // Original implementation for any other number of iterators
