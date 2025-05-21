@@ -135,7 +135,7 @@ _CCCL_DEVICE _CCCL_FORCEINLINE void process_tile_dispatch(
   ::cuda::std::true_type is_full_tile,
   ::cuda::std::true_type can_vectorize,
   Offset offset,
-  int num_elem_per_thread,
+  [[maybe_unused]] int num_elem_per_thread,
   int block_dim,
   int tile_size,
   F f,
@@ -144,12 +144,12 @@ _CCCL_DEVICE _CCCL_FORCEINLINE void process_tile_dispatch(
   RandomAccessIteratorIn2 in2,
   ::cuda::std::true_type /* is_exactly_two_iterators */)
 {
-  using InputT                 = it_value_t<RandomAccessIteratorOut>;
-  constexpr int items_per_vec  = VectorizedPolicy::vector_load_length; // How many elements in single load instruction
-  const int vectors_per_thread = num_elem_per_thread / items_per_vec;
-
+  using InputT                = it_value_t<RandomAccessIteratorOut>;
+  constexpr int items_per_vec = VectorizedPolicy::vector_load_length; // How many elements in single load instruction
+  constexpr int vectors_per_thread = VectorizedPolicy::items_per_thread_vectorized / items_per_vec;
   /// Vector type of InputT for data movement
-  using VectorT = typename CubVector<InputT, items_per_vec>::Type;
+  // using VectorT = typename CubVector<InputT, items_per_vec>::Type;
+  using VectorT = uint64_t;
 
   ::cuda::std::array<InputT, 16> processed_input_1;
   ::cuda::std::array<InputT, 16> processed_input_2;
@@ -158,10 +158,13 @@ _CCCL_DEVICE _CCCL_FORCEINLINE void process_tile_dispatch(
     // const int lane_id = threadIdx.x;
     // offset assume to be blockIdx.x
 
+    // tile size has to be multiple of items per vector
+
     // Fabricate a vectorized input iterator
-    auto d_in_unqualified = const_cast<InputT*>(input_ptr);
-    CacheModifiedInputIterator<cub::CacheLoadModifier::LOAD_DEFAULT, VectorT, Offset> d_vec_in(
-      reinterpret_cast<VectorT*>(d_in_unqualified));
+    auto d_in_unqualified     = const_cast<InputT*>(input_ptr);
+    auto d_in_unqualified_vec = reinterpret_cast<VectorT*>(d_in_unqualified);
+    // CacheModifiedInputIterator<cub::CacheLoadModifier::LOAD_DEFAULT, VectorT, Offset> d_vec_in(
+    //   reinterpret_cast<VectorT*>(d_in_unqualified));
 
     // Load items as vector items
     // InputT input_items[PrefetchPolicy::max_items_per_thread];
@@ -171,7 +174,8 @@ _CCCL_DEVICE _CCCL_FORCEINLINE void process_tile_dispatch(
     _CCCL_PRAGMA_UNROLL_FULL()
     for (int vec_idx = 0; vec_idx < vectors_per_thread; ++vec_idx)
     {
-      vec_items[vec_idx] = d_vec_in[(vec_idx * blockDim.x) + threadIdx.x];
+      vec_items[vec_idx] = d_in_unqualified_vec[(vec_idx * blockDim.x) + threadIdx.x]; // need to see LDG.64 (4
+                                                                                       // elements)
     }
 
     // return input_items; // Compiler should optimize copy away, if not, pass array by reference or something.
@@ -190,8 +194,8 @@ _CCCL_DEVICE _CCCL_FORCEINLINE void process_tile_dispatch(
     for (int i = 0; i < items_per_vec; i++)
     {
       const int vec_index = vector_location + i;
-      out[vec_index]      = f(THRUST_NS_QUALIFIER::raw_reference_cast(processed_input_1[i + (vec_idx * items_per_vec)]),
-                         processed_input_2[i + (vec_idx * items_per_vec)]);
+      out[vec_index] =
+        f(processed_input_1[i + (vec_idx * items_per_vec)], processed_input_2[i + (vec_idx * items_per_vec)]);
     }
   }
   // Try to vectorize stores after we vectorize loads (and benchmark + test)
@@ -365,9 +369,9 @@ _CCCL_DEVICE void transform_kernel_impl(
   RandomAccessIteratorIn... ins)
 {
   constexpr int block_dim = VectorizedPolicy::block_threads;
-  const int tile_stride   = block_dim * num_elem_per_thread;
-  const Offset offset     = static_cast<Offset>(blockIdx.x) * tile_stride;
-  const int tile_size     = static_cast<int>((::cuda::std::min)(num_items - offset, Offset{tile_stride}));
+  const int tile_size     = block_dim * num_elem_per_thread;
+  const Offset offset     = static_cast<Offset>(blockIdx.x) * tile_size;
+  const int num_valid     = static_cast<int>((::cuda::std::min)(num_items - offset, Offset{tile_size}));
 
   // move index and iterator domain to the block/thread index, to reduce arithmetic in the loops below
   {
@@ -393,7 +397,7 @@ _CCCL_DEVICE void transform_kernel_impl(
       }
     };
 
-  if (tile_stride == tile_size)
+  if (num_valid == tile_size)
   {
     process_tile<VectorizedPolicy, F, Offset, RandomAccessIteratorOut, RandomAccessIteratorIn...>(
       ::cuda::std::true_type{},
@@ -402,7 +406,7 @@ _CCCL_DEVICE void transform_kernel_impl(
       num_elem_per_thread,
       offset,
       block_dim,
-      tile_size,
+      num_valid,
       f,
       out,
       ins...);
