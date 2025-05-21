@@ -268,7 +268,7 @@ _CCCL_DEVICE void transform_kernel_impl(
   if (num_valid == tile_size)
   {
     process_tile_vectorized<VectorizedPolicy, F, RandomAccessIteratorOut, RandomAccessIteratorIn...>(
-      ::cuda::std::true_type{}, ::cuda::std::true_type{}, num_valid, f, out, ins...);
+      num_valid, f, out, ins...);
   }
   else
   {
