@@ -73,66 +73,13 @@ _CCCL_DEVICE _CCCL_FORCEINLINE void prefetch_tile(It begin, int tile_size)
   }
 }
 
-template <typename PrefetchPolicy,
-          typename F,
-          typename Offset,
-          typename RandomAccessIteratorOut,
-          typename... RandomAccessIteratorIn>
-_CCCL_DEVICE _CCCL_FORCEINLINE void process_tile(
-  ::cuda::std::true_type /*is_full_tile*/,
-  ::cuda::std::false_type /*can_vectorize*/,
-  Offset /*offset*/,
-  int num_elem_per_thread,
-  int block_dim,
-  int /*tile_size*/,
-  F f,
-  RandomAccessIteratorOut out,
-  RandomAccessIteratorIn... ins)
-{
-  for (int j = 0; j < num_elem_per_thread; ++j)
-  {
-    const int idx = j * block_dim + threadIdx.x;
-    // we have to unwrap Thrust's proxy references here for backward compatibility (try zip_iterator.cu test)
-    out[idx] = f(THRUST_NS_QUALIFIER::raw_reference_cast(ins[idx])...);
-  }
-}
-
-template <typename PrefetchPolicy,
-          typename F,
-          typename Offset,
-          typename RandomAccessIteratorOut,
-          typename... RandomAccessIteratorIn>
-_CCCL_DEVICE _CCCL_FORCEINLINE void process_tile(
-  ::cuda::std::false_type /*is_full_tile*/,
-  ::cuda::std::false_type /*can_vectorize*/,
-  Offset /*offset*/,
-  int num_elem_per_thread,
-  int block_dim,
-  int tile_size,
-  F f,
-  RandomAccessIteratorOut out,
-  RandomAccessIteratorIn... ins)
-{
-  for (int j = 0; j < num_elem_per_thread; ++j)
-  {
-    const int idx = j * block_dim + threadIdx.x;
-    if (idx < tile_size)
-    {
-      // we have to unwrap Thrust's proxy references here for backward compatibility (try zip_iterator.cu test)
-      out[idx] = f(THRUST_NS_QUALIFIER::raw_reference_cast(ins[idx])...);
-    }
-  }
-}
-
 // New implementation for exactly 2 iterators
 template <typename VectorizedPolicy,
           typename F,
           typename RandomAccessIteratorOut,
           typename RandomAccessIteratorIn1,
           typename RandomAccessIteratorIn2>
-_CCCL_DEVICE _CCCL_FORCEINLINE void process_tile_dispatch(
-  ::cuda::std::true_type is_full_tile,
-  ::cuda::std::true_type can_vectorize,
+_CCCL_DEVICE _CCCL_FORCEINLINE void process_tile_vectorized_dispatch(
   int /*tile_size*/,
   F f,
   RandomAccessIteratorOut out,
@@ -196,9 +143,7 @@ _CCCL_DEVICE _CCCL_FORCEINLINE void process_tile_dispatch(
 
 // Original implementation for any other number of iterators
 template <typename VectorizedPolicy, typename F, typename RandomAccessIteratorOut, typename... RandomAccessIteratorIn>
-_CCCL_DEVICE _CCCL_FORCEINLINE void process_tile_dispatch(
-  ::cuda::std::true_type is_full_tile,
-  ::cuda::std::true_type can_vectorize,
+_CCCL_DEVICE _CCCL_FORCEINLINE void process_tile_vectorized_dispatch(
   int tile_size,
   F f,
   RandomAccessIteratorOut out,
@@ -227,53 +172,13 @@ _CCCL_DEVICE _CCCL_FORCEINLINE void process_tile_dispatch(
 
 // Primary template - dispatches to the appropriate implementation based on parameter count
 template <typename PrefetchPolicy, typename F, typename RandomAccessIteratorOut, typename... RandomAccessIteratorIn>
-_CCCL_DEVICE _CCCL_FORCEINLINE void process_tile(
-  ::cuda::std::true_type is_full_tile,
-  ::cuda::std::true_type can_vectorize,
-  int tile_size,
-  F f,
-  RandomAccessIteratorOut out,
-  RandomAccessIteratorIn... ins)
+_CCCL_DEVICE _CCCL_FORCEINLINE void
+process_tile_vectorized(int tile_size, F f, RandomAccessIteratorOut out, RandomAccessIteratorIn... ins)
 {
   // Dispatch to either the new implementation (exactly 2 iterators)
   // or the original implementation (any other number of iterators)
-  process_tile_dispatch<PrefetchPolicy, F, RandomAccessIteratorOut, RandomAccessIteratorIn...>(
-    is_full_tile,
-    can_vectorize,
-    tile_size,
-    f,
-    out,
-    ins...,
-    ::cuda::std::integral_constant < bool,
-    sizeof...(ins) == 2 > {});
-}
-
-template <typename PrefetchPolicy,
-          typename F,
-          typename Offset,
-          typename RandomAccessIteratorOut,
-          typename... RandomAccessIteratorIn>
-_CCCL_DEVICE _CCCL_FORCEINLINE void process_tile(
-  ::cuda::std::false_type /*is_full_tile*/,
-  ::cuda::std::true_type /*can_vectorize*/,
-  Offset offset,
-  int num_elem_per_thread,
-  int block_dim,
-  int tile_size,
-  F f,
-  RandomAccessIteratorOut out,
-  RandomAccessIteratorIn... ins)
-{
-  // Not vectorized for now
-  for (int j = 0; j < num_elem_per_thread; ++j)
-  {
-    const int idx = j * block_dim + threadIdx.x;
-    if (idx < tile_size)
-    {
-      // we have to unwrap Thrust's proxy references here for backward compatibility (try zip_iterator.cu test)
-      out[idx] = f(THRUST_NS_QUALIFIER::raw_reference_cast(ins[idx])...);
-    }
-  }
+  process_tile_vectorized_dispatch<PrefetchPolicy, F, RandomAccessIteratorOut, RandomAccessIteratorIn...>(
+    tile_size, f, out, ins..., ::cuda::std::integral_constant < bool, sizeof...(ins) == 2 > {});
 }
 
 // This kernel guarantees that objects passed as arguments to the user-provided transformation function f reside in
@@ -362,7 +267,7 @@ _CCCL_DEVICE void transform_kernel_impl(
 
   if (num_valid == tile_size)
   {
-    process_tile<VectorizedPolicy, F, RandomAccessIteratorOut, RandomAccessIteratorIn...>(
+    process_tile_vectorized<VectorizedPolicy, F, RandomAccessIteratorOut, RandomAccessIteratorIn...>(
       ::cuda::std::true_type{}, ::cuda::std::true_type{}, num_valid, f, out, ins...);
   }
   else
