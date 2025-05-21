@@ -155,16 +155,11 @@ _CCCL_DEVICE _CCCL_FORCEINLINE void process_tile_dispatch(
   ::cuda::std::array<InputT, 16> processed_input_2;
 
   auto process_single_in = [&](auto input_ptr, auto& input_items) {
-    // const int lane_id = threadIdx.x;
-    // offset assume to be blockIdx.x
-
     // tile size has to be multiple of items per vector
 
     // Fabricate a vectorized input iterator
     auto d_in_unqualified     = const_cast<InputT*>(input_ptr);
     auto d_in_unqualified_vec = reinterpret_cast<VectorT*>(d_in_unqualified);
-    // CacheModifiedInputIterator<cub::CacheLoadModifier::LOAD_DEFAULT, VectorT, Offset> d_vec_in(
-    //   reinterpret_cast<VectorT*>(d_in_unqualified));
 
     // Load items as vector items
     // InputT input_items[PrefetchPolicy::max_items_per_thread];
@@ -174,28 +169,25 @@ _CCCL_DEVICE _CCCL_FORCEINLINE void process_tile_dispatch(
     _CCCL_PRAGMA_UNROLL_FULL()
     for (int vec_idx = 0; vec_idx < vectors_per_thread; ++vec_idx)
     {
-      vec_items[vec_idx] = d_in_unqualified_vec[(vec_idx * blockDim.x) + threadIdx.x]; // need to see LDG.64 (4
-                                                                                       // elements)
+      // need to see LDG.64 (4 elements)
+      vec_items[vec_idx] = d_in_unqualified_vec[(vec_idx * VectorizedPolicy::block_threads) + threadIdx.x];
     }
-
-    // return input_items; // Compiler should optimize copy away, if not, pass array by reference or something.
   };
 
   // For now, throw away variadic part, hardoce two iterators. Then we can
   // generalize.
-  // auto processed_inputs = ::cuda::std::tuple{process_single_in(ins)...};
   process_single_in(in1, processed_input_1);
   process_single_in(in2, processed_input_2);
-  // auto processed_output  = process_single_in(out);
 
   for (int vec_idx = 0; vec_idx < vectors_per_thread; ++vec_idx)
   {
-    const int vector_location = threadIdx.x * items_per_vec + (vec_idx * blockDim.x * items_per_vec);
+    const int out_vector_location =
+      threadIdx.x * items_per_vec + (vec_idx * VectorizedPolicy::block_threads * items_per_vec);
+    const int in_vector_location = vec_idx * items_per_vec;
     for (int i = 0; i < items_per_vec; i++)
     {
-      const int vec_index = vector_location + i;
-      out[vec_index] =
-        f(processed_input_1[i + (vec_idx * items_per_vec)], processed_input_2[i + (vec_idx * items_per_vec)]);
+      out[out_vector_location + i] =
+        f(processed_input_1[i + in_vector_location], processed_input_2[i + in_vector_location]);
     }
   }
   // Try to vectorize stores after we vectorize loads (and benchmark + test)
