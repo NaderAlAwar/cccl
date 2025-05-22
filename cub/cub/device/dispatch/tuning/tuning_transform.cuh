@@ -76,11 +76,11 @@ struct prefetch_policy_t
 {
   static constexpr int block_threads = BlockThreads;
   // items per tile are determined at runtime. these (inclusive) bounds allow overriding that value via a tuning policy
-  static constexpr int items_per_thread_no_input = 2; // when there are no input iterators, the kernel is just filling
-  static constexpr int min_items_per_thread      = 1;
-  static constexpr int max_items_per_thread      = 32;
-  static constexpr int items_per_thread          = 1;
-  static constexpr int vector_load_length        = 1;
+  static constexpr int items_per_thread_no_input   = 2; // when there are no input iterators, the kernel is just filling
+  static constexpr int min_items_per_thread        = 1;
+  static constexpr int max_items_per_thread        = 32;
+  static constexpr int items_per_thread_vectorized = 1;
+  static constexpr int vector_load_length          = 1;
 };
 
 template <int BlockThreads>
@@ -97,11 +97,11 @@ struct vectorized_policy_t
 {
   static constexpr int block_threads = BlockThreads;
   // items per tile are determined at runtime. these (inclusive) bounds allow overriding that value via a tuning policy
-  static constexpr int items_per_thread_no_input = 2; // when there are no input iterators, the kernel is just filling
-  static constexpr int min_items_per_thread      = 1;
-  static constexpr int max_items_per_thread      = 32;
-  static constexpr int items_per_thread          = 16;
-  static constexpr int vector_load_length        = 4;
+  static constexpr int items_per_thread_no_input   = 2; // when there are no input iterators, the kernel is just filling
+  static constexpr int min_items_per_thread        = 1;
+  static constexpr int max_items_per_thread        = 32;
+  static constexpr int items_per_thread_vectorized = 16;
+  static constexpr int vector_load_length          = 4;
 };
 
 // mult must be a power of 2
