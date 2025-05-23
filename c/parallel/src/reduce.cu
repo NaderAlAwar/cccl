@@ -56,6 +56,15 @@ struct reduce_runtime_tuning_policy
   {
     return *this;
   }
+  reduce_runtime_tuning_policy LastBlock() const
+  {
+    return *this;
+  }
+
+  static constexpr cub::detail::reduce::Algorithm GetAlgorithm()
+  {
+    return cub::detail::reduce::Algorithm::last_block;
+  }
 
   int ItemsPerThread() const
   {
@@ -187,6 +196,43 @@ std::string get_device_reduce_kernel_name(
   return result;
 }
 
+std::string get_device_reduce_last_block_kernel_name(
+  std::string_view input_iterator_t, std::string_view output_iterator_t, std::string_view accum_t, cccl_value_t init)
+{
+  std::string chained_policy_t;
+  check(nvrtcGetTypeName<device_reduce_policy>(&chained_policy_t));
+
+  std::string offset_t;
+  check(nvrtcGetTypeName<OffsetT>(&offset_t));
+
+  std::string transform_op_t;
+  check(nvrtcGetTypeName<cuda::std::__identity>(&transform_op_t));
+
+  const std::string init_t = cccl_type_enum_to_name(init.type.type);
+
+  std::string result = "cub::detail::reduce::DeviceReduceLastBlockKernel<";
+  result += chained_policy_t;
+  result += ", ";
+  result += input_iterator_t;
+  result += ", ";
+  result += output_iterator_t;
+  result += ", ";
+  result += offset_t;
+  result += ", ";
+  // result += reduction_op_t;
+  result += "::cuda::std::plus<>";
+  result += ", ";
+  result += init_t;
+  result += ", ";
+  result += accum_t;
+  result += ", ";
+  result += transform_op_t;
+  result += ", ";
+  result += "int";
+  result += ">";
+  return result;
+}
+
 template <auto* GetPolicy>
 struct dynamic_reduce_policy_t
 {
@@ -220,6 +266,10 @@ struct reduce_kernel_source
   CUkernel ReductionKernel() const
   {
     return build.reduction_kernel;
+  }
+  CUkernel LastBlockKernel() const
+  {
+    return build.last_block_kernel;
   }
 };
 } // namespace reduce
@@ -280,6 +330,8 @@ CUresult cccl_device_reduce_build(
     struct ActivePolicy {
     using ReducePolicy = agent_policy_t;
     using SingleTilePolicy = agent_policy_t;
+    using ReduceLastBlockPolicy = agent_policy_t;
+    using ReduceAtomicPolicy = agent_policy_t;
     };
   };
   {6}
@@ -305,9 +357,12 @@ CUresult cccl_device_reduce_build(
     std::string single_tile_second_kernel_name = reduce::get_single_tile_kernel_name(
       cccl_type_enum_to_name(accum_t.type, true), output_iterator_name, op_name, init, accum_cpp, true);
     std::string reduction_kernel_name = reduce::get_device_reduce_kernel_name(op_name, input_iterator_name, accum_cpp);
+    std::string reduction_last_block_kernel_name =
+      reduce::get_device_reduce_last_block_kernel_name(input_iterator_name, output_iterator_name, accum_cpp, init);
     std::string single_tile_kernel_lowered_name;
     std::string single_tile_second_kernel_lowered_name;
     std::string reduction_kernel_lowered_name;
+    std::string reduction_last_block_kernel_lowered_name;
 
     const std::string arch = "-arch=sm_" + std::to_string(cc_major) + std::to_string(cc_minor);
 
@@ -340,10 +395,12 @@ CUresult cccl_device_reduce_build(
         .add_expression({single_tile_kernel_name})
         .add_expression({single_tile_second_kernel_name})
         .add_expression({reduction_kernel_name})
+        .add_expression({reduction_last_block_kernel_name})
         .compile_program({args, num_args})
         .get_name({single_tile_kernel_name, single_tile_kernel_lowered_name})
         .get_name({single_tile_second_kernel_name, single_tile_second_kernel_lowered_name})
         .get_name({reduction_kernel_name, reduction_kernel_lowered_name})
+        .get_name({reduction_last_block_kernel_name, reduction_last_block_kernel_lowered_name})
         .cleanup_program()
         .add_link_list(ltoir_list)
         .finalize_program(num_lto_args, lopts);
@@ -353,6 +410,8 @@ CUresult cccl_device_reduce_build(
     check(cuLibraryGetKernel(
       &build->single_tile_second_kernel, build->library, single_tile_second_kernel_lowered_name.c_str()));
     check(cuLibraryGetKernel(&build->reduction_kernel, build->library, reduction_kernel_lowered_name.c_str()));
+    check(
+      cuLibraryGetKernel(&build->last_block_kernel, build->library, reduction_last_block_kernel_lowered_name.c_str()));
 
     build->cc               = cc;
     build->cubin            = (void*) result.data.release();
@@ -390,7 +449,7 @@ CUresult cccl_device_reduce(
     CUdevice cu_device;
     check(cuCtxGetDevice(&cu_device));
 
-    auto exec_status = cub::DispatchReduce<
+    auto exec_status = cub::detail::reduce::DispatchAlternativeReduce<
       indirect_arg_t, // InputIteratorT
       indirect_arg_t, // OutputIteratorT
       ::cuda::std::size_t, // OffsetT

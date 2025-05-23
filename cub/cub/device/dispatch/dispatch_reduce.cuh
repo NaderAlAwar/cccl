@@ -67,6 +67,8 @@ CUB_NAMESPACE_BEGIN
 namespace detail::reduce
 {
 
+using CounterT = int;
+
 template <typename MaxPolicyT,
           typename InputIteratorT,
           typename OutputIteratorT,
@@ -100,6 +102,19 @@ struct DeviceReduceKernelSource
                                  ReductionOpT,
                                  InitT,
                                  AccumT>)
+
+  CUB_DEFINE_KERNEL_GETTER(
+    LastBlockKernel,
+    DeviceReduceLastBlockKernel<
+      MaxPolicyT,
+      InputIteratorT,
+      OutputIteratorT,
+      OffsetT,
+      ReductionOpT,
+      InitT,
+      AccumT,
+      TransformOpT,
+      CounterT>);
 
   CUB_RUNTIME_FUNCTION static constexpr size_t AccumSize()
   {
@@ -993,6 +1008,358 @@ struct DispatchSegmentedReduce
     return error;
   }
 };
+
+namespace detail::reduce
+{
+/**
+ * @brief Utility class for dispatching the appropriately-tuned kernels for
+ *        device-wide reduction
+ *
+ * @tparam InputIteratorT
+ *   Random-access input iterator type for reading input items @iterator
+ *
+ * @tparam OutputIteratorT
+ *   Output iterator type for recording the reduced aggregate @iterator
+ *
+ * @tparam OffsetT
+ *   Signed integer type for global offsets
+ *
+ * @tparam ReductionOpT
+ *   Binary reduction functor type having member
+ *   `auto operator()(const T &a, const U &b)`
+ *
+ * @tparam InitT
+ *   Initial value type
+ */
+template <typename InputIteratorT,
+          typename OutputIteratorT,
+          typename OffsetT,
+          typename ReductionOpT,
+          typename InitT  = cub::detail::non_void_value_t<OutputIteratorT, cub::detail::it_value_t<InputIteratorT>>,
+          typename AccumT = ::cuda::std::__accumulator_t<ReductionOpT, cub::detail::it_value_t<InputIteratorT>, InitT>,
+          typename TransformOpT = ::cuda::std::__identity,
+          typename PolicyHub    = detail::reduce::policy_hub<AccumT, OffsetT, ReductionOpT>,
+          typename KernelSource = detail::reduce::DeviceReduceKernelSource<
+            typename PolicyHub::MaxPolicy,
+            InputIteratorT,
+            OutputIteratorT,
+            OffsetT,
+            ReductionOpT,
+            InitT,
+            AccumT,
+            TransformOpT>,
+          typename KernelLauncherFactory = detail::TripleChevronFactory>
+struct DispatchAlternativeReduce
+{
+  //---------------------------------------------------------------------------
+  // Problem state
+  //---------------------------------------------------------------------------
+
+  /// Device-accessible allocation of temporary storage. When `nullptr`, the
+  /// required allocation size is written to `temp_storage_bytes` and no work
+  /// is done.
+  void* d_temp_storage;
+
+  /// Reference to size in bytes of `d_temp_storage` allocation
+  size_t& temp_storage_bytes;
+
+  /// Pointer to the input sequence of data items
+  InputIteratorT d_in;
+
+  /// Pointer to the output aggregate
+  OutputIteratorT d_out;
+
+  /// Total number of input items (i.e., length of `d_in`)
+  OffsetT num_items;
+
+  /// Binary reduction functor
+  ReductionOpT reduction_op;
+
+  /// The initial value of the reduction
+  InitT init;
+
+  /// CUDA stream to launch kernels within. Default is stream<sub>0</sub>.
+  cudaStream_t stream;
+
+  int ptx_version;
+
+  TransformOpT transform_op;
+
+  KernelSource kernel_source;
+
+  KernelLauncherFactory launcher_factory;
+
+  //---------------------------------------------------------------------------
+  // Constructor
+  //---------------------------------------------------------------------------
+
+  /// Constructor
+  CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE DispatchAlternativeReduce(
+    void* d_temp_storage,
+    size_t& temp_storage_bytes,
+    InputIteratorT d_in,
+    OutputIteratorT d_out,
+    OffsetT num_items,
+    ReductionOpT reduction_op,
+    InitT init,
+    cudaStream_t stream,
+    int ptx_version,
+    TransformOpT transform_op              = {},
+    KernelSource kernel_source             = {},
+    KernelLauncherFactory launcher_factory = {})
+      : d_temp_storage(d_temp_storage)
+      , temp_storage_bytes(temp_storage_bytes)
+      , d_in(d_in)
+      , d_out(d_out)
+      , num_items(num_items)
+      , reduction_op(reduction_op)
+      , init(init)
+      , stream(stream)
+      , ptx_version(ptx_version)
+      , transform_op(transform_op)
+      , kernel_source(kernel_source)
+      , launcher_factory(launcher_factory)
+  {}
+
+  //---------------------------------------------------------------------------
+  // Small-problem (single tile) invocation
+  //---------------------------------------------------------------------------
+
+  /**
+   * @brief Invoke a single block block to reduce in-core
+   *
+   * @tparam ActivePolicyT
+   *   Umbrella policy active for the target device
+   *
+   * @tparam LastBlockKernelT
+   *   Function type of cub::DeviceReduceLastBlockKernel
+   *
+   * @param[in] last_block_kernel
+   *   Kernel function pointer to parameterization of
+   *   cub::DeviceReduceLastBlockKernel
+   */
+  template <typename ActivePolicyT, typename LastBlockKernelT>
+  CUB_RUNTIME_FUNCTION _CCCL_VISIBILITY_HIDDEN _CCCL_FORCEINLINE cudaError_t
+  InvokeNewKernel(LastBlockKernelT last_block_kernel, ActivePolicyT active_policy = {})
+  {
+    cudaError error = cudaSuccess;
+    do
+    {
+      // Get SM count
+      int sm_count;
+      error = CubDebug(launcher_factory.MultiProcessorCount(sm_count));
+      if (cudaSuccess != error)
+      {
+        break;
+      }
+
+      // Init regular kernel configuration
+      detail::KernelConfig reduce_config;
+      error = CubDebug(reduce_config.Init(last_block_kernel, active_policy.Reduce(), launcher_factory));
+      if (cudaSuccess != error)
+      {
+        break;
+      }
+
+      int reduce_device_occupancy = reduce_config.sm_occupancy * sm_count;
+
+      // Even-share work distribution
+      int max_blocks = reduce_device_occupancy * detail::subscription_factor;
+      GridEvenShare<OffsetT> even_share;
+      even_share.DispatchInit(num_items, max_blocks, reduce_config.tile_size);
+
+      // Temporary storage allocation requirements
+      void* allocations[1]       = {};
+      size_t allocation_sizes[1] = {
+        max_blocks * kernel_source.AccumSize() // bytes needed for privatized block
+                                               // reductions
+      };
+
+      // Alias the temporary allocations from the single storage blob (or
+      // compute the necessary size of the blob)
+      error = CubDebug(detail::AliasTemporaries(d_temp_storage, temp_storage_bytes, allocations, allocation_sizes));
+      if (cudaSuccess != error)
+      {
+        break;
+      }
+
+      if (d_temp_storage == nullptr)
+      {
+        // Return if the caller is simply requesting the size of the storage
+        // allocation
+        return cudaSuccess;
+      }
+
+      // Alias the allocation for the privatized per-block reductions
+      AccumT* d_block_reductions = static_cast<AccumT*>(allocations[0]);
+
+      // Get grid size for device_reduce_sweep_kernel
+      int reduce_grid_size = even_share.grid_size;
+
+// Log device_reduce_sweep_kernel configuration
+#ifdef CUB_DEBUG_LOG
+      _CubLog("Invoking DeviceLastBlockKernel<<<%lu, %d, 0, %lld>>>(), %d items "
+              "per thread, %d SM occupancy\n",
+              (unsigned long) reduce_grid_size,
+              active_policy.LastBlockReduce().BlockThreads(),
+              (long long) stream,
+              active_policy.LastBlockReduce().ItemsPerThread(),
+              reduce_config.sm_occupancy);
+#endif // CUB_DEBUG_LOG
+
+      CounterT* counter;
+      error = CubDebug(cudaMalloc(&counter, sizeof(CounterT)));
+      if (cudaSuccess != error)
+      {
+        break;
+      }
+
+      error = CubDebug(cudaMemset(counter, 0, sizeof(CounterT)));
+      if (cudaSuccess != error)
+      {
+        break;
+      }
+
+      // Invoke DeviceReduceKernel
+      launcher_factory(reduce_grid_size, active_policy.LastBlock().BlockThreads(), 0, stream)
+        .doit(last_block_kernel,
+              d_in,
+              d_out,
+              d_block_reductions,
+              static_cast<OffsetT>(reduce_grid_size),
+              even_share,
+              reduction_op,
+              init,
+              transform_op,
+              counter);
+
+      // Check for failure to launch
+      error = CubDebug(cudaPeekAtLastError());
+      if (cudaSuccess != error)
+      {
+        break;
+      }
+
+      // Sync the stream if specified to flush runtime errors
+      error = CubDebug(detail::DebugSyncStream(stream));
+      if (cudaSuccess != error)
+      {
+        break;
+      }
+    } while (0);
+
+    return error;
+  }
+
+  //---------------------------------------------------------------------------
+  // Chained policy invocation
+  //---------------------------------------------------------------------------
+
+  /// Invocation
+  template <typename ActivePolicyT>
+  CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE cudaError_t Invoke(ActivePolicyT active_policy = {})
+  {
+    auto wrapped_policy = detail::reduce::MakeReducePolicyWrapper(active_policy);
+
+    if (Algorithm::last_block == wrapped_policy.GetAlgorithm())
+    {
+      return InvokeNewKernel(kernel_source.LastBlockKernel(), wrapped_policy);
+    }
+    return cudaSuccess;
+    // else
+    // {
+    //   return InvokeNewKernel(kernel_source.AtomicKernel(), wrapped_policy);
+    // }
+  }
+
+  //---------------------------------------------------------------------------
+  // Dispatch entrypoints
+  //---------------------------------------------------------------------------
+
+  /**
+   * @brief Internal dispatch routine for computing a device-wide reduction
+   *
+   * @param[in] d_temp_storage
+   *   Device-accessible allocation of temporary storage. When `nullptr`, the
+   *   required allocation size is written to `temp_storage_bytes` and no work
+   *   is done.
+   *
+   * @param[in,out] temp_storage_bytes
+   *   Reference to size in bytes of `d_temp_storage` allocation
+   *
+   * @param[in] d_in
+   *   Pointer to the input sequence of data items
+   *
+   * @param[out] d_out
+   *   Pointer to the output aggregate
+   *
+   * @param[in] num_items
+   *   Total number of input items (i.e., length of `d_in`)
+   *
+   * @param[in] reduction_op
+   *   Binary reduction functor
+   *
+   * @param[in] init
+   *   The initial value of the reduction
+   *
+   * @param[in] stream
+   *   **[optional]** CUDA stream to launch kernels within.
+   *   Default is stream<sub>0</sub>.
+   */
+  template <typename MaxPolicyT = typename PolicyHub::MaxPolicy>
+  CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE static cudaError_t Dispatch(
+    void* d_temp_storage,
+    size_t& temp_storage_bytes,
+    InputIteratorT d_in,
+    OutputIteratorT d_out,
+    OffsetT num_items,
+    ReductionOpT reduction_op,
+    InitT init,
+    cudaStream_t stream,
+    TransformOpT transform_op              = {},
+    KernelSource kernel_source             = {},
+    KernelLauncherFactory launcher_factory = {},
+    MaxPolicyT max_policy                  = {})
+  {
+    cudaError error = cudaSuccess;
+    do
+    {
+      // Get PTX version
+      int ptx_version = 0;
+      error           = CubDebug(launcher_factory.PtxVersion(ptx_version));
+      if (cudaSuccess != error)
+      {
+        break;
+      }
+
+      // Create dispatch functor
+      DispatchAlternativeReduce dispatch(
+        d_temp_storage,
+        temp_storage_bytes,
+        d_in,
+        d_out,
+        num_items,
+        reduction_op,
+        init,
+        stream,
+        ptx_version,
+        transform_op,
+        kernel_source,
+        launcher_factory);
+
+      // Dispatch to chained policy
+      error = CubDebug(max_policy.Invoke(ptx_version, dispatch));
+      if (cudaSuccess != error)
+      {
+        break;
+      }
+    } while (0);
+
+    return error;
+  }
+};
+
+} // namespace detail::reduce
 
 namespace detail::reduce
 {

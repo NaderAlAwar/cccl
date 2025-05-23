@@ -274,6 +274,135 @@ CUB_DETAIL_KERNEL_ATTRIBUTES __launch_bounds__(
     detail::reduce::finalize_and_store_aggregate(d_out, reduction_op, init, block_aggregate);
   }
 }
+
+/**
+ * @brief Reduce region kernel entry point (multi-block). Computes privatized
+ *        reductions, one per thread block.
+ *
+ * @tparam ChainedPolicyT
+ *   Chained tuning policy
+ *
+ * @tparam InputIteratorT
+ *   Random-access input iterator type for reading input items @iterator
+ *
+ * @tparam OffsetT
+ *   Signed integer type for global offsets
+ *
+ * @tparam ReductionOpT
+ *   Binary reduction functor type having member
+ *   `auto operator()(const T &a, const U &b)`
+ *
+ * @tparam InitT
+ *   Initial value type
+ *
+ * @tparam AccumT
+ *   Accumulator type
+ *
+ * @param[in] d_in
+ *   Pointer to the input sequence of data items
+ *
+ * @param[out] d_out
+ *   Pointer to the output aggregate
+ *
+ * @param[in] num_items
+ *   Total number of input data items
+ *
+ * @param[in] even_share
+ *   Even-share descriptor for mapping an equal number of tiles onto each
+ *   thread block
+ *
+ * @param[in] reduction_op
+ *   Binary reduction functor
+ */
+template <typename ChainedPolicyT,
+          typename InputIteratorT,
+          typename OutputIteratorT,
+          typename OffsetT,
+          typename ReductionOpT,
+          typename InitT,
+          typename AccumT,
+          typename TransformOpT,
+          typename CounterT>
+CUB_DETAIL_KERNEL_ATTRIBUTES
+__launch_bounds__(int(ChainedPolicyT::ActivePolicy::ReduceLastBlockPolicy::BLOCK_THREADS)) void DeviceReduceLastBlockKernel(
+  InputIteratorT d_in,
+  OutputIteratorT d_out,
+  AccumT* d_block_reductions,
+  OffsetT num_items_for_last_stage,
+  GridEvenShare<OffsetT> even_share,
+  ReductionOpT reduction_op,
+  InitT init,
+  TransformOpT transform_op,
+  CounterT* counter)
+{
+  // Thread block type for reducing input tiles
+  using AgentReduceT = detail::reduce::AgentReduce<
+    typename ChainedPolicyT::ActivePolicy::ReduceLastBlockPolicy,
+    InputIteratorT,
+    AccumT*,
+    OffsetT,
+    ReductionOpT,
+    AccumT,
+    TransformOpT>;
+
+  // Shared memory storage
+  __shared__ typename AgentReduceT::TempStorage temp_storage;
+
+  // Consume input tiles
+  AccumT block_aggregate = AgentReduceT(temp_storage, d_in, reduction_op, transform_op).ConsumeTiles(even_share);
+
+  // Output result
+  if (threadIdx.x == 0)
+  {
+    // ony thread 0 has valid value in block aggregate
+    detail::uninitialized_copy_single(d_block_reductions + blockIdx.x, block_aggregate);
+  }
+
+  // __threadfence_block();
+  __threadfence();
+
+  // // First solution, one thread does the reduction
+  // if (threadIdx.x == 0)
+  // {
+  //   CounterT old_counter = atomicAdd(counter, static_cast<CounterT>(1));
+
+  //   // printf("old counter %d\n", old_counter);
+
+  //   if (old_counter == gridDim.x - 1)
+  //   {
+  //     auto result = static_cast<AccumT>(init);
+  //     // printf("starting with %d\n", result);
+  //     // printf("%d or %llu\n", gridDim.x, num_items_for_last_stage);
+  //     for (OffsetT i = 0; i < num_items_for_last_stage; i++)
+  //     {
+  //       // printf("adding %f to %f\n", result, d_block_reductions[i]);
+  //       result = reduction_op(result, d_block_reductions[i]);
+  //     }
+  //     d_out[0] = result;
+  //   }
+  // }
+
+  int perform_final_reduce = false;
+  if (threadIdx.x == 0)
+  {
+    CounterT old_counter = atomicAdd(counter, static_cast<CounterT>(1));
+    perform_final_reduce = old_counter == num_items_for_last_stage - 1;
+  }
+
+  if (__syncthreads_or(perform_final_reduce))
+  {
+    // Consume input tiles
+    AccumT block_aggregate = AgentReduceT(temp_storage, d_block_reductions, reduction_op, transform_op)
+                               .ConsumeRange(OffsetT(0), num_items_for_last_stage);
+
+    // Output result
+    if (threadIdx.x == 0)
+    {
+      detail::reduce::finalize_and_store_aggregate(d_out, reduction_op, init, block_aggregate);
+    }
+  }
+}
+
 } // namespace reduce
 } // namespace detail
 

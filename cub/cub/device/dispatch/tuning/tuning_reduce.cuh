@@ -55,6 +55,13 @@ struct ReducePolicyWrapper : PolicyT
   {}
 };
 
+enum class Algorithm
+{
+  original,
+  last_block,
+  atomic,
+};
+
 template <typename StaticPolicyT>
 struct ReducePolicyWrapper<StaticPolicyT,
                            _CUDA_VSTD::void_t<typename StaticPolicyT::ReducePolicy,
@@ -64,6 +71,11 @@ struct ReducePolicyWrapper<StaticPolicyT,
   CUB_RUNTIME_FUNCTION ReducePolicyWrapper(StaticPolicyT base)
       : StaticPolicyT(base)
   {}
+
+  _CCCL_HOST_DEVICE static constexpr Algorithm GetAlgorithm()
+  {
+    return StaticPolicyT::algorithm;
+  }
 
   CUB_DEFINE_SUB_POLICY_GETTER(Reduce)
   CUB_DEFINE_SUB_POLICY_GETTER(SingleTile)
@@ -217,6 +229,9 @@ struct policy_hub
 
     using SingleTilePolicy      = ReducePolicy;
     using SegmentedReducePolicy = ReducePolicy;
+
+    using ReduceLastBlockPolicy = ReducePolicy;
+    using ReduceAtomicPolicy    = ReducePolicy;
   };
 
   struct Policy600 : ChainedPolicy<600, Policy600, Policy500>
@@ -236,6 +251,9 @@ struct policy_hub
 
     using SingleTilePolicy      = ReducePolicy;
     using SegmentedReducePolicy = ReducePolicy;
+
+    using ReduceLastBlockPolicy = ReducePolicy;
+    using ReduceAtomicPolicy    = ReducePolicy;
   };
 
   struct Policy1000 : ChainedPolicy<1000, Policy1000, Policy600>
@@ -262,6 +280,9 @@ struct policy_hub
 
     using SingleTilePolicy      = ReducePolicy;
     using SegmentedReducePolicy = ReducePolicy;
+
+    using ReduceLastBlockPolicy = ReducePolicy;
+    using ReduceAtomicPolicy    = ReducePolicy;
   };
 
   using MaxPolicy = Policy1000;
