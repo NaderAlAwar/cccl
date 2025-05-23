@@ -1169,11 +1169,10 @@ struct DispatchAlternativeReduce
       even_share.DispatchInit(num_items, max_blocks, reduce_config.tile_size);
 
       // Temporary storage allocation requirements
-      void* allocations[1]       = {};
-      size_t allocation_sizes[1] = {
-        max_blocks * kernel_source.AccumSize() // bytes needed for privatized block
-                                               // reductions
-      };
+      void* allocations[2]       = {nullptr, nullptr};
+      size_t allocation_sizes[2] = {max_blocks * kernel_source.AccumSize(), // bytes needed for privatized block
+                                                                            // reductions
+                                    sizeof(CounterT)};
 
       // Alias the temporary allocations from the single storage blob (or
       // compute the necessary size of the blob)
@@ -1193,6 +1192,9 @@ struct DispatchAlternativeReduce
       // Alias the allocation for the privatized per-block reductions
       AccumT* d_block_reductions = static_cast<AccumT*>(allocations[0]);
 
+      // Alias the allocation for the counter
+      CounterT* d_counter = static_cast<CounterT*>(allocations[1]);
+
       // Get grid size for device_reduce_sweep_kernel
       int reduce_grid_size = even_share.grid_size;
 
@@ -1207,19 +1209,6 @@ struct DispatchAlternativeReduce
               reduce_config.sm_occupancy);
 #endif // CUB_DEBUG_LOG
 
-      CounterT* counter;
-      error = CubDebug(cudaMalloc(&counter, sizeof(CounterT)));
-      if (cudaSuccess != error)
-      {
-        break;
-      }
-
-      error = CubDebug(cudaMemset(counter, 0, sizeof(CounterT)));
-      if (cudaSuccess != error)
-      {
-        break;
-      }
-
       // Invoke DeviceReduceKernel
       launcher_factory(reduce_grid_size, active_policy.LastBlock().BlockThreads(), 0, stream)
         .doit(last_block_kernel,
@@ -1231,7 +1220,7 @@ struct DispatchAlternativeReduce
               reduction_op,
               init,
               transform_op,
-              counter);
+              d_counter);
 
       // Check for failure to launch
       error = CubDebug(cudaPeekAtLastError());
