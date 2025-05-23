@@ -1209,19 +1209,6 @@ struct DispatchAlternativeReduce
               reduce_config.sm_occupancy);
 #endif // CUB_DEBUG_LOG
 
-      CounterT* counter;
-      error = CubDebug(cudaMalloc(&counter, sizeof(CounterT)));
-      if (cudaSuccess != error)
-      {
-        break;
-      }
-
-      error = CubDebug(cudaMemset(counter, 0, sizeof(CounterT)));
-      if (cudaSuccess != error)
-      {
-        break;
-      }
-
       // Invoke DeviceReduceKernel
       launcher_factory(reduce_grid_size, active_policy.LastBlock().BlockThreads(), 0, stream)
         .doit(last_block_kernel,
