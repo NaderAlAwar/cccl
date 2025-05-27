@@ -33,6 +33,7 @@ typedef struct cccl_device_reduce_build_result_t
   CUkernel single_tile_second_kernel;
   CUkernel reduction_kernel;
   CUkernel last_block_kernel;
+  CUkernel atomic_kernel;
 } cccl_device_reduce_build_result_t;
 
 // TODO return a union of nvtx/cuda/nvrtc errors or a string?
