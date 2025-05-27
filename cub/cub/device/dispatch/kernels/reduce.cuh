@@ -403,6 +403,54 @@ __launch_bounds__(int(ChainedPolicyT::ActivePolicy::ReduceLastBlockPolicy::BLOCK
   }
 }
 
+template <typename ChainedPolicyT,
+          typename InputIteratorT,
+          typename OutputIteratorT,
+          typename OffsetT,
+          typename ReductionOpT,
+          typename InitT,
+          typename AccumT,
+          typename TransformOpT>
+CUB_DETAIL_KERNEL_ATTRIBUTES
+__launch_bounds__(int(ChainedPolicyT::ActivePolicy::ReduceAtomicPolicy::BLOCK_THREADS)) void DeviceReduceAtomicKernel(
+  InputIteratorT d_in,
+  OutputIteratorT d_out,
+  AccumT* d_block_reductions,
+  GridEvenShare<OffsetT> even_share,
+  ReductionOpT reduction_op,
+  InitT init,
+  TransformOpT transform_op)
+{
+  // Thread block type for reducing input tiles
+  using AgentReduceT = detail::reduce::AgentReduce<
+    typename ChainedPolicyT::ActivePolicy::ReduceAtomicPolicy,
+    InputIteratorT,
+    AccumT*,
+    OffsetT,
+    ReductionOpT,
+    AccumT,
+    TransformOpT>;
+
+  // Shared memory storage
+  __shared__ typename AgentReduceT::TempStorage temp_storage;
+
+  // Consume input tiles
+  AccumT block_aggregate = AgentReduceT(temp_storage, d_in, reduction_op, transform_op).ConsumeTiles(even_share);
+
+  // Output result
+  if (threadIdx.x == 0)
+  {
+    // ony thread 0 has valid value in block aggregate
+    detail::uninitialized_copy_single(d_block_reductions + blockIdx.x, block_aggregate);
+    if (blockIdx.x == 0)
+    {
+      atomicAdd(d_out, init);
+    }
+
+    atomicAdd(d_out, d_block_reductions[blockIdx.x]);
+  }
+}
+
 } // namespace reduce
 } // namespace detail
 
