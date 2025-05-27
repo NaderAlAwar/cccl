@@ -328,7 +328,6 @@ __launch_bounds__(int(ChainedPolicyT::ActivePolicy::ReduceLastBlockPolicy::BLOCK
   InputIteratorT d_in,
   OutputIteratorT d_out,
   AccumT* d_block_reductions,
-  OffsetT num_items_for_last_stage,
   GridEvenShare<OffsetT> even_share,
   ReductionOpT reduction_op,
   InitT init,
@@ -361,39 +360,28 @@ __launch_bounds__(int(ChainedPolicyT::ActivePolicy::ReduceLastBlockPolicy::BLOCK
   // __threadfence_block();
   __threadfence();
 
-  // // First solution, one thread does the reduction
-  // if (threadIdx.x == 0)
-  // {
-  //   CounterT old_counter = atomicAdd(counter, static_cast<CounterT>(1));
-
-  //   // printf("old counter %d\n", old_counter);
-
-  //   if (old_counter == gridDim.x - 1)
-  //   {
-  //     auto result = static_cast<AccumT>(init);
-  //     // printf("starting with %d\n", result);
-  //     // printf("%d or %llu\n", gridDim.x, num_items_for_last_stage);
-  //     for (OffsetT i = 0; i < num_items_for_last_stage; i++)
-  //     {
-  //       // printf("adding %f to %f\n", result, d_block_reductions[i]);
-  //       result = reduction_op(result, d_block_reductions[i]);
-  //     }
-  //     d_out[0] = result;
-  //   }
-  // }
-
   int perform_final_reduce = false;
   if (threadIdx.x == 0)
   {
     CounterT old_counter = atomicAdd(counter, static_cast<CounterT>(1));
-    perform_final_reduce = old_counter == num_items_for_last_stage - 1;
+    perform_final_reduce = old_counter == gridDim.x - 1;
   }
 
   if (__syncthreads_or(perform_final_reduce))
   {
+    // Thread block type for reducing input tiles
+    using FinalAgentReduceT =
+      detail::reduce::AgentReduce<typename ChainedPolicyT::ActivePolicy::ReduceLastBlockPolicy,
+                                  AccumT*,
+                                  OutputIteratorT,
+                                  OffsetT,
+                                  ReductionOpT,
+                                  AccumT>;
+    __shared__ typename FinalAgentReduceT::TempStorage temp_storage;
+
     // Consume input tiles
-    AccumT block_aggregate = AgentReduceT(temp_storage, d_block_reductions, reduction_op, transform_op)
-                               .ConsumeRange(OffsetT(0), num_items_for_last_stage);
+    AccumT block_aggregate =
+      FinalAgentReduceT(temp_storage, d_block_reductions, reduction_op).ConsumeRange(OffsetT(0), gridDim.x);
 
     // Output result
     if (threadIdx.x == 0)

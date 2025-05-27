@@ -245,8 +245,8 @@ struct policy_hub
     using ReduceLastBlockPolicy = ReducePolicy;
     using ReduceAtomicPolicy    = ReducePolicy;
 
-    // static constexpr Algorithm algorithm = Algorithm::last_block;
-    static constexpr Algorithm algorithm = Algorithm::atomic;
+    static constexpr Algorithm algorithm = Algorithm::last_block;
+    // static constexpr Algorithm algorithm = Algorithm::atomic;
   };
 
   struct Policy600 : ChainedPolicy<600, Policy600, Policy500>
@@ -270,8 +270,8 @@ struct policy_hub
     using ReduceLastBlockPolicy = ReducePolicy;
     using ReduceAtomicPolicy    = ReducePolicy;
 
-    // static constexpr Algorithm algorithm = Algorithm::last_block;
-    static constexpr Algorithm algorithm = Algorithm::atomic;
+    static constexpr Algorithm algorithm = Algorithm::last_block;
+    // static constexpr Algorithm algorithm = Algorithm::atomic;
   };
 
   struct Policy1000 : ChainedPolicy<1000, Policy1000, Policy600>
@@ -302,8 +302,8 @@ struct policy_hub
     using ReduceLastBlockPolicy = ReducePolicy;
     using ReduceAtomicPolicy    = ReducePolicy;
 
-    // static constexpr Algorithm algorithm = Algorithm::last_block;
-    static constexpr Algorithm algorithm = Algorithm::atomic;
+    static constexpr Algorithm algorithm = Algorithm::last_block;
+    // static constexpr Algorithm algorithm = Algorithm::atomic;
   };
 
   using MaxPolicy = Policy1000;
