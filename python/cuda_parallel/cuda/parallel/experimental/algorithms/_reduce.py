@@ -76,7 +76,7 @@ class _Reduce:
 
         return self.build_result.compute(
             temp_storage,
-            temp_storage_bytes,
+            temp_storage.nbytes,
             self.d_in_cccl,
             self.d_out_cccl,
             num_items,
