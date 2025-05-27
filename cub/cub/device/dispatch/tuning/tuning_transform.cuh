@@ -192,7 +192,7 @@ struct TransformPolicyWrapper<StaticPolicyT, ::cuda::std::void_t<decltype(Static
 
   _CCCL_HOST_DEVICE static constexpr int ItemsPerThreadVectorized()
   {
-    return StaticPolicyT::algo_policy::items_per_thread;
+    return StaticPolicyT::algo_policy::items_per_thread_vectorized;
   }
 
   _CCCL_HOST_DEVICE static constexpr int VectorLoadLength()

@@ -66,7 +66,9 @@ template <typename StaticPolicyT>
 struct ReducePolicyWrapper<StaticPolicyT,
                            _CUDA_VSTD::void_t<typename StaticPolicyT::ReducePolicy,
                                               typename StaticPolicyT::SingleTilePolicy,
-                                              typename StaticPolicyT::SegmentedReducePolicy>> : StaticPolicyT
+                                              typename StaticPolicyT::SegmentedReducePolicy,
+                                              typename StaticPolicyT::ReduceLastBlockPolicy,
+                                              typename StaticPolicyT::ReduceAtomicPolicy>> : StaticPolicyT
 {
   CUB_RUNTIME_FUNCTION ReducePolicyWrapper(StaticPolicyT base)
       : StaticPolicyT(base)
@@ -80,6 +82,16 @@ struct ReducePolicyWrapper<StaticPolicyT,
   CUB_DEFINE_SUB_POLICY_GETTER(Reduce)
   CUB_DEFINE_SUB_POLICY_GETTER(SingleTile)
   CUB_DEFINE_SUB_POLICY_GETTER(SegmentedReduce)
+
+  CUB_RUNTIME_FUNCTION static constexpr auto LastBlock()
+  {
+    return cub::detail::MakePolicyWrapper(typename StaticPolicyT::ReduceLastBlockPolicy());
+  }
+
+  CUB_RUNTIME_FUNCTION static constexpr auto Atomic()
+  {
+    return cub::detail::MakePolicyWrapper(typename StaticPolicyT::ReduceAtomicPolicy());
+  }
 };
 
 template <typename PolicyT>
@@ -232,6 +244,9 @@ struct policy_hub
 
     using ReduceLastBlockPolicy = ReducePolicy;
     using ReduceAtomicPolicy    = ReducePolicy;
+
+    // static constexpr Algorithm algorithm = Algorithm::last_block;
+    static constexpr Algorithm algorithm = Algorithm::atomic;
   };
 
   struct Policy600 : ChainedPolicy<600, Policy600, Policy500>
@@ -254,6 +269,9 @@ struct policy_hub
 
     using ReduceLastBlockPolicy = ReducePolicy;
     using ReduceAtomicPolicy    = ReducePolicy;
+
+    // static constexpr Algorithm algorithm = Algorithm::last_block;
+    static constexpr Algorithm algorithm = Algorithm::atomic;
   };
 
   struct Policy1000 : ChainedPolicy<1000, Policy1000, Policy600>
@@ -283,6 +301,9 @@ struct policy_hub
 
     using ReduceLastBlockPolicy = ReducePolicy;
     using ReduceAtomicPolicy    = ReducePolicy;
+
+    // static constexpr Algorithm algorithm = Algorithm::last_block;
+    static constexpr Algorithm algorithm = Algorithm::atomic;
   };
 
   using MaxPolicy = Policy1000;
