@@ -5,7 +5,6 @@
 
 from __future__ import annotations  # TODO: required for Python 3.7 docs env
 
-import functools
 from typing import Callable
 
 import numba
@@ -55,27 +54,36 @@ class _Reduce:
             self.h_init_cccl,
         )
 
-    def initialize(self, d_out, h_init, d_temp_storage, num_items):
-        set_cccl_iterator_state(self.d_out_cccl, d_out)
-        set_cccl_iterator_state(self.d_in_cccl, d_out)
-        self.h_init_cccl.state = h_init.data.cast("B")
+    def __call__(self, temp_storage, d_in, d_out, num_items, h_init, stream=None):
+        self.d_in_cccl.state = d_in.data_ptr()
 
-        self.kernel_call = functools.partial(
-            self.build_result.compute,
-            d_temp_storage.data.ptr,
-            d_temp_storage.nbytes,
+        if temp_storage is None:
+            temp_storage_bytes = 0
+            temp_storage = 0
+            set_cccl_iterator_state(self.d_out_cccl, d_out)
+            set_cccl_iterator_state(self.d_in_cccl, d_in)
+            self.h_init_cccl.state = h_init.data.cast("B")
+            return self.build_result.compute(
+                temp_storage,
+                temp_storage_bytes,
+                self.d_in_cccl,
+                self.d_out_cccl,
+                num_items,
+                self.op_wrapper,
+                self.h_init_cccl,
+                stream,
+            )
+
+        return self.build_result.compute(
+            temp_storage,
+            temp_storage_bytes,
             self.d_in_cccl,
             self.d_out_cccl,
             num_items,
             self.op_wrapper,
             self.h_init_cccl,
-            None,
+            stream,
         )
-
-    def __call__(
-        self,
-    ):
-        self.kernel_call()
 
 
 def make_cache_key(
