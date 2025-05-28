@@ -56,6 +56,7 @@ class _Reduce:
 
     def __call__(self, temp_storage, d_in, d_out, num_items, h_init, stream=None):
         self.d_in_cccl.state = d_in.data_ptr()
+        self.d_out_cccl.state = d_out.data_ptr()
 
         if temp_storage is None:
             temp_storage_bytes = 0
