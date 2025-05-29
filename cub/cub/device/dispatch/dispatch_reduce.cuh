@@ -1349,14 +1349,15 @@ struct DispatchAlternativeReduce
   {
     auto wrapped_policy = detail::reduce::MakeReducePolicyWrapper(active_policy);
 
-    if (Algorithm::last_block == wrapped_policy.GetAlgorithm())
+    if (Algorithm::atomic == wrapped_policy.GetAlgorithm())
     {
-      return InvokeLastBlockKernel(kernel_source.LastBlockKernel(), wrapped_policy);
+      if constexpr (std::is_floating_point_v<InitT>)
+      {
+        return InvokeAtomicKernel(kernel_source.AtomicKernel(), wrapped_policy);
+      }
     }
-    else
-    {
-      return InvokeAtomicKernel(kernel_source.AtomicKernel(), wrapped_policy);
-    }
+
+    return InvokeLastBlockKernel(kernel_source.LastBlockKernel(), wrapped_policy);
   }
 
   //---------------------------------------------------------------------------
