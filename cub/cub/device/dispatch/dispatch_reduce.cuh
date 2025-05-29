@@ -1199,6 +1199,12 @@ struct DispatchAlternativeReduce
       // Alias the allocation for the counter
       CounterT* d_counter = static_cast<CounterT*>(allocations[1]);
 
+      error = CubDebug(launcher_factory.MemsetAsync(d_counter, 0, sizeof(CounterT), stream));
+      if (cudaSuccess != error)
+      {
+        break;
+      }
+
       // Get grid size for device_reduce_sweep_kernel
       int reduce_grid_size = even_share.grid_size;
 
@@ -1303,6 +1309,12 @@ struct DispatchAlternativeReduce
       // Alias the allocation for the privatized per-block reductions
       AccumT* d_block_reductions = static_cast<AccumT*>(allocations[0]);
 
+      error = CubDebug(launcher_factory.MemsetAsync(d_out, 0, kernel_source.AccumSize(), stream));
+      if (cudaSuccess != error)
+      {
+        break;
+      }
+
       // Get grid size for device_reduce_sweep_kernel
       int reduce_grid_size = even_share.grid_size;
 
@@ -1319,7 +1331,7 @@ struct DispatchAlternativeReduce
 
       // Invoke DeviceReduceKernel
       launcher_factory(reduce_grid_size, active_policy.Atomic().BlockThreads(), 0, stream)
-        .doit(atomic_kernel, d_in, d_out, d_block_reductions, even_share, reduction_op, init, transform_op);
+        .doit(atomic_kernel, d_in, d_out, even_share, reduction_op, init, transform_op);
 
       // Check for failure to launch
       error = CubDebug(cudaPeekAtLastError());

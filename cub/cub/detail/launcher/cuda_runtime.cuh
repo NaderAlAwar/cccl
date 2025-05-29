@@ -64,6 +64,11 @@ struct TripleChevronFactory
     // Get max grid dimension
     return cudaDeviceGetAttribute(&max_grid_dim_x, cudaDevAttrMaxGridDimX, device_ordinal);
   }
+
+  _CCCL_HIDE_FROM_ABI cudaError_t MemsetAsync(void* dst, int value, size_t num_bytes, cudaStream_t stream) const
+  {
+    return cudaMemsetAsync(dst, value, num_bytes, stream);
+  }
 };
 
 } // namespace detail

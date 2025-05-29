@@ -344,11 +344,27 @@ __launch_bounds__(int(ChainedPolicyT::ActivePolicy::ReduceLastBlockPolicy::BLOCK
     AccumT,
     TransformOpT>;
 
+  // Thread block type for reducing input tiles
+  using FinalAgentReduceT =
+    detail::reduce::AgentReduce<typename ChainedPolicyT::ActivePolicy::ReduceLastBlockPolicy,
+                                AccumT*,
+                                OutputIteratorT,
+                                OffsetT,
+                                ReductionOpT,
+                                AccumT>;
+
   // Shared memory storage
-  __shared__ typename AgentReduceT::TempStorage temp_storage;
+  union temp_storage_t
+  {
+    typename AgentReduceT::TempStorage partial_reduce;
+    typename FinalAgentReduceT::TempStorage final_reduce;
+  };
+
+  __shared__ temp_storage_t temp_storage;
 
   // Consume input tiles
-  AccumT block_aggregate = AgentReduceT(temp_storage, d_in, reduction_op, transform_op).ConsumeTiles(even_share);
+  AccumT block_aggregate =
+    AgentReduceT(temp_storage.partial_reduce, d_in, reduction_op, transform_op).ConsumeTiles(even_share);
 
   // Output result
   if (threadIdx.x == 0)
@@ -357,7 +373,6 @@ __launch_bounds__(int(ChainedPolicyT::ActivePolicy::ReduceLastBlockPolicy::BLOCK
     detail::uninitialized_copy_single(d_block_reductions + blockIdx.x, block_aggregate);
   }
 
-  // __threadfence_block();
   __threadfence();
 
   int perform_final_reduce = false;
@@ -369,19 +384,9 @@ __launch_bounds__(int(ChainedPolicyT::ActivePolicy::ReduceLastBlockPolicy::BLOCK
 
   if (__syncthreads_or(perform_final_reduce))
   {
-    // Thread block type for reducing input tiles
-    using FinalAgentReduceT =
-      detail::reduce::AgentReduce<typename ChainedPolicyT::ActivePolicy::ReduceLastBlockPolicy,
-                                  AccumT*,
-                                  OutputIteratorT,
-                                  OffsetT,
-                                  ReductionOpT,
-                                  AccumT>;
-    __shared__ typename FinalAgentReduceT::TempStorage temp_storage;
-
     // Consume input tiles
     AccumT block_aggregate =
-      FinalAgentReduceT(temp_storage, d_block_reductions, reduction_op).ConsumeRange(OffsetT(0), gridDim.x);
+      FinalAgentReduceT(temp_storage.final_reduce, d_block_reductions, reduction_op).ConsumeRange(OffsetT(0), gridDim.x);
 
     // Output result
     if (threadIdx.x == 0)
@@ -403,7 +408,6 @@ CUB_DETAIL_KERNEL_ATTRIBUTES
 __launch_bounds__(int(ChainedPolicyT::ActivePolicy::ReduceAtomicPolicy::BLOCK_THREADS)) void DeviceReduceAtomicKernel(
   InputIteratorT d_in,
   OutputIteratorT d_out,
-  AccumT* d_block_reductions,
   GridEvenShare<OffsetT> even_share,
   ReductionOpT reduction_op,
   InitT init,
@@ -429,13 +433,13 @@ __launch_bounds__(int(ChainedPolicyT::ActivePolicy::ReduceAtomicPolicy::BLOCK_TH
   if (threadIdx.x == 0)
   {
     // ony thread 0 has valid value in block aggregate
-    detail::uninitialized_copy_single(d_block_reductions + blockIdx.x, block_aggregate);
+    // detail::uninitialized_copy_single(d_block_reductions + blockIdx.x, block_aggregate);
     if (blockIdx.x == 0)
     {
       atomicAdd(d_out, init);
     }
 
-    atomicAdd(d_out, d_block_reductions[blockIdx.x]);
+    atomicAdd(d_out, block_aggregate);
   }
 }
 
