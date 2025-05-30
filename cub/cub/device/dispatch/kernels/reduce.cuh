@@ -410,6 +410,7 @@ __launch_bounds__(int(ChainedPolicyT::ActivePolicy::ReduceAtomicPolicy::BLOCK_TH
   OutputIteratorT d_out,
   GridEvenShare<OffsetT> even_share,
   ReductionOpT reduction_op,
+  InitT init,
   TransformOpT transform_op)
 {
   // Thread block type for reducing input tiles
@@ -433,6 +434,10 @@ __launch_bounds__(int(ChainedPolicyT::ActivePolicy::ReduceAtomicPolicy::BLOCK_TH
   {
     // ony thread 0 has valid value in block aggregate
     // detail::uninitialized_copy_single(d_block_reductions + blockIdx.x, block_aggregate);
+    if (blockIdx.x == 0)
+    {
+      atomicAdd(d_out, init);
+    }
 
     atomicAdd(d_out, block_aggregate);
   }
