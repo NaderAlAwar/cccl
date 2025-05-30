@@ -514,7 +514,7 @@ CUresult cccl_device_reduce(
         *temp_storage_bytes,
         d_in,
         d_out,
-        num_items,
+        static_cast<OffsetT>(num_items),
         op,
         init,
         stream,
