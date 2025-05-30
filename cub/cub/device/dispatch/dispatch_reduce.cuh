@@ -1199,11 +1199,11 @@ struct DispatchAlternativeReduce
       // Alias the allocation for the counter
       CounterT* d_counter = static_cast<CounterT*>(allocations[1]);
 
-      error = CubDebug(launcher_factory.MemsetAsync(d_counter, 0, sizeof(CounterT), stream));
-      if (cudaSuccess != error)
-      {
-        break;
-      }
+      // error = CubDebug(launcher_factory.MemsetAsync(d_counter, 0, sizeof(CounterT), stream));
+      // if (cudaSuccess != error)
+      // {
+      //   break;
+      // }
 
       // Get grid size for device_reduce_sweep_kernel
       int reduce_grid_size = even_share.grid_size;
