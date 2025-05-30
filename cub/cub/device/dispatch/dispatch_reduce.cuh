@@ -1285,30 +1285,6 @@ struct DispatchAlternativeReduce
       GridEvenShare<OffsetT> even_share;
       even_share.DispatchInit(num_items, max_blocks, reduce_config.tile_size);
 
-      // Temporary storage allocation requirements
-      void* allocations[1]       = {nullptr};
-      size_t allocation_sizes[1] = {
-        max_blocks * kernel_source.AccumSize() // bytes needed for privatized block reductions
-      };
-
-      // Alias the temporary allocations from the single storage blob (or
-      // compute the necessary size of the blob)
-      error = CubDebug(detail::AliasTemporaries(d_temp_storage, temp_storage_bytes, allocations, allocation_sizes));
-      if (cudaSuccess != error)
-      {
-        break;
-      }
-
-      if (d_temp_storage == nullptr)
-      {
-        // Return if the caller is simply requesting the size of the storage
-        // allocation
-        return cudaSuccess;
-      }
-
-      // Alias the allocation for the privatized per-block reductions
-      AccumT* d_block_reductions = static_cast<AccumT*>(allocations[0]);
-
       error = CubDebug(launcher_factory.MemsetAsync(d_out, 0, kernel_source.AccumSize(), stream));
       if (cudaSuccess != error)
       {
