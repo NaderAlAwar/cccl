@@ -1285,11 +1285,11 @@ struct DispatchAlternativeReduce
       GridEvenShare<OffsetT> even_share;
       even_share.DispatchInit(num_items, max_blocks, reduce_config.tile_size);
 
-      error = CubDebug(launcher_factory.MemsetAsync(d_out, 0, kernel_source.AccumSize(), stream));
-      if (cudaSuccess != error)
-      {
-        break;
-      }
+      // error = CubDebug(launcher_factory.MemsetAsync(d_out, 0, kernel_source.AccumSize(), stream));
+      // if (cudaSuccess != error)
+      // {
+      //   break;
+      // }
 
       // Get grid size for device_reduce_sweep_kernel
       int reduce_grid_size = even_share.grid_size;
