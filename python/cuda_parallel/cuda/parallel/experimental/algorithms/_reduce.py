@@ -55,8 +55,9 @@ class _Reduce:
             self.h_init_cccl,
         )
 
-    def initialize_fast(self, temp_storage, d_out, num_items, h_init):
-        self.d_out_cccl.state = d_out.data_ptr()
+    def initialize_fast(self, temp_storage, d_in, d_out, num_items, h_init):
+        set_cccl_iterator_state(self.d_out_cccl, d_out)
+        set_cccl_iterator_state(self.d_in_cccl, d_in)
         self.h_init_cccl.state = h_init.data.cast("B")
         self.kernel_call = functools.partial(
             self.build_result.compute,
