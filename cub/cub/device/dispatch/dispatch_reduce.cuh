@@ -1339,10 +1339,14 @@ struct DispatchAlternativeReduce
 
     if (Algorithm::atomic == wrapped_policy.GetAlgorithm())
     {
+#ifdef CCCL_C_EXPERIMENTAL
+      return InvokeAtomicKernel(kernel_source.AtomicKernel(), wrapped_policy);
+#else
       if constexpr (std::is_floating_point_v<InitT>)
       {
         return InvokeAtomicKernel(kernel_source.AtomicKernel(), wrapped_policy);
       }
+#endif
     }
 
     return InvokeLastBlockKernel(kernel_source.LastBlockKernel(), wrapped_policy);
