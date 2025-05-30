@@ -36,7 +36,7 @@
 
 struct device_reduce_policy;
 using TransformOpT = ::cuda::std::identity;
-using OffsetT      = unsigned long long;
+using OffsetT      = uint32_t;
 static_assert(std::is_same_v<cub::detail::choose_offset_t<OffsetT>, OffsetT>, "OffsetT must be size_t");
 
 namespace reduce
@@ -501,7 +501,7 @@ CUresult cccl_device_reduce(
     auto exec_status = cub::detail::reduce::DispatchAlternativeReduce<
       indirect_arg_t, // InputIteratorT
       indirect_arg_t, // OutputIteratorT
-      ::cuda::std::size_t, // OffsetT
+      OffsetT, // OffsetT
       indirect_arg_t, // ReductionOpT
       indirect_arg_t, // InitT
       void, // AccumT
