@@ -1307,7 +1307,7 @@ struct DispatchAlternativeReduce
 
       // Invoke DeviceReduceKernel
       launcher_factory(reduce_grid_size, active_policy.Atomic().BlockThreads(), 0, stream)
-        .doit(atomic_kernel, d_in, d_out, even_share, reduction_op, init, transform_op);
+        .doit(atomic_kernel, d_in, d_out, even_share, reduction_op, transform_op);
 
       // Check for failure to launch
       error = CubDebug(cudaPeekAtLastError());
