@@ -5,6 +5,7 @@
 
 from __future__ import annotations  # TODO: required for Python 3.7 docs env
 
+import functools
 from typing import Callable
 
 import numba
@@ -53,6 +54,25 @@ class _Reduce:
             self.op_wrapper,
             self.h_init_cccl,
         )
+
+    def initialize_fast(self, temp_storage, d_out, num_items, h_init):
+        self.d_out_cccl.state = d_out.data_ptr()
+        self.h_init_cccl.state = h_init.data.cast("B")
+        self.kernel_call = functools.partial(
+            self.build_result.compute,
+            temp_storage.data.ptr,
+            temp_storage.nbytes,
+            self.d_in_cccl,
+            self.d_out_cccl,
+            num_items,
+            self.op_wrapper,
+            self.h_init_cccl,
+            None,
+        )
+
+    def call_fast(self, d_in):
+        self.d_in_cccl.state = d_in.data_ptr()
+        self.kernel_call()
 
     def __call__(self, temp_storage, d_in, d_out, num_items, h_init, stream=None):
         self.d_in_cccl.state = d_in.data_ptr()
