@@ -104,8 +104,7 @@ Tuning find_tuning(int cc, const Tuning (&tunings)[N])
 
 reduce_runtime_tuning_policy get_policy(int cc, cccl_type_info accumulator_type)
 {
-  // constexpr reduce_tuning_t chain[] = {{60, 256, 16, 4}, {35, 256, 20, 4}};
-  constexpr reduce_tuning_t chain[] = {{60, 512, 16, 2}, {35, 256, 20, 4}};
+  constexpr reduce_tuning_t chain[] = {{60, 256, 16, 4}, {35, 256, 20, 4}};
 
   auto [_, block_size, items_per_thread, vector_load_length] = find_tuning(cc, chain);
 
@@ -413,7 +412,7 @@ CUresult cccl_device_reduce_build(
 
     const std::string arch = "-arch=sm_" + std::to_string(cc_major) + std::to_string(cc_minor);
 
-    constexpr size_t num_args  = 9;
+    constexpr size_t num_args  = 10;
     const char* args[num_args] = {
       arch.c_str(),
       cub_path,
@@ -423,7 +422,8 @@ CUresult cccl_device_reduce_build(
       "-rdc=true",
       "-dlto",
       "-DCUB_DISABLE_CDP",
-      "-std=c++20"};
+      "-std=c++20",
+      "--use_fast_math"};
 
     constexpr size_t num_lto_args   = 2;
     const char* lopts[num_lto_args] = {"-lto", arch.c_str()};
