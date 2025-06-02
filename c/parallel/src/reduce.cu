@@ -412,7 +412,7 @@ CUresult cccl_device_reduce_build(
 
     const std::string arch = "-arch=sm_" + std::to_string(cc_major) + std::to_string(cc_minor);
 
-    constexpr size_t num_args  = 10;
+    constexpr size_t num_args  = 9;
     const char* args[num_args] = {
       arch.c_str(),
       cub_path,
@@ -422,8 +422,7 @@ CUresult cccl_device_reduce_build(
       "-rdc=true",
       "-dlto",
       "-DCUB_DISABLE_CDP",
-      "-std=c++20",
-      "--use_fast_math"};
+      "-std=c++20"};
 
     constexpr size_t num_lto_args   = 2;
     const char* lopts[num_lto_args] = {"-lto", arch.c_str()};
