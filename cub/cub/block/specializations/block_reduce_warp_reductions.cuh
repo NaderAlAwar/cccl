@@ -192,21 +192,31 @@ struct BlockReduceWarpReductions
     //   warp_aggregate = ApplyWarpAggregates<FULL_TILE>(reduction_op, warp_aggregate, num_valid, constant_v<1>);
     // }
 
-    if (linear_tid == 0)
-    {
-      detail::uninitialized_copy_single(temp_storage.warp_aggregates + warp_id, warp_aggregate);
-    }
+    // if (linear_tid == 0)
+    // {
+    //   detail::uninitialized_copy_single(temp_storage.warp_aggregates + warp_id, warp_aggregate);
+    // }
 
-    __syncthreads();
+    // __syncthreads();
 
-    if (lane_id == 0 && warp_id != 0)
+    // if (lane_id == 0 && warp_id != 0)
+    // {
+    //   // printf("adding %f\n", warp_aggregate);
+    //   atomicAdd(temp_storage.warp_aggregates, warp_aggregate);
+    // }
+
+    // __syncthreads();
+    // return temp_storage.warp_aggregates[0];
+
+    if (lane_id == 0)
     {
-      // printf("adding %f\n", warp_aggregate);
       atomicAdd(temp_storage.warp_aggregates, warp_aggregate);
     }
 
     __syncthreads();
-    return temp_storage.warp_aggregates[0];
+    warp_aggregate                  = temp_storage.warp_aggregates[0];
+    temp_storage.warp_aggregates[0] = 0;
+    return warp_aggregate;
   }
 
   /**
