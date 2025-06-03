@@ -37,7 +37,7 @@
 
 struct op_wrapper;
 struct device_scan_policy;
-using OffsetT = uint32_t;
+using OffsetT = unsigned long long;
 static_assert(std::is_same_v<cub::detail::choose_offset_t<OffsetT>, OffsetT>, "OffsetT must be size_t");
 
 struct input_iterator_state_t;
@@ -247,14 +247,14 @@ struct __align__({1}) storage_t {
 {4}
 {5}
 struct agent_policy_t {
-  static constexpr int ITEMS_PER_THREAD = cub::detail::MemBoundScaling<128, 24, float>::ITEMS_PER_THREAD; //{2};
-  static constexpr int BLOCK_THREADS = cub::detail::MemBoundScaling<128, 24, float>::BLOCK_THREADS; //{3};
-  static constexpr cub::BlockLoadAlgorithm LOAD_ALGORITHM = cub::BLOCK_LOAD_WARP_TRANSPOSE;
+  static constexpr int ITEMS_PER_THREAD = cub::detail::MemBoundScaling<192, 7, float>::ITEMS_PER_THREAD; //{2};
+  static constexpr int BLOCK_THREADS = cub::detail::MemBoundScaling<192, 7, float>::BLOCK_THREADS; //{3};
+  static constexpr cub::BlockLoadAlgorithm LOAD_ALGORITHM = cub::BLOCK_LOAD_DIRECT;
   static constexpr cub::CacheLoadModifier LOAD_MODIFIER = cub::LOAD_DEFAULT;
-  static constexpr cub::BlockStoreAlgorithm STORE_ALGORITHM = cub::BLOCK_STORE_WARP_TRANSPOSE;
+  static constexpr cub::BlockStoreAlgorithm STORE_ALGORITHM = cub::BLOCK_STORE_DIRECT;
   static constexpr cub::BlockScanAlgorithm SCAN_ALGORITHM = cub::BLOCK_SCAN_WARP_SCANS;
   struct detail {
-    using delay_constructor_t = cub::detail::fixed_delay_constructor_t<688, 1140>; // <{7}>;
+    using delay_constructor_t = cub::detail::fixed_delay_constructor_t<228, 1070>; // <{7}>;
   };
 };
 struct device_scan_policy {
