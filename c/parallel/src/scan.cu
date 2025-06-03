@@ -101,8 +101,8 @@ scan_runtime_tuning_policy get_policy(int /*cc*/, cccl_type_info /*accumulator_t
   // TODO: we should update this once we figure out a way to reuse
   // tuning logic from C++. Alternately, we should implement
   // something better than a hardcoded default:
-  return {cub::detail::MemBoundScaling<128, 24, float>::BLOCK_THREADS,
-          cub::detail::MemBoundScaling<128, 24, float>::ITEMS_PER_THREAD,
+  return {cub::detail::MemBoundScaling<192, 7, float>::BLOCK_THREADS,
+          cub::detail::MemBoundScaling<192, 7, float>::ITEMS_PER_THREAD,
           cub::LOAD_DEFAULT};
 }
 
