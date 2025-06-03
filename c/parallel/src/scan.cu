@@ -249,12 +249,12 @@ struct __align__({1}) storage_t {
 struct agent_policy_t {
   static constexpr int ITEMS_PER_THREAD = cub::detail::MemBoundScaling<192, 7, float>::ITEMS_PER_THREAD; //{2};
   static constexpr int BLOCK_THREADS = cub::detail::MemBoundScaling<192, 7, float>::BLOCK_THREADS; //{3};
-  static constexpr cub::BlockLoadAlgorithm LOAD_ALGORITHM = cub::BLOCK_LOAD_DIRECT;
+  static constexpr cub::BlockLoadAlgorithm LOAD_ALGORITHM = cub::BLOCK_LOAD_WARP_TRANSPOSE;
   static constexpr cub::CacheLoadModifier LOAD_MODIFIER = cub::LOAD_DEFAULT;
-  static constexpr cub::BlockStoreAlgorithm STORE_ALGORITHM = cub::BLOCK_STORE_DIRECT;
+  static constexpr cub::BlockStoreAlgorithm STORE_ALGORITHM = cub::BLOCK_STORE_WARP_TRANSPOSE;
   static constexpr cub::BlockScanAlgorithm SCAN_ALGORITHM = cub::BLOCK_SCAN_WARP_SCANS;
   struct detail {
-    using delay_constructor_t = cub::detail::fixed_delay_constructor_t<228, 1070>; // <{7}>;
+    using delay_constructor_t = cub::detail::fixed_delay_constructor_t<612, 755>; // <{7}>;
   };
 };
 struct device_scan_policy {
