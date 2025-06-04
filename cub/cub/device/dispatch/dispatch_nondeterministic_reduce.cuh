@@ -248,7 +248,7 @@ struct DispatchNondeterministicReduce
 
       // Init regular kernel configuration
       detail::KernelConfig reduce_config;
-      error = CubDebug(reduce_config.Init(last_block_kernel, active_policy.Reduce(), launcher_factory));
+      error = CubDebug(reduce_config.Init(last_block_kernel, active_policy.LastBlock(), launcher_factory));
       if (cudaSuccess != error)
       {
         break;
@@ -370,7 +370,7 @@ struct DispatchNondeterministicReduce
 
       // Init regular kernel configuration
       detail::KernelConfig reduce_config;
-      error = CubDebug(reduce_config.Init(atomic_kernel, active_policy.Reduce(), launcher_factory));
+      error = CubDebug(reduce_config.Init(atomic_kernel, active_policy.Atomic(), launcher_factory));
       if (cudaSuccess != error)
       {
         break;

@@ -103,23 +103,6 @@ struct DeviceReduceKernelSource
                                  InitT,
                                  AccumT>)
 
-  CUB_DEFINE_KERNEL_GETTER(
-    LastBlockKernel,
-    DeviceReduceLastBlockKernel<
-      MaxPolicyT,
-      InputIteratorT,
-      OutputIteratorT,
-      OffsetT,
-      ReductionOpT,
-      InitT,
-      AccumT,
-      TransformOpT,
-      CounterT>);
-
-  CUB_DEFINE_KERNEL_GETTER(
-    AtomicKernel,
-    DeviceReduceAtomicKernel<MaxPolicyT, InputIteratorT, OutputIteratorT, OffsetT, ReductionOpT, InitT, AccumT, TransformOpT>);
-
   CUB_RUNTIME_FUNCTION static constexpr size_t AccumSize()
   {
     return sizeof(AccumT);
