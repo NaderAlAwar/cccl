@@ -10,7 +10,7 @@
 
 #include <cub/detail/choose_offset.cuh>
 #include <cub/detail/launcher/cuda_driver.cuh>
-#include <cub/device/device_reduce.cuh>
+#include <cub/device/device_nondeterministic_reduce.cuh>
 #include <cub/grid/grid_even_share.cuh>
 #include <cub/util_device.cuh>
 
@@ -30,7 +30,7 @@
 #include "util/errors.h"
 #include "util/indirect_arg.h"
 #include "util/types.h"
-#include <cccl/c/reduce.h>
+#include <cccl/c/nondeterministic_reduce.h>
 #include <nvrtc/command_list.h>
 #include <nvrtc/ltoir_list_appender.h>
 
@@ -39,7 +39,7 @@ using TransformOpT = ::cuda::std::identity;
 using OffsetT      = uint32_t;
 static_assert(std::is_same_v<cub::detail::choose_offset_t<OffsetT>, OffsetT>, "OffsetT must be size_t");
 
-namespace reduce
+namespace nondeterministic_reduce
 {
 
 struct reduce_runtime_tuning_policy
@@ -48,14 +48,6 @@ struct reduce_runtime_tuning_policy
   int items_per_thread;
   int vector_load_length;
 
-  reduce_runtime_tuning_policy SingleTile() const
-  {
-    return *this;
-  }
-  reduce_runtime_tuning_policy Reduce() const
-  {
-    return *this;
-  }
   reduce_runtime_tuning_policy LastBlock() const
   {
     return *this;
@@ -65,9 +57,10 @@ struct reduce_runtime_tuning_policy
     return *this;
   }
 
-  static constexpr cub::detail::reduce::Algorithm GetAlgorithm()
+  static constexpr cub::detail::nondeterministic_reduce::Algorithm GetAlgorithm()
   {
-    return cub::detail::reduce::Algorithm::last_block;
+    return cub::detail::nondeterministic_reduce::Algorithm::atomic;
+    // return cub::detail::nondeterministic_reduce::Algorithm::last_block;
   }
 
   int ItemsPerThread() const
@@ -126,33 +119,21 @@ static cccl_type_info get_accumulator_type(cccl_op_t /*op*/, cccl_iterator_t /*i
   return init.type;
 }
 
-std::string get_single_tile_kernel_name(
-  std::string_view input_iterator_t,
-  std::string_view output_iterator_t,
-  [[maybe_unused]] std::string_view reduction_op_t,
-  cccl_value_t init,
-  std::string_view accum_cpp_t,
-  bool is_second_kernel)
+std::string get_device_reduce_last_block_kernel_name(
+  std::string_view input_iterator_t, std::string_view output_iterator_t, std::string_view accum_t, cccl_value_t init)
 {
   std::string chained_policy_t;
   check(nvrtcGetTypeName<device_reduce_policy>(&chained_policy_t));
 
+  std::string offset_t;
+  check(nvrtcGetTypeName<OffsetT>(&offset_t));
+
+  std::string transform_op_t;
+  check(nvrtcGetTypeName<cuda::std::__identity>(&transform_op_t));
+
   const std::string init_t = cccl_type_enum_to_name(init.type.type);
 
-  std::string offset_t;
-  if (is_second_kernel)
-  {
-    // Second kernel is always invoked with an int offset.
-    // See the definition of the local variable `reduce_grid_size`
-    // in DispatchReduce::InvokePasses.
-    check(nvrtcGetTypeName<int>(&offset_t));
-  }
-  else
-  {
-    check(nvrtcGetTypeName<OffsetT>(&offset_t));
-  }
-
-  std::string result = "cub::detail::reduce::DeviceReduceSingleTileKernel<";
+  std::string result = "cub::detail::nondeterministic_reduce::DeviceReduceLastBlockKernel<";
   result += chained_policy_t;
   result += ", ";
   result += input_iterator_t;
@@ -166,13 +147,17 @@ std::string get_single_tile_kernel_name(
   result += ", ";
   result += init_t;
   result += ", ";
-  result += accum_cpp_t;
+  result += accum_t;
+  result += ", ";
+  result += transform_op_t;
+  result += ", ";
+  result += "int";
   result += ">";
   return result;
 }
 
-std::string get_device_reduce_kernel_name(
-  [[maybe_unused]] std::string_view reduction_op_t, std::string_view input_iterator_t, std::string_view accum_t)
+std::string get_device_reduce_atomic_kernel_name(
+  std::string_view input_iterator_t, std::string_view output_iterator_t, std::string_view accum_t, cccl_value_t init)
 {
   std::string chained_policy_t;
   check(nvrtcGetTypeName<device_reduce_policy>(&chained_policy_t));
@@ -183,15 +168,21 @@ std::string get_device_reduce_kernel_name(
   std::string transform_op_t;
   check(nvrtcGetTypeName<cuda::std::__identity>(&transform_op_t));
 
-  std::string result = "cub::detail::reduce::DeviceReduceKernel<";
+  const std::string init_t = cccl_type_enum_to_name(init.type.type);
+
+  std::string result = "cub::detail::nondeterministic_reduce::DeviceReduceAtomicKernel<";
   result += chained_policy_t;
   result += ", ";
   result += input_iterator_t;
+  result += ", ";
+  result += output_iterator_t;
   result += ", ";
   result += offset_t;
   result += ", ";
   // result += reduction_op_t;
   result += "::cuda::std::plus<>";
+  result += ", ";
+  result += init_t;
   result += ", ";
   result += accum_t;
   result += ", ";
@@ -216,32 +207,28 @@ struct dynamic_reduce_policy_t
 
 struct reduce_kernel_source
 {
-  cccl_device_reduce_build_result_t& build;
+  cccl_device_nondeterministic_reduce_build_result_t& build;
 
   std::size_t AccumSize() const
   {
     return build.accumulator_size;
   }
-  CUkernel SingleTileKernel() const
+  CUkernel LastBlockKernel() const
   {
-    return build.single_tile_kernel;
+    return build.last_block_kernel;
   }
-  CUkernel SingleTileSecondKernel() const
+  CUkernel AtomicKernel() const
   {
-    return build.single_tile_second_kernel;
-  }
-  CUkernel ReductionKernel() const
-  {
-    return build.reduction_kernel;
+    return build.atomic_kernel;
   }
 };
-} // namespace reduce
+} // namespace nondeterministic_reduce
 
 struct reduce_iterator_tag;
 struct reduction_operation_tag;
 
-CUresult cccl_device_reduce_build(
-  cccl_device_reduce_build_result_t* build,
+CUresult cccl_device_nondeterministic_reduce_build(
+  cccl_device_nondeterministic_reduce_build_result_t* build,
   cccl_iterator_t input_it,
   cccl_iterator_t output_it,
   cccl_op_t op,
@@ -260,8 +247,8 @@ CUresult cccl_device_reduce_build(
     const char* name = "test";
 
     const int cc                 = cc_major * 10 + cc_minor;
-    const cccl_type_info accum_t = reduce::get_accumulator_type(op, input_it, init);
-    const auto policy            = reduce::get_policy(cc, accum_t);
+    const cccl_type_info accum_t = nondeterministic_reduce::get_accumulator_type(op, input_it, init);
+    const auto policy            = nondeterministic_reduce::get_policy(cc, accum_t);
     const auto accum_cpp         = cccl_type_enum_to_name(accum_t.type);
 
     const auto [input_iterator_name, input_iterator_src] =
@@ -274,8 +261,8 @@ CUresult cccl_device_reduce_build(
 
     std::string src =
       R"XXX(
-  #include <cub/block/block_reduce.cuh>
-  #include <cub/device/dispatch/kernels/reduce.cuh>
+  #include <cub/block/block_nondeterministic_reduce.cuh>
+  #include <cub/device/dispatch/kernels/nondeterministic_reduce.cuh>
   {8}
   struct __align__({1}) storage_t {
     char data[{0}];
@@ -286,7 +273,7 @@ CUresult cccl_device_reduce_build(
     static constexpr int ITEMS_PER_THREAD = {2};
     static constexpr int BLOCK_THREADS = {3};
     static constexpr int VECTOR_LOAD_LENGTH = {7};
-    static constexpr cub::BlockReduceAlgorithm BLOCK_ALGORITHM = cub::BLOCK_REDUCE_WARP_REDUCTIONS;
+    static constexpr cub::BlockNondeterministicReduceAlgorithm BLOCK_ALGORITHM = cub::BLOCK_NONDETERMINISTIC_REDUCE_WARP_REDUCTIONS;
     static constexpr cub::CacheLoadModifier LOAD_MODIFIER = cub::LOAD_LDG;
   };
   struct device_reduce_policy {
@@ -315,14 +302,12 @@ CUresult cccl_device_reduce_build(
     fflush(stdout);
 #endif
 
-    std::string single_tile_kernel_name =
-      reduce::get_single_tile_kernel_name(input_iterator_name, output_iterator_name, op_name, init, accum_cpp, false);
-    std::string single_tile_second_kernel_name = reduce::get_single_tile_kernel_name(
-      cccl_type_enum_to_name(accum_t.type, true), output_iterator_name, op_name, init, accum_cpp, true);
-    std::string reduction_kernel_name = reduce::get_device_reduce_kernel_name(op_name, input_iterator_name, accum_cpp);
-    std::string single_tile_kernel_lowered_name;
-    std::string single_tile_second_kernel_lowered_name;
-    std::string reduction_kernel_lowered_name;
+    std::string reduction_last_block_kernel_name = nondeterministic_reduce::get_device_reduce_last_block_kernel_name(
+      input_iterator_name, output_iterator_name, accum_cpp, init);
+    std::string reduction_atomic_kernel_name = nondeterministic_reduce::get_device_reduce_atomic_kernel_name(
+      input_iterator_name, output_iterator_name, accum_cpp, init);
+    std::string reduction_last_block_kernel_lowered_name;
+    std::string reduction_atomic_kernel_lowered_name;
 
     const std::string arch = "-arch=sm_" + std::to_string(cc_major) + std::to_string(cc_minor);
 
@@ -352,22 +337,19 @@ CUresult cccl_device_reduce_build(
     nvrtc_link_result result =
       make_nvrtc_command_list()
         .add_program(nvrtc_translation_unit{src.c_str(), name})
-        .add_expression({single_tile_kernel_name})
-        .add_expression({single_tile_second_kernel_name})
-        .add_expression({reduction_kernel_name})
+        .add_expression({reduction_last_block_kernel_name})
+        .add_expression({reduction_atomic_kernel_name})
         .compile_program({args, num_args})
-        .get_name({single_tile_kernel_name, single_tile_kernel_lowered_name})
-        .get_name({single_tile_second_kernel_name, single_tile_second_kernel_lowered_name})
-        .get_name({reduction_kernel_name, reduction_kernel_lowered_name})
+        .get_name({reduction_last_block_kernel_name, reduction_last_block_kernel_lowered_name})
+        .get_name({reduction_atomic_kernel_name, reduction_atomic_kernel_lowered_name})
         .cleanup_program()
         .add_link_list(ltoir_list)
         .finalize_program(num_lto_args, lopts);
 
     cuLibraryLoadData(&build->library, result.data.get(), nullptr, nullptr, 0, nullptr, nullptr, 0);
-    check(cuLibraryGetKernel(&build->single_tile_kernel, build->library, single_tile_kernel_lowered_name.c_str()));
-    check(cuLibraryGetKernel(
-      &build->single_tile_second_kernel, build->library, single_tile_second_kernel_lowered_name.c_str()));
-    check(cuLibraryGetKernel(&build->reduction_kernel, build->library, reduction_kernel_lowered_name.c_str()));
+    check(
+      cuLibraryGetKernel(&build->last_block_kernel, build->library, reduction_last_block_kernel_lowered_name.c_str()));
+    check(cuLibraryGetKernel(&build->atomic_kernel, build->library, reduction_atomic_kernel_lowered_name.c_str()));
 
     build->cc               = cc;
     build->cubin            = (void*) result.data.release();
@@ -385,8 +367,8 @@ CUresult cccl_device_reduce_build(
   return error;
 }
 
-CUresult cccl_device_reduce(
-  cccl_device_reduce_build_result_t build,
+CUresult cccl_device_nondeterministic_reduce(
+  cccl_device_nondeterministic_reduce_build_result_t build,
   void* d_temp_storage,
   size_t* temp_storage_bytes,
   cccl_iterator_t d_in,
@@ -405,7 +387,7 @@ CUresult cccl_device_reduce(
     CUdevice cu_device;
     check(cuCtxGetDevice(&cu_device));
 
-    auto exec_status = cub::DispatchReduce<
+    auto exec_status = cub::detail::nondeterministic_reduce::DispatchNondeterministicReduce<
       indirect_arg_t, // InputIteratorT
       indirect_arg_t, // OutputIteratorT
       OffsetT, // OffsetT
@@ -413,8 +395,8 @@ CUresult cccl_device_reduce(
       indirect_arg_t, // InitT
       void, // AccumT
       ::cuda::std::__identity, // TransformOpT
-      reduce::dynamic_reduce_policy_t<&reduce::get_policy>, // PolicyHub
-      reduce::reduce_kernel_source, // KernelSource
+      nondeterministic_reduce::dynamic_reduce_policy_t<&nondeterministic_reduce::get_policy>, // PolicyHub
+      nondeterministic_reduce::reduce_kernel_source, // KernelSource
       cub::detail::CudaDriverLauncherFactory>:: // KernelLauncherFactory
       Dispatch(
         d_temp_storage,
@@ -428,7 +410,7 @@ CUresult cccl_device_reduce(
         {},
         {build},
         cub::detail::CudaDriverLauncherFactory{cu_device, build.cc},
-        {reduce::get_accumulator_type(op, d_in, init)});
+        {nondeterministic_reduce::get_accumulator_type(op, d_in, init)});
 
     error = static_cast<CUresult>(exec_status);
   }
@@ -449,7 +431,7 @@ CUresult cccl_device_reduce(
   return error;
 }
 
-CUresult cccl_device_reduce_cleanup(cccl_device_reduce_build_result_t* build_ptr)
+CUresult cccl_device_nondeterministic_reduce_cleanup(cccl_device_nondeterministic_reduce_build_result_t* build_ptr)
 {
   try
   {

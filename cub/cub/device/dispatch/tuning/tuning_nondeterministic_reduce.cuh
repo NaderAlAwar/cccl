@@ -236,7 +236,7 @@ struct policy_hub
       items_per_thread,
       AccumT,
       items_per_vec_load,
-      BLOCK_REDUCE_WARP_REDUCTIONS,
+      BLOCK_NONDETERMINISTIC_REDUCE_WARP_REDUCTIONS,
       LOAD_LDG>;
 
     using SingleTilePolicy      = ReducePolicy;
@@ -261,7 +261,7 @@ struct policy_hub
       items_per_thread,
       AccumT,
       items_per_vec_load,
-      BLOCK_REDUCE_WARP_REDUCTIONS,
+      BLOCK_NONDETERMINISTIC_REDUCE_WARP_REDUCTIONS,
       LOAD_LDG>;
 
     using SingleTilePolicy      = ReducePolicy;
@@ -283,7 +283,7 @@ struct policy_hub
       Tuning::items,
       AccumT,
       Tuning::items_per_vec_load,
-      BLOCK_REDUCE_WARP_REDUCTIONS,
+      BLOCK_NONDETERMINISTIC_REDUCE_WARP_REDUCTIONS,
       LOAD_LDG>;
     // use Policy600 as DefaultPolicy
     template <typename Tuning>

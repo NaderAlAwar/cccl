@@ -28,7 +28,7 @@
 
 /**
  * @file
- * cub::BlockReduceWarpReductions provides variants of warp-reduction-based parallel reduction
+ * cub::BlockNondeterministicReduceWarpReductions provides variants of warp-reduction-based parallel reduction
  * across a CUDA thread block. Supports non-commutative reduction operators.
  */
 
@@ -54,7 +54,7 @@ CUB_NAMESPACE_BEGIN
 namespace detail
 {
 /**
- * @brief BlockReduceWarpReductions provides variants of warp-reduction-based parallel reduction
+ * @brief BlockNondeterministicReduceWarpReductions provides variants of warp-reduction-based parallel reduction
  *        across a CUDA thread block. Supports non-commutative reduction operators.
  * @tparam T
  *   Data type being reduced
@@ -69,7 +69,7 @@ namespace detail
  *   The thread block length in threads along the Z dimension
  */
 template <typename T, int BLOCK_DIM_X, int BLOCK_DIM_Y, int BLOCK_DIM_Z>
-struct BlockReduceWarpReductions
+struct BlockNondeterministicReduceWarpReductions
 {
   /// Constants
   enum
@@ -117,7 +117,7 @@ struct BlockReduceWarpReductions
   int lane_id;
 
   /// Constructor
-  _CCCL_DEVICE _CCCL_FORCEINLINE BlockReduceWarpReductions(TempStorage& temp_storage)
+  _CCCL_DEVICE _CCCL_FORCEINLINE BlockNondeterministicReduceWarpReductions(TempStorage& temp_storage)
       : temp_storage(temp_storage.Alias())
       , linear_tid(RowMajorTid(BLOCK_DIM_X, BLOCK_DIM_Y, BLOCK_DIM_Z))
       , warp_id((WARPS == 1) ? 0 : linear_tid / WARP_THREADS)
@@ -178,24 +178,21 @@ struct BlockReduceWarpReductions
   template <bool FULL_TILE, typename ReductionOp>
   _CCCL_DEVICE _CCCL_FORCEINLINE T ApplyWarpAggregates(ReductionOp reduction_op, T warp_aggregate, int num_valid)
   {
-    if constexpr (::cuda::std::is_floating_point_v<T>)
+    if (linear_tid == 0)
     {
-      if (linear_tid == 0)
-      {
-        detail::uninitialized_copy_single(temp_storage.warp_aggregates, warp_aggregate);
-      }
-
-      __syncthreads();
-
-      if (lane_id == 0 && warp_id != 0)
-      {
-        // printf("adding %f\n", warp_aggregate);
-        atomicAdd(temp_storage.warp_aggregates, warp_aggregate);
-      }
-
-      __syncthreads();
-      return temp_storage.warp_aggregates[0];
+      detail::uninitialized_copy_single(temp_storage.warp_aggregates, warp_aggregate);
     }
+
+    __syncthreads();
+
+    if (lane_id == 0 && warp_id != 0)
+    {
+      // printf("adding %f\n", warp_aggregate);
+      atomicAdd(temp_storage.warp_aggregates, warp_aggregate);
+    }
+
+    __syncthreads();
+    return temp_storage.warp_aggregates[0];
 
     // Share lane aggregates
     // if (lane_id == 0)

@@ -5,6 +5,9 @@
 
 from ._histogram import histogram as histogram
 from ._merge_sort import merge_sort as merge_sort
+from ._nondeterministic_reduce import (
+    nondeterministic_reduce_into as nondeterministic_reduce_into,
+)
 from ._radix_sort import DoubleBuffer, SortOrder
 from ._radix_sort import radix_sort as radix_sort
 from ._reduce import reduce_into as reduce_into
@@ -16,7 +19,7 @@ from ._unique_by_key import unique_by_key as unique_by_key
 
 __all__ = [
     "merge_sort",
-    "reduce_into",
+    "nondeterministic_reduce_into",
     "exclusive_scan",
     "inclusive_scan",
     "segmented_reduce",

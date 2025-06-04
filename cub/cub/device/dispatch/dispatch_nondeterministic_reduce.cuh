@@ -248,7 +248,7 @@ struct DispatchNondeterministicReduce
 
       // Init regular kernel configuration
       detail::KernelConfig reduce_config;
-      error = CubDebug(reduce_config.Init(last_block_kernel, active_policy.Reduce(), launcher_factory));
+      error = CubDebug(reduce_config.Init(last_block_kernel, active_policy.LastBlock(), launcher_factory));
       if (cudaSuccess != error)
       {
         break;
@@ -288,11 +288,11 @@ struct DispatchNondeterministicReduce
       // Alias the allocation for the counter
       CounterT* d_counter = static_cast<CounterT*>(allocations[1]);
 
-      // error = CubDebug(launcher_factory.MemsetAsync(d_counter, 0, sizeof(CounterT), stream));
-      // if (cudaSuccess != error)
-      // {
-      //   break;
-      // }
+      error = CubDebug(launcher_factory.MemsetAsync(d_counter, 0, sizeof(CounterT), stream));
+      if (cudaSuccess != error)
+      {
+        break;
+      }
 
       // Get grid size for device_reduce_sweep_kernel
       int reduce_grid_size = even_share.grid_size;
@@ -361,7 +361,7 @@ struct DispatchNondeterministicReduce
 
       // Init regular kernel configuration
       detail::KernelConfig reduce_config;
-      error = CubDebug(reduce_config.Init(atomic_kernel, active_policy.Reduce(), launcher_factory));
+      error = CubDebug(reduce_config.Init(atomic_kernel, active_policy.Atomic(), launcher_factory));
       if (cudaSuccess != error)
       {
         break;
@@ -374,12 +374,15 @@ struct DispatchNondeterministicReduce
       GridEvenShare<OffsetT> even_share;
       even_share.DispatchInit(num_items, max_blocks, reduce_config.tile_size);
 
-      // TODO: need to unwrap the pointer here, call proper conversion operator
-      // error = CubDebug(launcher_factory.MemsetAsync(d_out, 0, kernel_source.AccumSize(), stream));
-      // if (cudaSuccess != error)
-      // {
-      //   break;
-      // }
+#ifdef CCCL_C_EXPERIMENTAL
+      error = CubDebug(launcher_factory.MemsetAsync(&d_out, 0, kernel_source.AccumSize(), stream));
+#else
+      error = CubDebug(launcher_factory.MemsetAsync(d_out, 0, kernel_source.AccumSize(), stream));
+#endif
+      if (cudaSuccess != error)
+      {
+        break;
+      }
 
       // Get grid size for device_reduce_sweep_kernel
       int reduce_grid_size = even_share.grid_size;
@@ -425,21 +428,21 @@ struct DispatchNondeterministicReduce
   template <typename ActivePolicyT>
   CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE cudaError_t Invoke(ActivePolicyT active_policy = {})
   {
+    if (num_items == 0)
+    {
+      return cudaSuccess;
+    }
+
     auto wrapped_policy = detail::nondeterministic_reduce::MakeReducePolicyWrapper(active_policy);
 
     if (Algorithm::atomic == wrapped_policy.GetAlgorithm())
     {
-#ifdef CCCL_C_EXPERIMENTAL
       return InvokeAtomicKernel(kernel_source.AtomicKernel(), wrapped_policy);
-#else
-      if constexpr (std::is_floating_point_v<InitT>)
-      {
-        return InvokeAtomicKernel(kernel_source.AtomicKernel(), wrapped_policy);
-      }
-#endif
     }
-
-    return InvokeLastBlockKernel(kernel_source.LastBlockKernel(), wrapped_policy);
+    else
+    {
+      return InvokeLastBlockKernel(kernel_source.LastBlockKernel(), wrapped_policy);
+    }
   }
 
   //---------------------------------------------------------------------------

@@ -44,7 +44,7 @@
 #endif // no system header
 
 #include <cub/block/block_load.cuh>
-#include <cub/block/block_reduce.cuh>
+#include <cub/block/block_nondeterministic_reduce.cuh>
 #include <cub/detail/type_traits.cuh>
 #include <cub/grid/grid_even_share.cuh>
 #include <cub/grid/grid_mapping.cuh>
@@ -74,7 +74,7 @@ template <
   int NOMINAL_ITEMS_PER_THREAD_4B,
   typename ComputeT,
   int _VECTOR_LOAD_LENGTH,
-  BlockReduceAlgorithm _BLOCK_ALGORITHM,
+  BlockNondeterministicReduceAlgorithm _BLOCK_ALGORITHM,
   CacheLoadModifier _LOAD_MODIFIER,
   typename ScalingType = detail::MemBoundScaling<NOMINAL_BLOCK_THREADS_4B, NOMINAL_ITEMS_PER_THREAD_4B, ComputeT>>
 struct AgentNondeterministicReducePolicy : ScalingType
@@ -83,7 +83,7 @@ struct AgentNondeterministicReducePolicy : ScalingType
   static constexpr int VECTOR_LOAD_LENGTH = _VECTOR_LOAD_LENGTH;
 
   /// Cooperative block-wide reduction algorithm to use
-  static constexpr BlockReduceAlgorithm BLOCK_ALGORITHM = _BLOCK_ALGORITHM;
+  static constexpr BlockNondeterministicReduceAlgorithm BLOCK_ALGORITHM = _BLOCK_ALGORITHM;
 
   /// Cache load modifier for reading input elements
   static constexpr CacheLoadModifier LOAD_MODIFIER = _LOAD_MODIFIER;
@@ -551,26 +551,27 @@ template <typename AgentReducePolicy,
           typename AccumT,
           typename TransformOp = ::cuda::std::__identity>
 struct AgentReduce
-    : AgentReduceImpl<AgentReducePolicy,
-                      InputIteratorT,
-                      OutputIteratorT,
-                      OffsetT,
-                      ReductionOp,
-                      AccumT,
-                      TransformOp,
-                      BlockReduce<AccumT, AgentReducePolicy::BLOCK_THREADS, AgentReducePolicy::BLOCK_ALGORITHM>,
-                      AgentReducePolicy::BLOCK_THREADS>
+    : AgentReduceImpl<
+        AgentReducePolicy,
+        InputIteratorT,
+        OutputIteratorT,
+        OffsetT,
+        ReductionOp,
+        AccumT,
+        TransformOp,
+        BlockNondeterministicReduce<AccumT, AgentReducePolicy::BLOCK_THREADS, AgentReducePolicy::BLOCK_ALGORITHM>,
+        AgentReducePolicy::BLOCK_THREADS>
 {
-  using base_t =
-    AgentReduceImpl<AgentReducePolicy,
-                    InputIteratorT,
-                    OutputIteratorT,
-                    OffsetT,
-                    ReductionOp,
-                    AccumT,
-                    TransformOp,
-                    BlockReduce<AccumT, AgentReducePolicy::BLOCK_THREADS, AgentReducePolicy::BLOCK_ALGORITHM>,
-                    AgentReducePolicy::BLOCK_THREADS>;
+  using base_t = AgentReduceImpl<
+    AgentReducePolicy,
+    InputIteratorT,
+    OutputIteratorT,
+    OffsetT,
+    ReductionOp,
+    AccumT,
+    TransformOp,
+    BlockNondeterministicReduce<AccumT, AgentReducePolicy::BLOCK_THREADS, AgentReducePolicy::BLOCK_ALGORITHM>,
+    AgentReducePolicy::BLOCK_THREADS>;
 
   _CCCL_DEVICE _CCCL_FORCEINLINE AgentReduce(
     typename base_t::TempStorage& temp_storage,
