@@ -351,15 +351,6 @@ struct DispatchNondeterministicReduce
     cudaError error = cudaSuccess;
     do
     {
-      // No temporary storage is needed but I keep this to keep the API consistent
-      if (d_temp_storage == nullptr)
-      {
-        temp_storage_bytes = 1;
-        // Return if the caller is simply requesting the size of the storage
-        // allocation
-        return cudaSuccess;
-      }
-
       // Get SM count
       int sm_count;
       error = CubDebug(launcher_factory.MultiProcessorCount(sm_count));
@@ -437,6 +428,11 @@ struct DispatchNondeterministicReduce
   template <typename ActivePolicyT>
   CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE cudaError_t Invoke(ActivePolicyT active_policy = {})
   {
+    if (num_items == 0)
+    {
+      return cudaSuccess;
+    }
+
     auto wrapped_policy = detail::nondeterministic_reduce::MakeReducePolicyWrapper(active_policy);
 
     if (Algorithm::atomic == wrapped_policy.GetAlgorithm())

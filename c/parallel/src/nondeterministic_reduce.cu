@@ -59,7 +59,8 @@ struct reduce_runtime_tuning_policy
 
   static constexpr cub::detail::nondeterministic_reduce::Algorithm GetAlgorithm()
   {
-    return cub::detail::nondeterministic_reduce::Algorithm::last_block;
+    return cub::detail::nondeterministic_reduce::Algorithm::atomic;
+    // return cub::detail::nondeterministic_reduce::Algorithm::last_block;
   }
 
   int ItemsPerThread() const
@@ -132,7 +133,7 @@ std::string get_device_reduce_last_block_kernel_name(
 
   const std::string init_t = cccl_type_enum_to_name(init.type.type);
 
-  std::string result = "cub::detail::reduce::DeviceReduceLastBlockKernel<";
+  std::string result = "cub::detail::nondeterministic_reduce::DeviceReduceLastBlockKernel<";
   result += chained_policy_t;
   result += ", ";
   result += input_iterator_t;
@@ -169,7 +170,7 @@ std::string get_device_reduce_atomic_kernel_name(
 
   const std::string init_t = cccl_type_enum_to_name(init.type.type);
 
-  std::string result = "cub::detail::reduce::DeviceReduceAtomicKernel<";
+  std::string result = "cub::detail::nondeterministic_reduce::DeviceReduceAtomicKernel<";
   result += chained_policy_t;
   result += ", ";
   result += input_iterator_t;
@@ -272,7 +273,7 @@ CUresult cccl_device_nondeterministic_reduce_build(
     static constexpr int ITEMS_PER_THREAD = {2};
     static constexpr int BLOCK_THREADS = {3};
     static constexpr int VECTOR_LOAD_LENGTH = {7};
-    static constexpr cub::BlockReduceAlgorithm BLOCK_ALGORITHM = cub::BLOCK_REDUCE_WARP_REDUCTIONS;
+    static constexpr cub::BlockNondeterministicReduceAlgorithm BLOCK_ALGORITHM = cub::BLOCK_NONDETERMINISTIC_REDUCE_WARP_REDUCTIONS;
     static constexpr cub::CacheLoadModifier LOAD_MODIFIER = cub::LOAD_LDG;
   };
   struct device_reduce_policy {

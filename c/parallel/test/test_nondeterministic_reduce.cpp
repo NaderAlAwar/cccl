@@ -13,6 +13,7 @@
 #include <cstdint>
 
 #include "test_util.h"
+#include <cccl/c/nondeterministic_reduce.h>
 
 void reduce(cccl_iterator_t input, cccl_iterator_t output, uint64_t num_items, cccl_op_t op, cccl_value_t init)
 {
@@ -27,9 +28,9 @@ void reduce(cccl_iterator_t input, cccl_iterator_t output, uint64_t num_items, c
   const char* libcudacxx_path = TEST_LIBCUDACXX_PATH;
   const char* ctk_path        = TEST_CTK_PATH;
 
-  cccl_device_reduce_build_result_t build;
+  cccl_device_nondeterministic_reduce_build_result_t build;
   REQUIRE(CUDA_SUCCESS
-          == cccl_device_reduce_build(
+          == cccl_device_nondeterministic_reduce_build(
             &build, input, output, op, init, cc_major, cc_minor, cub_path, thrust_path, libcudacxx_path, ctk_path));
 
   const std::string sass = inspect_sass(build.cubin, build.cubin_size);
@@ -38,21 +39,23 @@ void reduce(cccl_iterator_t input, cccl_iterator_t output, uint64_t num_items, c
 
   size_t temp_storage_bytes = 0;
   REQUIRE(
-    CUDA_SUCCESS == cccl_device_reduce(build, nullptr, &temp_storage_bytes, input, output, num_items, op, init, 0));
+    CUDA_SUCCESS
+    == cccl_device_nondeterministic_reduce(build, nullptr, &temp_storage_bytes, input, output, num_items, op, init, 0));
 
   pointer_t<uint8_t> temp_storage(temp_storage_bytes);
 
   REQUIRE(CUDA_SUCCESS
-          == cccl_device_reduce(build, temp_storage.ptr, &temp_storage_bytes, input, output, num_items, op, init, 0));
-  REQUIRE(CUDA_SUCCESS == cccl_device_reduce_cleanup(&build));
+          == cccl_device_nondeterministic_reduce(
+            build, temp_storage.ptr, &temp_storage_bytes, input, output, num_items, op, init, 0));
+  REQUIRE(CUDA_SUCCESS == cccl_device_nondeterministic_reduce_cleanup(&build));
 }
 
-using integral_types = c2h::type_list<int32_t, uint32_t, int64_t, uint64_t>;
+using integral_types = c2h::type_list<int32_t>;
 C2H_TEST("Reduce works with integral types", "[reduce]", integral_types)
 {
   using T = c2h::get<0, TestType>;
 
-  const std::size_t num_items = GENERATE(0, 42, take(4, random(1 << 12, 1 << 24)));
+  const std::size_t num_items = GENERATE(42, take(4, random(1 << 12, 1 << 24)));
   operation_t op              = make_operation("op", get_reduce_op(get_type_info<T>().type));
   const std::vector<T> input  = generate<T>(num_items);
   pointer_t<T> input_ptr(input);

@@ -57,8 +57,9 @@ CUB_NAMESPACE_BEGIN
  * Algorithmic variants
  ******************************************************************************/
 
-//! BlockReduceAlgorithm enumerates alternative algorithms for parallel reduction across a CUDA thread block.
-enum BlockReduceAlgorithm
+//! BlockNondeterministicReduceAlgorithm enumerates alternative algorithms for parallel reduction across a CUDA thread
+//! block.
+enum BlockNondeterministicReduceAlgorithm
 {
 
   //! @rst
@@ -79,15 +80,14 @@ enum BlockReduceAlgorithm
   //! Performance Considerations
   //! ++++++++++++++++++++++++++
   //!
-  //! - This variant performs less communication than BLOCK_REDUCE_RAKING_NON_COMMUTATIVE
+  //! - This variant performs less communication than BLOCK_NONDETERMINISTIC_REDUCE_RAKING_NON_COMMUTATIVE
   //!   and is preferable when the reduction operator is commutative. This variant
-  //!   applies fewer reduction operators than BLOCK_REDUCE_WARP_REDUCTIONS, and can provide higher overall
-  //!   throughput across the GPU when suitably occupied. However, turn-around latency may be
-  //!   higher than to BLOCK_REDUCE_WARP_REDUCTIONS and thus less-desirable
-  //!   when the GPU is under-occupied.
+  //!   applies fewer reduction operators than BLOCK_NONDETERMINISTIC_REDUCE_WARP_REDUCTIONS, and can provide higher
+  //!   overall throughput across the GPU when suitably occupied. However, turn-around latency may be higher than to
+  //!   BLOCK_NONDETERMINISTIC_REDUCE_WARP_REDUCTIONS and thus less-desirable when the GPU is under-occupied.
   //!
   //! @endrst
-  BLOCK_REDUCE_RAKING_COMMUTATIVE_ONLY,
+  BLOCK_NONDETERMINISTIC_REDUCE_RAKING_COMMUTATIVE_ONLY,
 
   //! @rst
   //! Overview
@@ -108,15 +108,14 @@ enum BlockReduceAlgorithm
   //! Performance Considerations
   //! ++++++++++++++++++++++++++
   //!
-  //! - This variant performs more communication than BLOCK_REDUCE_RAKING
+  //! - This variant performs more communication than BLOCK_NONDETERMINISTIC_REDUCE_RAKING
   //!   and is only preferable when the reduction operator is non-commutative. This variant
-  //!   applies fewer reduction operators than BLOCK_REDUCE_WARP_REDUCTIONS, and can provide higher overall
-  //!   throughput across the GPU when suitably occupied. However, turn-around latency may be
-  //!   higher than to BLOCK_REDUCE_WARP_REDUCTIONS and thus less-desirable
-  //!   when the GPU is under-occupied.
+  //!   applies fewer reduction operators than BLOCK_NONDETERMINISTIC_REDUCE_WARP_REDUCTIONS, and can provide higher
+  //!   overall throughput across the GPU when suitably occupied. However, turn-around latency may be higher than to
+  //!   BLOCK_NONDETERMINISTIC_REDUCE_WARP_REDUCTIONS and thus less-desirable when the GPU is under-occupied.
   //!
   //! @endrst
-  BLOCK_REDUCE_RAKING,
+  BLOCK_NONDETERMINISTIC_REDUCE_RAKING,
 
   //! @rst
   //! Overview
@@ -138,13 +137,13 @@ enum BlockReduceAlgorithm
   //! Performance Considerations
   //! ++++++++++++++++++++++++++
   //!
-  //! - This variant applies more reduction operators than BLOCK_REDUCE_RAKING
-  //!   or BLOCK_REDUCE_RAKING_NON_COMMUTATIVE, which may result in lower overall
+  //! - This variant applies more reduction operators than BLOCK_NONDETERMINISTIC_REDUCE_RAKING
+  //!   or BLOCK_NONDETERMINISTIC_REDUCE_RAKING_NON_COMMUTATIVE, which may result in lower overall
   //!   throughput across the GPU. However turn-around latency may be lower and
   //!   thus useful when the GPU is under-occupied.
   //!
   //! @endrst
-  BLOCK_REDUCE_WARP_REDUCTIONS,
+  BLOCK_NONDETERMINISTIC_REDUCE_WARP_REDUCTIONS,
 };
 
 //! @rst
@@ -160,11 +159,11 @@ enum BlockReduceAlgorithm
 //! - BlockReduce can be optionally specialized by algorithm to accommodate different latency/throughput
 //!   workload profiles:
 //!
-//!   #. :cpp:enumerator:`cub::BLOCK_REDUCE_RAKING_COMMUTATIVE_ONLY`:
+//!   #. :cpp:enumerator:`cub::BLOCK_NONDETERMINISTIC_REDUCE_RAKING_COMMUTATIVE_ONLY`:
 //!      An efficient "raking" reduction algorithm that only supports commutative reduction operators.
-//!   #. :cpp:enumerator:`cub::BLOCK_REDUCE_RAKING`:
+//!   #. :cpp:enumerator:`cub::BLOCK_NONDETERMINISTIC_REDUCE_RAKING`:
 //!      An efficient "raking" reduction algorithm that supports commutative and non-commutative reduction operators.
-//!   #. :cpp:enumerator:`cub::BLOCK_REDUCE_WARP_REDUCTIONS`:
+//!   #. :cpp:enumerator:`cub::BLOCK_NONDETERMINISTIC_REDUCE_WARP_REDUCTIONS`:
 //!      A quick "tiled warp-reductions" reduction algorithm that supports commutative and non-commutative
 //!      reduction operators.
 //!
@@ -178,7 +177,7 @@ enum BlockReduceAlgorithm
 //!   - Summation (vs. generic reduction)
 //!   - ``BLOCK_THREADS`` is a multiple of the architecture's warp size
 //!   - Every thread has a valid input (i.e., full vs. partial-tiles)
-//! - See cub::BlockReduceAlgorithm for performance details regarding algorithmic alternatives
+//! - See cub::BlockNondeterministicReduceAlgorithm for performance details regarding algorithmic alternatives
 //!
 //! A Simple Example
 //! +++++++++++++++++++++++++++++++++++++++++++++
@@ -224,8 +223,8 @@ enum BlockReduceAlgorithm
 //!   The thread block length in threads along the X dimension
 //!
 //! @tparam ALGORITHM
-//!   **[optional]** cub::BlockReduceAlgorithm enumerator specifying the underlying algorithm to use
-//!   (default: cub::BLOCK_REDUCE_WARP_REDUCTIONS)
+//!   **[optional]** cub::BlockNondeterministicReduceAlgorithm enumerator specifying the underlying algorithm to use
+//!   (default: cub::BLOCK_NONDETERMINISTIC_REDUCE_WARP_REDUCTIONS)
 //!
 //! @tparam BLOCK_DIM_Y
 //!   **[optional]** The thread block length in threads along the Y dimension (default: 1)
@@ -235,10 +234,10 @@ enum BlockReduceAlgorithm
 //!
 template <typename T,
           int BLOCK_DIM_X,
-          BlockReduceAlgorithm ALGORITHM = BLOCK_REDUCE_WARP_REDUCTIONS,
-          int BLOCK_DIM_Y                = 1,
-          int BLOCK_DIM_Z                = 1>
-class BlockReduce
+          BlockNondeterministicReduceAlgorithm ALGORITHM = BLOCK_NONDETERMINISTIC_REDUCE_WARP_REDUCTIONS,
+          int BLOCK_DIM_Y                                = 1,
+          int BLOCK_DIM_Z                                = 1>
+class BlockNondeterministicReduce
 {
 private:
   /// Constants
@@ -248,15 +247,15 @@ private:
     BLOCK_THREADS = BLOCK_DIM_X * BLOCK_DIM_Y * BLOCK_DIM_Z,
   };
 
-  using WarpReductions        = detail::BlockReduceWarpReductions<T, BLOCK_DIM_X, BLOCK_DIM_Y, BLOCK_DIM_Z>;
+  using WarpReductions = detail::BlockNondeterministicReduceWarpReductions<T, BLOCK_DIM_X, BLOCK_DIM_Y, BLOCK_DIM_Z>;
   using RakingCommutativeOnly = detail::BlockReduceRakingCommutativeOnly<T, BLOCK_DIM_X, BLOCK_DIM_Y, BLOCK_DIM_Z>;
   using Raking                = detail::BlockReduceRaking<T, BLOCK_DIM_X, BLOCK_DIM_Y, BLOCK_DIM_Z>;
 
   /// Internal specialization type
   using InternalBlockReduce =
-    ::cuda::std::_If<ALGORITHM == BLOCK_REDUCE_WARP_REDUCTIONS,
+    ::cuda::std::_If<ALGORITHM == BLOCK_NONDETERMINISTIC_REDUCE_WARP_REDUCTIONS,
                      WarpReductions,
-                     ::cuda::std::_If<ALGORITHM == BLOCK_REDUCE_RAKING_COMMUTATIVE_ONLY,
+                     ::cuda::std::_If<ALGORITHM == BLOCK_NONDETERMINISTIC_REDUCE_RAKING_COMMUTATIVE_ONLY,
                                       RakingCommutativeOnly,
                                       Raking>>; // BlockReduceRaking
 
@@ -285,7 +284,7 @@ public:
   //! @{
 
   //! @brief Collective constructor using a private static allocation of shared memory as temporary storage.
-  _CCCL_DEVICE _CCCL_FORCEINLINE BlockReduce()
+  _CCCL_DEVICE _CCCL_FORCEINLINE BlockNondeterministicReduce()
       : temp_storage(PrivateStorage())
       , linear_tid(RowMajorTid(BLOCK_DIM_X, BLOCK_DIM_Y, BLOCK_DIM_Z))
   {}
@@ -296,7 +295,7 @@ public:
    * @param[in] temp_storage
    *   Reference to memory allocation having layout type TempStorage
    */
-  _CCCL_DEVICE _CCCL_FORCEINLINE BlockReduce(TempStorage& temp_storage)
+  _CCCL_DEVICE _CCCL_FORCEINLINE BlockNondeterministicReduce(TempStorage& temp_storage)
       : temp_storage(temp_storage.Alias())
       , linear_tid(RowMajorTid(BLOCK_DIM_X, BLOCK_DIM_Y, BLOCK_DIM_Z))
   {}

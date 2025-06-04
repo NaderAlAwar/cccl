@@ -197,6 +197,31 @@ class DeviceReduceBuildResult:
         stream,
     ) -> int: ...
 
+# ------------
+# DeviceNondeterministicReduce
+# ------------
+
+class DeviceNondeterministicReduceBuildResult:
+    def __init__(
+        self,
+        d_in: Iterator,
+        d_out: Iterator,
+        binary_op: Op,
+        h_init: Value,
+        info: CommonData,
+    ): ...
+    def compute(
+        self,
+        temp_storage_ptr: int | None,
+        temp_storage_nbytes: int,
+        d_in: Iterator,
+        d_out: Iterator,
+        num_items: int,
+        binary_op: Op,
+        h_init: Value,
+        stream,
+    ) -> int: ...
+
 # ----------
 # DeviceScan
 # ----------
