@@ -237,7 +237,10 @@ CUB_DETAIL_KERNEL_ATTRIBUTES
 __launch_bounds__(int(ChainedPolicyT::ActivePolicy::ReduceAtomicPolicy::BLOCK_THREADS)) void DeviceReduceAtomicKernel(
   InputIteratorT d_in,
   OutputIteratorT d_out,
+  OffsetT num_items,
+#if TUNE_USE_GRID_EVEN_SHARE
   GridEvenShare<OffsetT> even_share,
+#endif
   ReductionOpT reduction_op,
   InitT init,
   TransformOpT transform_op)
@@ -255,8 +258,15 @@ __launch_bounds__(int(ChainedPolicyT::ActivePolicy::ReduceAtomicPolicy::BLOCK_TH
   // Shared memory storage
   __shared__ typename AgentReduceT::TempStorage temp_storage;
 
+#if TUNE_USE_GRID_EVEN_SHARE
   // Consume input tiles
   AccumT block_aggregate = AgentReduceT(temp_storage, d_in, reduction_op, transform_op).ConsumeTiles(even_share);
+#else
+  AccumT block_aggregate =
+    AgentReduceT(temp_storage, d_in, reduction_op, transform_op)
+      .ConsumeRange(blockIdx.x * AgentReduceT::TILE_ITEMS,
+                    _CUDA_VSTD::min(static_cast<OffsetT>((blockIdx.x + 1) * AgentReduceT::TILE_ITEMS), num_items));
+#endif
 
   // Output result
   if (threadIdx.x == 0)

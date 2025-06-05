@@ -16,8 +16,6 @@ endif()
 set(benches_meta_target cub.all.benches)
 add_custom_target(${benches_meta_target})
 
-add_definitions(-DCUB_USE_ATOMIC_BLOCK_REDUCE=0)
-
 function(get_recursive_subdirs subdirs)
   set(dirs)
   file(GLOB_RECURSE contents

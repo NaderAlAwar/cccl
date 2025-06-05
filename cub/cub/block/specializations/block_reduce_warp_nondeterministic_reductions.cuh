@@ -178,7 +178,7 @@ struct BlockNondeterministicReduceWarpReductions
   template <bool FULL_TILE, typename ReductionOp>
   _CCCL_DEVICE _CCCL_FORCEINLINE T ApplyWarpAggregates(ReductionOp reduction_op, T warp_aggregate, int num_valid)
   {
-#if defined CUB_USE_ATOMIC_BLOCK_REDUCE && CUB_USE_ATOMIC_BLOCK_REDUCE == 1
+#if TUNE_USE_ATOMIC_BLOCK_REDUCE
     if (linear_tid == 0)
     {
       detail::uninitialized_copy_single(temp_storage.warp_aggregates, warp_aggregate);
