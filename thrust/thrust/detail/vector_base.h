@@ -45,6 +45,17 @@
 
 THRUST_NAMESPACE_BEGIN
 
+struct default_init_t
+{};
+struct no_init_t
+{};
+
+//! Tag to indicate that a vector's elements should be default initialized
+inline constexpr default_init_t default_init;
+
+//! Tag to indicate that a vector's elements should not be initialized
+inline constexpr no_init_t no_init;
+
 namespace detail
 {
 

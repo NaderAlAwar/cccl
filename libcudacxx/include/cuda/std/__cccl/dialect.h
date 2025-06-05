@@ -99,4 +99,11 @@
 #  define _CCCL_GLOBAL_CONSTANT inline constexpr
 #endif // __CUDA_ARCH__
 
+#if _CCCL_STD_VER <= 2017 || __cpp_consteval < 201811L
+#  define _CCCL_NO_CONSTEVAL
+#  define _CCCL_CONSTEVAL constexpr
+#else
+#  define _CCCL_CONSTEVAL consteval
+#endif
+
 #endif // __CCCL_DIALECT_H
