@@ -104,6 +104,16 @@ struct DeviceReduceKernelSource
 
 namespace detail::nondeterministic_reduce
 {
+
+// This function handles both pointers passed from C++ and indirect_arg_t. We pass the address of the device pointer
+// here, cast it to a double pointer, and dereference it. This is necessary because indirect_arg_t stores the address of
+// the device pointer in `ptr`, which is a host pointer stored in `void*`. We can't dereference it directly, so we cast
+// it to a double pointer. This also just works for pointers from the C++ path.
+void* unwrap_indirect_arg(void* iterator)
+{
+  return *reinterpret_cast<void**>(iterator);
+}
+
 /**
  * @brief Utility class for dispatching the appropriately-tuned kernels for
  *        device-wide reduction
@@ -293,7 +303,7 @@ struct DispatchNondeterministicReduce
       // Alias the allocation for the counter
       CounterT* d_counter = static_cast<CounterT*>(allocations[1]);
 
-      error = CubDebug(launcher_factory.MemsetAsync(d_counter, 0, sizeof(CounterT), stream));
+      error = CubDebug(launcher_factory.MemsetAsync(d_counter, 0, 1, sizeof(CounterT), stream));
       if (cudaSuccess != error)
       {
         break;
@@ -388,11 +398,8 @@ struct DispatchNondeterministicReduce
       GridEvenShare<OffsetT> even_share;
       even_share.DispatchInit(num_items, max_blocks, reduce_config.tile_size);
 
-#ifdef CCCL_C_EXPERIMENTAL
-      error = CubDebug(launcher_factory.MemsetAsync(d_out_ptr, 0, 1, stream));
-#else
-      error = CubDebug(launcher_factory.MemsetAsync(d_out, 0, kernel_source.AccumSize(), stream));
-#endif
+      error =
+        CubDebug(launcher_factory.MemsetAsync(unwrap_indirect_arg(&d_out), 0, 1, kernel_source.AccumSize(), stream));
       if (cudaSuccess != error)
       {
         break;

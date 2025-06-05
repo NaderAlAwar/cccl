@@ -108,9 +108,10 @@ struct CudaDriverLauncherFactory
     return static_cast<cudaError_t>(cuDeviceGetAttribute(&max_grid_dim_x, CU_DEVICE_ATTRIBUTE_MAX_GRID_DIM_X, device));
   }
 
-  _CCCL_HIDE_FROM_ABI cudaError_t MemsetAsync(void* dst, int value, size_t num_bytes, CUstream stream) const
+  _CCCL_HIDE_FROM_ABI cudaError_t
+  MemsetAsync(void* dst, int value, size_t num_elements, size_t /*element_size*/, CUstream stream) const
   {
-    return static_cast<cudaError_t>(cuMemsetD32Async(reinterpret_cast<CUdeviceptr>(dst), value, num_bytes, stream));
+    return static_cast<cudaError_t>(cuMemsetD32Async(reinterpret_cast<CUdeviceptr>(dst), value, num_elements, stream));
   }
 
   CUdevice device;
