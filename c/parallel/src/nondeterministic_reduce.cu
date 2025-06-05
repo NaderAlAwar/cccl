@@ -403,6 +403,7 @@ CUresult cccl_device_nondeterministic_reduce(
         *temp_storage_bytes,
         d_in,
         d_out,
+        d_out.state,
         static_cast<OffsetT>(num_items),
         op,
         init,

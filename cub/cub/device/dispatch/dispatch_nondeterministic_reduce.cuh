@@ -162,6 +162,9 @@ struct DispatchNondeterministicReduce
   /// Pointer to the output aggregate
   OutputIteratorT d_out;
 
+  // Needed to call cuMemsetD32Async
+  void* d_out_ptr;
+
   /// Total number of input items (i.e., length of `d_in`)
   OffsetT num_items;
 
@@ -192,6 +195,7 @@ struct DispatchNondeterministicReduce
     size_t& temp_storage_bytes,
     InputIteratorT d_in,
     OutputIteratorT d_out,
+    void* d_out_ptr,
     OffsetT num_items,
     ReductionOpT reduction_op,
     InitT init,
@@ -204,6 +208,7 @@ struct DispatchNondeterministicReduce
       , temp_storage_bytes(temp_storage_bytes)
       , d_in(d_in)
       , d_out(d_out)
+      , d_out_ptr(d_out_ptr)
       , num_items(num_items)
       , reduction_op(reduction_op)
       , init(init)
@@ -351,6 +356,15 @@ struct DispatchNondeterministicReduce
     cudaError error = cudaSuccess;
     do
     {
+      // This memory is not actually needed but we keep it to make sure the API is consistent
+      if (d_temp_storage == nullptr)
+      {
+        temp_storage_bytes = 1;
+        // Return if the caller is simply requesting the size of the storage
+        // allocation
+        return cudaSuccess;
+      }
+
       // Get SM count
       int sm_count;
       error = CubDebug(launcher_factory.MultiProcessorCount(sm_count));
@@ -375,7 +389,7 @@ struct DispatchNondeterministicReduce
       even_share.DispatchInit(num_items, max_blocks, reduce_config.tile_size);
 
 #ifdef CCCL_C_EXPERIMENTAL
-      error = CubDebug(launcher_factory.MemsetAsync(&d_out, 0, kernel_source.AccumSize(), stream));
+      error = CubDebug(launcher_factory.MemsetAsync(d_out_ptr, 0, 1, stream));
 #else
       error = CubDebug(launcher_factory.MemsetAsync(d_out, 0, kernel_source.AccumSize(), stream));
 #endif
@@ -485,6 +499,7 @@ struct DispatchNondeterministicReduce
     size_t& temp_storage_bytes,
     InputIteratorT d_in,
     OutputIteratorT d_out,
+    void* d_out_ptr,
     OffsetT num_items,
     ReductionOpT reduction_op,
     InitT init,
@@ -511,6 +526,7 @@ struct DispatchNondeterministicReduce
         temp_storage_bytes,
         d_in,
         d_out,
+        d_out_ptr,
         num_items,
         reduction_op,
         init,
