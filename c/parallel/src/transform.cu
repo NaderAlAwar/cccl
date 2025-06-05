@@ -115,7 +115,7 @@ struct transform_runtime_tuning_policy
 transform_runtime_tuning_policy get_policy(int output_size)
 {
   // return prefetch policy defaults:
-  constexpr int load_store_word_size = 4;
+  constexpr int load_store_word_size = 8;
   const int value_type_size          = ::cuda::std::max(output_size, 1);
   const int bytes_per_tile           = ::cuda::round_up(32, ::cuda::std::lcm(load_store_word_size, value_type_size));
   assert(bytes_per_tile % value_type_size == 0);
