@@ -247,8 +247,8 @@ struct __align__({1}) storage_t {
 {4}
 {5}
 struct agent_policy_t {
-  static constexpr int ITEMS_PER_THREAD = cub::detail::MemBoundScaling<192, 7, float>::ITEMS_PER_THREAD; //{2};
-  static constexpr int BLOCK_THREADS = cub::detail::MemBoundScaling<192, 7, float>::BLOCK_THREADS; //{3};
+  static constexpr int ITEMS_PER_THREAD = cub::detail::MemBoundScaling<128, 7, float>::ITEMS_PER_THREAD; //{2};
+  static constexpr int BLOCK_THREADS = cub::detail::MemBoundScaling<128, 7, float>::BLOCK_THREADS; //{3};
   static constexpr cub::BlockLoadAlgorithm LOAD_ALGORITHM = cub::BLOCK_LOAD_WARP_TRANSPOSE;
   static constexpr cub::CacheLoadModifier LOAD_MODIFIER = cub::LOAD_DEFAULT;
   static constexpr cub::BlockStoreAlgorithm STORE_ALGORITHM = cub::BLOCK_STORE_WARP_TRANSPOSE;
