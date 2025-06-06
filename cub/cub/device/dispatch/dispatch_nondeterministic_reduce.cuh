@@ -394,7 +394,6 @@ struct DispatchNondeterministicReduce
       int reduce_device_occupancy = reduce_config.sm_occupancy * sm_count;
 
 #if TUNE_USE_GRID_EVEN_SHARE
-      printf("using grid even\n");
       // Even-share work distribution
       int max_blocks = reduce_device_occupancy * detail::subscription_factor;
       GridEvenShare<OffsetT> even_share;
@@ -402,7 +401,6 @@ struct DispatchNondeterministicReduce
       // Get grid size for device_reduce_sweep_kernel
       int reduce_grid_size = even_share.grid_size;
 #else
-      printf("not using grid even\n");
       int reduce_grid_size = static_cast<int>(::cuda::ceil_div(num_items, reduce_config.tile_size));
 #endif
 
