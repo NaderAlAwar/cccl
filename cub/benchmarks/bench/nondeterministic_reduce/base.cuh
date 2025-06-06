@@ -120,4 +120,4 @@ void reduce(nvbench::state& state, nvbench::type_list<T, OffsetT>)
 NVBENCH_BENCH_TYPES(reduce, NVBENCH_TYPE_AXES(value_types, offset_types))
   .set_name("base")
   .set_type_axes_names({"T{ct}", "OffsetT{ct}"})
-  .add_int64_axis("Elements{io}", nvbench::range(65536, 1048576, 16777216, 52428800, 268435456));
+  .add_int64_axis("Elements{io}", {65536, 1048576, 16777216, 52428800, 268435456});
