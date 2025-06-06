@@ -375,14 +375,6 @@ struct DispatchNondeterministicReduce
         return cudaSuccess;
       }
 
-      // Get SM count
-      int sm_count;
-      error = CubDebug(launcher_factory.MultiProcessorCount(sm_count));
-      if (cudaSuccess != error)
-      {
-        break;
-      }
-
       // Init regular kernel configuration
       detail::KernelConfig reduce_config;
       error = CubDebug(reduce_config.Init(atomic_kernel, active_policy.Atomic(), launcher_factory));
@@ -391,9 +383,16 @@ struct DispatchNondeterministicReduce
         break;
       }
 
+#if TUNE_USE_GRID_EVEN_SHARE
+      // Get SM count
+      int sm_count;
+      error = CubDebug(launcher_factory.MultiProcessorCount(sm_count));
+      if (cudaSuccess != error)
+      {
+        break;
+      }
       int reduce_device_occupancy = reduce_config.sm_occupancy * sm_count;
 
-#if TUNE_USE_GRID_EVEN_SHARE
       // Even-share work distribution
       int max_blocks = reduce_device_occupancy * detail::subscription_factor;
       GridEvenShare<OffsetT> even_share;
