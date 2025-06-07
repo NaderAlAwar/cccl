@@ -410,7 +410,7 @@ struct dispatch_t<StableAddress,
   CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE cudaError_t Invoke(ActivePolicyT active_policy = {})
   {
     auto wrapped_policy = detail::transform::MakeTransformPolicyWrapper(active_policy);
-    if constexpr (Algorithm::vectorized == wrapped_policy.GetAlgorithm() && kernel_source.CanVectorize())
+    if constexpr (Algorithm::vectorized == wrapped_policy.GetAlgorithm())
     {
       return invoke_vectorized_algorithm(::cuda::std::index_sequence_for<RandomAccessIteratorsIn...>{}, wrapped_policy);
     }
