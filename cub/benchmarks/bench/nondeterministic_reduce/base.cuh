@@ -41,19 +41,25 @@ struct policy_hub_t
     static constexpr int items_per_thread   = TUNE_ITEMS_PER_THREAD;
     static constexpr int items_per_vec_load = TUNE_ITEMS_PER_VEC_LOAD;
 
-    using ReducePolicy =
-      cub::AgentReducePolicy<threads_per_block,
-                             items_per_thread,
-                             AccumT,
-                             items_per_vec_load,
-                             cub::BLOCK_REDUCE_WARP_REDUCTIONS,
-                             cub::LOAD_DEFAULT>;
+    using ReducePolicy = cub::AgentNondeterministicReducePolicy<
+      threads_per_block,
+      items_per_thread,
+      AccumT,
+      items_per_vec_load,
+      cub::BLOCK_NONDETERMINISTIC_REDUCE_WARP_REDUCTIONS,
+      cub::LOAD_LDG>;
 
     // SingleTilePolicy
     using SingleTilePolicy = ReducePolicy;
 
     // SegmentedReducePolicy
     using SegmentedReducePolicy = ReducePolicy;
+
+    using ReduceLastBlockPolicy = ReducePolicy;
+    using ReduceAtomicPolicy    = ReducePolicy;
+
+    static constexpr cub::detail::nondeterministic_reduce::Algorithm algorithm =
+      cub::detail::nondeterministic_reduce::Algorithm::atomic;
   };
 
   using MaxPolicy = policy_t;
@@ -75,7 +81,8 @@ void reduce(nvbench::state& state, nvbench::type_list<T, OffsetT>)
      offset_t,
      op_t,
      init_t,
-     accum_t
+     accum_t,
+     ::cuda::std::__identity
 #if !TUNE_BASE
     ,
     policy_hub_t<accum_t, offset_t>
