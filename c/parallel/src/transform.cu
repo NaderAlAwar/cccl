@@ -148,8 +148,8 @@ std::string get_kernel_name(cccl_iterator_t input_it, cccl_iterator_t output_it,
   std::string transform_op_t;
   check(nvrtcGetTypeName<op_wrapper>(&transform_op_t));
 
-  return "cub::detail::transform::transform_kernel<" + chained_policy_t + ", " + offset_t + ", " + "::cuda::std::plus<>"
-       + ", " + output_iterator_t + ", " + input_iterator_t + ">";
+  return "cub::detail::transform::transform_kernel<" + chained_policy_t + ", " + offset_t + ", " + transform_op_t + ", "
+       + output_iterator_t + ", " + input_iterator_t + ">";
 }
 
 std::string
@@ -324,8 +324,8 @@ struct device_transform_policy {{
         "    static constexpr auto algorithm = cub::detail::transform::Algorithm::vectorized;\n"
         "    using algo_policy = vectorized_policy_t;\n"
         "  };\n"
-        "};\n";
-    // + op_src + "\n";
+        "};\n"
+      + op_src + "\n";
 
 #if false // CCCL_DEBUGGING_SWITCH
     fflush(stderr);
