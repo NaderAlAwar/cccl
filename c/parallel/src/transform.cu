@@ -318,7 +318,7 @@ struct device_transform_policy {{
       + ";\n"
         "  static constexpr int load_store_word_size = "
       + std::to_string(policy.load_store_word_size)
-      + "};\n"
+      + ";};\n"
         "struct device_transform_policy {\n"
         "  struct ActivePolicy {\n"
         "    static constexpr auto algorithm = cub::detail::transform::Algorithm::vectorized;\n"
