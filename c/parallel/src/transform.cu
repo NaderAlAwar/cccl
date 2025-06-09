@@ -321,7 +321,7 @@ struct device_transform_policy {{
       + ";};\n"
         "struct device_transform_policy {\n"
         "  struct ActivePolicy {\n"
-        "    static constexpr auto algorithm = cub::detail::transform::Algorithm::vectorized;\n"
+        "    static constexpr auto algorithm = cub::detail::transform::Algorithm::prefetch;\n"
         "    using algo_policy = vectorized_policy_t;\n"
         "  };\n"
         "};\n"
