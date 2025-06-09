@@ -66,7 +66,7 @@ struct transform_runtime_tuning_policy
   // be able to keep this constexpr:
   static constexpr cub::detail::transform::Algorithm GetAlgorithm()
   {
-    return cub::detail::transform::Algorithm::vectorized;
+    return cub::detail::transform::Algorithm::prefetch;
   }
 
   int BlockThreads()
@@ -268,7 +268,7 @@ struct vectorized_policy_t {{
 }};
 struct device_transform_policy {{
   struct ActivePolicy {{
-    static constexpr auto algorithm = cub::detail::transform::Algorithm::vectorized;
+    static constexpr auto algorithm = cub::detail::transform::Algorithm::prefetch;
     using algo_policy = vectorized_policy_t;
   }};
 }};
