@@ -90,14 +90,15 @@ struct histogram_kernel_source
   }
 };
 
-histogram_runtime_tuning_policy get_policy(int /*cc*/, cccl_type_info sample_t, int num_active_channels)
+histogram_runtime_tuning_policy
+get_policy(int /*cc*/, [[maybe_unused]] cccl_type_info sample_t, [[maybe_unused]] int num_active_channels)
 {
-  const int v_scale                      = (sample_t.size + sizeof(int) - 1) / sizeof(int);
-  constexpr int nominal_items_per_thread = 16;
+  // const int v_scale                      = (sample_t.size + sizeof(int) - 1) / sizeof(int);
+  // constexpr int nominal_items_per_thread = 16;
 
-  int pixels_per_thread = (::cuda::std::max)(nominal_items_per_thread / num_active_channels / v_scale, 1);
+  // int pixels_per_thread = (::cuda::std::max) (nominal_items_per_thread / num_active_channels / v_scale, 1);
 
-  return {384, pixels_per_thread};
+  return {544, 20};
 }
 
 std::string get_init_kernel_name(int num_active_channels, std::string_view counter_t, std::string_view offset_t)
@@ -239,9 +240,9 @@ struct agent_policy_t {
   static constexpr bool IS_RLE_COMPRESS = true;
   static constexpr cub::BlockHistogramMemoryPreference MEM_PREFERENCE = cub::SMEM;
   static constexpr bool IS_WORK_STEALING = false;
-  static constexpr int VEC_SIZE = 4;
-  static constexpr cub::BlockLoadAlgorithm LOAD_ALGORITHM = cub::BLOCK_LOAD_DIRECT;
-  static constexpr cub::CacheLoadModifier LOAD_MODIFIER = cub::LOAD_LDG;
+  static constexpr int VEC_SIZE = 1 << 1;
+  static constexpr cub::BlockLoadAlgorithm LOAD_ALGORITHM = cub::BLOCK_LOAD_STRIPED;
+  static constexpr cub::CacheLoadModifier LOAD_MODIFIER = cub::LOAD_DEFAULT;
 };
 struct {5} {
   struct ActivePolicy {
