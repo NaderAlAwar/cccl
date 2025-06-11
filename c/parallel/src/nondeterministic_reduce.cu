@@ -61,8 +61,8 @@ struct reduce_runtime_tuning_policy
 
   static constexpr cub::detail::nondeterministic_reduce::Algorithm GetAlgorithm()
   {
-    return cub::detail::nondeterministic_reduce::Algorithm::atomic;
-    // return cub::detail::nondeterministic_reduce::Algorithm::last_block;
+    // return cub::detail::nondeterministic_reduce::Algorithm::atomic;
+    return cub::detail::nondeterministic_reduce::Algorithm::last_block;
   }
 
   int ItemsPerThread() const
