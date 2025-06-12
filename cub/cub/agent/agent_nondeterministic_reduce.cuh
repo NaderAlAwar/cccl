@@ -242,6 +242,7 @@ struct AgentReduceImpl
   ReductionOp reduction_op; ///< Binary reduction operator
   TransformOp transform_op; ///< Transform operator
   unsigned int lane_id; ///< Local thread index inside a Warp or Block
+  OutputIteratorT d_out;
 
   //---------------------------------------------------------------------
   // Utility
@@ -274,13 +275,19 @@ struct AgentReduceImpl
    * @param reduction_op Binary reduction operator
    */
   _CCCL_DEVICE _CCCL_FORCEINLINE AgentReduceImpl(
-    TempStorage& temp_storage, InputIteratorT d_in, ReductionOp reduction_op, TransformOp transform_op, int lane_id)
+    TempStorage& temp_storage,
+    InputIteratorT d_in,
+    ReductionOp reduction_op,
+    TransformOp transform_op,
+    int lane_id,
+    OutputIteratorT d_out)
       : temp_storage(temp_storage.Alias())
       , d_in(d_in)
       , d_wrapped_in(d_in)
       , reduction_op(reduction_op)
       , transform_op(transform_op)
       , lane_id(lane_id)
+      , d_out(d_out)
   {}
 
   //---------------------------------------------------------------------
@@ -425,7 +432,7 @@ struct AgentReduceImpl
       {
         valid_items = (NumThreads <= valid_items) ? NumThreads : valid_items;
       }
-      return CollectiveReduceT(temp_storage.reduce).Reduce(thread_aggregate, reduction_op, valid_items);
+      return CollectiveReduceT(temp_storage.reduce, d_out).Reduce(thread_aggregate, reduction_op, valid_items);
     }
 
     // Extracting this into a function saves 8% of generated kernel size by allowing to reuse
@@ -433,7 +440,7 @@ struct AgentReduceImpl
     ConsumeFullTileRange(thread_aggregate, even_share, can_vectorize);
 
     // Compute block-wide reduction (all threads have valid items)
-    return CollectiveReduceT(temp_storage.reduce).Reduce(thread_aggregate, reduction_op);
+    return CollectiveReduceT(temp_storage.reduce, d_out).Reduce(thread_aggregate, reduction_op);
   }
 
   /**
@@ -577,8 +584,9 @@ struct AgentReduce
     typename base_t::TempStorage& temp_storage,
     InputIteratorT d_in,
     ReductionOp reduction_op,
+    OutputIteratorT d_out,
     TransformOp transform_op = {})
-      : base_t(temp_storage, d_in, reduction_op, transform_op, threadIdx.x)
+      : base_t(temp_storage, d_in, reduction_op, transform_op, threadIdx.x, d_out)
   {}
 };
 

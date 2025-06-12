@@ -250,14 +250,17 @@ private:
   using WarpReductions = detail::BlockNondeterministicReduceWarpReductions<T, BLOCK_DIM_X, BLOCK_DIM_Y, BLOCK_DIM_Z>;
   using RakingCommutativeOnly = detail::BlockReduceRakingCommutativeOnly<T, BLOCK_DIM_X, BLOCK_DIM_Y, BLOCK_DIM_Z>;
   using Raking                = detail::BlockReduceRaking<T, BLOCK_DIM_X, BLOCK_DIM_Y, BLOCK_DIM_Z>;
+  using WarpReductionsAddToGlobal =
+    detail::BlockNondeterministicReduceAddToGlobalWarpReductions<T, BLOCK_DIM_X, BLOCK_DIM_Y, BLOCK_DIM_Z>;
 
-  /// Internal specialization type
-  using InternalBlockReduce =
-    ::cuda::std::_If<ALGORITHM == BLOCK_NONDETERMINISTIC_REDUCE_WARP_REDUCTIONS,
-                     WarpReductions,
-                     ::cuda::std::_If<ALGORITHM == BLOCK_NONDETERMINISTIC_REDUCE_RAKING_COMMUTATIVE_ONLY,
-                                      RakingCommutativeOnly,
-                                      Raking>>; // BlockReduceRaking
+  // /// Internal specialization type
+  // using InternalBlockReduce =
+  //   ::cuda::std::_If<ALGORITHM == BLOCK_NONDETERMINISTIC_REDUCE_WARP_REDUCTIONS,
+  //                    WarpReductions,
+  //                    ::cuda::std::_If<ALGORITHM == BLOCK_NONDETERMINISTIC_REDUCE_RAKING_COMMUTATIVE_ONLY,
+  //                                     RakingCommutativeOnly,
+  //                                     Raking>>; // BlockReduceRaking
+  using InternalBlockReduce = WarpReductionsAddToGlobal;
 
   /// Shared memory storage layout type for BlockReduce
   using _TempStorage = typename InternalBlockReduce::TempStorage;
@@ -275,6 +278,8 @@ private:
   /// Linear thread-id
   unsigned int linear_tid;
 
+  T* final_result;
+
 public:
   /// @smemstorage{BlockReduce}
   struct TempStorage : Uninitialized<_TempStorage>
@@ -284,9 +289,10 @@ public:
   //! @{
 
   //! @brief Collective constructor using a private static allocation of shared memory as temporary storage.
-  _CCCL_DEVICE _CCCL_FORCEINLINE BlockNondeterministicReduce()
+  _CCCL_DEVICE _CCCL_FORCEINLINE BlockNondeterministicReduce(T* final_result = nullptr)
       : temp_storage(PrivateStorage())
       , linear_tid(RowMajorTid(BLOCK_DIM_X, BLOCK_DIM_Y, BLOCK_DIM_Z))
+      , final_result(final_result)
   {}
 
   /**
@@ -295,9 +301,10 @@ public:
    * @param[in] temp_storage
    *   Reference to memory allocation having layout type TempStorage
    */
-  _CCCL_DEVICE _CCCL_FORCEINLINE BlockNondeterministicReduce(TempStorage& temp_storage)
+  _CCCL_DEVICE _CCCL_FORCEINLINE BlockNondeterministicReduce(TempStorage& temp_storage, T* final_result = nullptr)
       : temp_storage(temp_storage.Alias())
       , linear_tid(RowMajorTid(BLOCK_DIM_X, BLOCK_DIM_Y, BLOCK_DIM_Z))
+      , final_result(final_result)
   {}
 
   //! @}  end member group
@@ -351,7 +358,7 @@ public:
   template <typename ReductionOp>
   _CCCL_DEVICE _CCCL_FORCEINLINE T Reduce(T input, ReductionOp reduction_op)
   {
-    return InternalBlockReduce(temp_storage).template Reduce<true>(input, BLOCK_THREADS, reduction_op);
+    return InternalBlockReduce(temp_storage, final_result).template Reduce<true>(input, BLOCK_THREADS, reduction_op);
   }
 
   //! @rst
@@ -462,11 +469,11 @@ public:
     // Determine if we skip bounds checking
     if (num_valid >= BLOCK_THREADS)
     {
-      return InternalBlockReduce(temp_storage).template Reduce<true>(input, num_valid, reduction_op);
+      return InternalBlockReduce(temp_storage, final_result).template Reduce<true>(input, num_valid, reduction_op);
     }
     else
     {
-      return InternalBlockReduce(temp_storage).template Reduce<false>(input, num_valid, reduction_op);
+      return InternalBlockReduce(temp_storage, final_result).template Reduce<false>(input, num_valid, reduction_op);
     }
   }
 
@@ -514,7 +521,7 @@ public:
   //!   Calling thread's input
   _CCCL_DEVICE _CCCL_FORCEINLINE T Sum(T input)
   {
-    return InternalBlockReduce(temp_storage).template Sum<true>(input, BLOCK_THREADS);
+    return InternalBlockReduce(temp_storage, final_result).template Sum<true>(input, BLOCK_THREADS);
   }
 
   //! @rst
@@ -614,11 +621,11 @@ public:
     // Determine if we skip bounds checking
     if (num_valid >= BLOCK_THREADS)
     {
-      return InternalBlockReduce(temp_storage).template Sum<true>(input, num_valid);
+      return InternalBlockReduce(temp_storage, final_result).template Sum<true>(input, num_valid);
     }
     else
     {
-      return InternalBlockReduce(temp_storage).template Sum<false>(input, num_valid);
+      return InternalBlockReduce(temp_storage, final_result).template Sum<false>(input, num_valid);
     }
   }
 
