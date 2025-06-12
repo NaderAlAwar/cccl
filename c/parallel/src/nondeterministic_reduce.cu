@@ -263,8 +263,8 @@ CUresult cccl_device_nondeterministic_reduce_build(
 
     std::string src =
       R"XXX(
-  // #define TUNE_USE_GRID_EVEN_SHARE 1
-  #define TUNE_USE_ATOMIC_BLOCK_REDUCE 1
+  #define TUNE_USE_GRID_EVEN_SHARE 1
+  // #define TUNE_USE_ATOMIC_BLOCK_REDUCE 1
   #include <cub/block/block_nondeterministic_reduce.cuh>
   #include <cub/device/dispatch/kernels/nondeterministic_reduce.cuh>
   {8}
