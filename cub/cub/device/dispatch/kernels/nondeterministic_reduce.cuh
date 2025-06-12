@@ -237,7 +237,7 @@ CUB_DETAIL_KERNEL_ATTRIBUTES
 __launch_bounds__(int(ChainedPolicyT::ActivePolicy::ReduceAtomicPolicy::BLOCK_THREADS)) void DeviceReduceAtomicKernel(
   InputIteratorT d_in,
   OutputIteratorT d_out,
-  OffsetT num_items,
+// OffsetT num_items,
 #if TUNE_USE_GRID_EVEN_SHARE
   GridEvenShare<OffsetT> even_share,
 #endif
@@ -254,6 +254,8 @@ __launch_bounds__(int(ChainedPolicyT::ActivePolicy::ReduceAtomicPolicy::BLOCK_TH
     ReductionOpT,
     AccumT,
     TransformOpT>;
+
+  constexpr OffsetT num_items = 52428800;
 
   // Shared memory storage
   __shared__ typename AgentReduceT::TempStorage temp_storage;

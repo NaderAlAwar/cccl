@@ -426,7 +426,6 @@ struct DispatchNondeterministicReduce
         .doit(atomic_kernel,
               d_in,
               d_out,
-              num_items,
 #if TUNE_USE_GRID_EVEN_SHARE
               even_share,
 #endif
