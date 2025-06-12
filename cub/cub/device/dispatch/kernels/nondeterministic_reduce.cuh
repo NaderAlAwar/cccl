@@ -258,6 +258,12 @@ __launch_bounds__(int(ChainedPolicyT::ActivePolicy::ReduceAtomicPolicy::BLOCK_TH
   // Shared memory storage
   __shared__ typename AgentReduceT::TempStorage temp_storage;
 
+  // Output result
+  if (threadIdx.x == 0 && blockIdx.x == 0)
+  {
+    atomicAdd(d_out, init);
+  }
+
 #if TUNE_USE_GRID_EVEN_SHARE
   // Consume input tiles
   AccumT block_aggregate = AgentReduceT(temp_storage, d_in, reduction_op, d_out, transform_op).ConsumeTiles(even_share);
@@ -268,18 +274,18 @@ __launch_bounds__(int(ChainedPolicyT::ActivePolicy::ReduceAtomicPolicy::BLOCK_TH
                     _CUDA_VSTD::min(static_cast<OffsetT>((blockIdx.x + 1) * AgentReduceT::TILE_ITEMS), num_items));
 #endif
 
-  // Output result
-  if (threadIdx.x == 0)
-  {
-    // ony thread 0 has valid value in block aggregate
-    // detail::uninitialized_copy_single(d_block_reductions + blockIdx.x, block_aggregate);
-    if (blockIdx.x == 0)
-    {
-      atomicAdd(d_out, init);
-    }
+  // // Output result
+  // if (threadIdx.x == 0)
+  // {
+  //   // ony thread 0 has valid value in block aggregate
+  //   // detail::uninitialized_copy_single(d_block_reductions + blockIdx.x, block_aggregate);
+  //   if (blockIdx.x == 0)
+  //   {
+  //     atomicAdd(d_out, init);
+  //   }
 
-    atomicAdd(d_out, block_aggregate);
-  }
+  //   atomicAdd(d_out, block_aggregate);
+  // }
 }
 
 } // namespace nondeterministic_reduce
