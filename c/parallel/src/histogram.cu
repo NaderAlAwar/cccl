@@ -240,8 +240,8 @@ struct agent_policy_t {
   static constexpr bool IS_RLE_COMPRESS = false;
   static constexpr cub::BlockHistogramMemoryPreference MEM_PREFERENCE = cub::SMEM;
   static constexpr bool IS_WORK_STEALING = false;
-  static constexpr int VEC_SIZE = 1 << 0;
-  static constexpr cub::BlockLoadAlgorithm LOAD_ALGORITHM = cub::BLOCK_LOAD_DIRECT;
+  static constexpr int VEC_SIZE = 1 << 1;
+  static constexpr cub::BlockLoadAlgorithm LOAD_ALGORITHM = cub::BLOCK_LOAD_WARP_TRANSPOSE;
   static constexpr cub::CacheLoadModifier LOAD_MODIFIER = cub::LOAD_DEFAULT;
 };
 struct {5} {
