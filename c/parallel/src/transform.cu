@@ -96,7 +96,7 @@ struct transform_runtime_tuning_policy
   {
     return vector_load_length;
   }
-  static constexpr int min_bif = 1024 * 16;
+  static constexpr int min_bif = 1024 * 12;
 };
 
 transform_runtime_tuning_policy get_policy()
