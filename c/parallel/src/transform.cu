@@ -61,6 +61,7 @@ struct transform_runtime_tuning_policy
   int vector_load_length;
   int items_per_thread;
   int load_store_word_size;
+  int min_bif;
 
   // Note: when we extend transform to support UBLKCP, we may no longer
   // be able to keep this constexpr:
@@ -110,10 +111,15 @@ struct transform_runtime_tuning_policy
     return load_store_word_size;
   }
 
-  static constexpr int min_bif = 1024 * 16;
+  int MinBif()
+  {
+    return min_bif;
+  }
+
+  // static constexpr int min_bif = 1024 * 16;
 };
 
-transform_runtime_tuning_policy get_policy(int output_size)
+transform_runtime_tuning_policy get_policy(int output_size, int cc)
 {
   // return prefetch policy defaults:
   constexpr int load_store_word_size = 8;
@@ -122,7 +128,8 @@ transform_runtime_tuning_policy get_policy(int output_size)
   assert(bytes_per_tile % value_type_size == 0);
   const int items_per_thread = bytes_per_tile / value_type_size;
   assert((items_per_thread * value_type_size) % load_store_word_size == 0);
-  return {256, 2, 1, 32, 16, 4, items_per_thread, load_store_word_size};
+  int min_bif = cub::detail::transform::arch_to_min_bytes_in_flight(cc * 10);
+  return {256, 2, 1, 32, 16, 4, items_per_thread, load_store_word_size, min_bif};
 }
 
 template <typename StorageT>
@@ -179,9 +186,9 @@ struct dynamic_transform_policy_t
   using max_policy = dynamic_transform_policy_t;
 
   template <typename F>
-  cudaError_t Invoke(int /*device_ptx_version*/, F& op)
+  cudaError_t Invoke(int device_ptx_version, F& op)
   {
-    return op.template Invoke<transform_runtime_tuning_policy>(GetPolicy(output_size));
+    return op.template Invoke<transform_runtime_tuning_policy>(GetPolicy(device_ptx_version, output_size));
   }
 
   int output_size;
@@ -238,7 +245,7 @@ CUresult cccl_device_unary_transform_build(
     const char* name = "test";
 
     const int cc                 = cc_major * 10 + cc_minor;
-    const auto policy            = transform::get_policy(output_it.value_type.size);
+    const auto policy            = transform::get_policy(output_it.value_type.size, cc);
     const auto input_it_value_t  = cccl_type_enum_to_name<input_storage_t>(input_it.value_type.type);
     const auto output_it_value_t = cccl_type_enum_to_name<output_storage_t>(output_it.value_type.type);
     const auto offset_t          = cccl_type_enum_to_name(cccl_type_enum::CCCL_INT64);
@@ -469,7 +476,7 @@ CUresult cccl_device_binary_transform_build(
     const char* name = "test";
 
     const int cc                 = cc_major * 10 + cc_minor;
-    const auto policy            = transform::get_policy(output_it.value_type.size);
+    const auto policy            = transform::get_policy(output_it.value_type.size, cc);
     const auto input1_it_value_t = cccl_type_enum_to_name<input1_storage_t>(input1_it.value_type.type);
     const auto input2_it_value_t = cccl_type_enum_to_name<input2_storage_t>(input2_it.value_type.type);
 

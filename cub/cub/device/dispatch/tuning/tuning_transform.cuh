@@ -214,6 +214,11 @@ struct TransformPolicyWrapper<StaticPolicyT, ::cuda::std::void_t<decltype(Static
   {
     return StaticPolicyT::algo_policy::load_store_word_size;
   }
+
+  _CCCL_HOST_DEVICE static constexpr int MinBif()
+  {
+    return StaticPolicyT::min_bif;
+  }
 };
 
 template <typename PolicyT>
