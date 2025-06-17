@@ -119,7 +119,7 @@ struct transform_runtime_tuning_policy
   // static constexpr int min_bif = 1024 * 16;
 };
 
-transform_runtime_tuning_policy get_policy(int output_size, int cc)
+transform_runtime_tuning_policy get_policy(int cc, int output_size)
 {
   // return prefetch policy defaults:
   constexpr int load_store_word_size = 8;
@@ -245,7 +245,7 @@ CUresult cccl_device_unary_transform_build(
     const char* name = "test";
 
     const int cc                 = cc_major * 10 + cc_minor;
-    const auto policy            = transform::get_policy(output_it.value_type.size, cc);
+    const auto policy            = transform::get_policy(cc, output_it.value_type.size);
     const auto input_it_value_t  = cccl_type_enum_to_name<input_storage_t>(input_it.value_type.type);
     const auto output_it_value_t = cccl_type_enum_to_name<output_storage_t>(output_it.value_type.type);
     const auto offset_t          = cccl_type_enum_to_name(cccl_type_enum::CCCL_INT64);
@@ -476,7 +476,7 @@ CUresult cccl_device_binary_transform_build(
     const char* name = "test";
 
     const int cc                 = cc_major * 10 + cc_minor;
-    const auto policy            = transform::get_policy(output_it.value_type.size, cc);
+    const auto policy            = transform::get_policy(cc, output_it.value_type.size);
     const auto input1_it_value_t = cccl_type_enum_to_name<input1_storage_t>(input1_it.value_type.type);
     const auto input2_it_value_t = cccl_type_enum_to_name<input2_storage_t>(input2_it.value_type.type);
 
