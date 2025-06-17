@@ -67,7 +67,8 @@ def _numba_type_to_info(numba_type: types.Type) -> TypeInfo:
         # alignment of the pointee.
         value_type = value_type.pointee
     size = value_type.get_abi_size(context.target_data)
-    alignment = value_type.get_abi_alignment(context.target_data)
+    # alignment = value_type.get_abi_alignment(context.target_data)
+    alignment = 4 # This is the alignment of the pixel type
     return TypeInfo(size, alignment, _type_to_enum(numba_type))
 
 
