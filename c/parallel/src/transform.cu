@@ -248,7 +248,7 @@ CUresult cccl_device_unary_transform_build(
     const auto policy            = transform::get_policy(cc, output_it.value_type.size);
     const auto input_it_value_t  = cccl_type_enum_to_name<input_storage_t>(input_it.value_type.type);
     const auto output_it_value_t = cccl_type_enum_to_name<output_storage_t>(output_it.value_type.type);
-    const auto offset_t          = cccl_type_enum_to_name(cccl_type_enum::CCCL_INT64);
+    const auto offset_t          = cccl_type_enum_to_name(cccl_type_enum::CCCL_INT32);
     const std::string input_iterator_src =
       make_kernel_input_iterator(offset_t, transform::input_iterator_name, input_it_value_t, input_it);
     const std::string output_iterator_src =
@@ -481,7 +481,7 @@ CUresult cccl_device_binary_transform_build(
     const auto input2_it_value_t = cccl_type_enum_to_name<input2_storage_t>(input2_it.value_type.type);
 
     const auto output_it_value_t = cccl_type_enum_to_name<output_storage_t>(output_it.value_type.type);
-    const auto offset_t          = cccl_type_enum_to_name(cccl_type_enum::CCCL_INT64);
+    const auto offset_t          = cccl_type_enum_to_name(cccl_type_enum::CCCL_INT32);
     const std::string input1_iterator_src =
       make_kernel_input_iterator(offset_t, transform::input1_iterator_name, input1_it_value_t, input1_it);
     const std::string input2_iterator_src =
