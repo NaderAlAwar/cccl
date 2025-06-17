@@ -242,9 +242,8 @@ struct policy_hub<RequiresStableAddress, ::cuda::std::tuple<RandomAccessIterator
     (THRUST_NS_QUALIFIER::is_contiguous_iterator_v<RandomAccessIteratorsIn> && ...);
   static constexpr bool all_values_trivially_reloc =
     (THRUST_NS_QUALIFIER::is_trivially_relocatable_v<it_value_t<RandomAccessIteratorsIn>> && ...);
-  static constexpr bool can_memcpy = all_contiguous && all_values_trivially_reloc;
-  static constexpr bool all_values_same_size =
-    are_equal(size_of<it_value_t<RandomAccessIteratorsIn>>..., size_of<it_value_t<RandomAccessIteratorOut>>);
+  static constexpr bool can_memcpy           = all_contiguous && all_values_trivially_reloc;
+  static constexpr bool all_values_same_size = are_equal(size_of<it_value_t<RandomAccessIteratorsIn>>...);
 
   // for vectorized policy:
   static constexpr int load_store_word_size = 8;

@@ -243,7 +243,8 @@ _CCCL_DEVICE void transform_kernel_impl(
 
   // write output
   if constexpr (THRUST_NS_QUALIFIER::is_contiguous_iterator_v<RandomAccessIteratorOut>
-                && THRUST_NS_QUALIFIER::is_trivially_relocatable_v<it_value_t<RandomAccessIteratorOut>>)
+                && THRUST_NS_QUALIFIER::is_trivially_relocatable_v<it_value_t<RandomAccessIteratorOut>>
+                && sizeof(it_value_t<RandomAccessIteratorOut>) > load_store_word_size)
   {
     // vector path
     static_assert((items_per_thread * sizeof(output_t)) % load_store_word_size == 0);
