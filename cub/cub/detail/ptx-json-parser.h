@@ -31,7 +31,7 @@
 
 #include <thrust/detail/algorithm_wrapper.h>
 
-#include <format>
+// #include <format>
 #include <string_view>
 
 #include <nlohmann/json.hpp>
@@ -42,21 +42,22 @@ namespace detail::ptx_json
 {
 inline nlohmann::json parse(std::string_view tag, std::string_view ptx_stream)
 {
-  auto const open_tag      = std::format("cccl.ptx_json.begin({})", tag);
-  auto const open_location = std::ranges::search(ptx_stream, open_tag);
-  if (std::ranges::size(open_location) != open_tag.size())
+  std::string open_tag  = "cccl.ptx_json.begin(" + std::string(tag) + ")";
+  std::string close_tag = "cccl.ptx_json.end(" + std::string(tag) + ")";
+  auto open_pos         = ptx_stream.find(open_tag);
+  if (open_pos == std::string_view::npos)
+  {
+    return nullptr;
+  }
+  open_pos += open_tag.size();
+
+  auto close_pos = ptx_stream.find(close_tag, open_pos);
+  if (close_pos == std::string_view::npos)
   {
     return nullptr;
   }
 
-  auto const close_tag      = std::format("cccl.ptx_json.end({})", tag);
-  auto const close_location = std::ranges::search(ptx_stream, close_tag);
-  if (std::ranges::size(close_location) != close_location.size())
-  {
-    return nullptr;
-  }
-
-  return nlohmann::json::parse(std::ranges::end(open_location), std::ranges::begin(close_location), nullptr, true, true);
+  return nlohmann::json::parse(ptx_stream.data() + open_pos, ptx_stream.data() + close_pos, nullptr, true, true);
 }
 } // namespace detail::ptx_json
 

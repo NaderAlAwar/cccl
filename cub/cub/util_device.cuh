@@ -56,7 +56,7 @@
 
 #if !_CCCL_COMPILER(NVRTC)
 #  if defined(CUB_DEFINE_RUNTIME_POLICIES)
-#    include <format>
+// #    include <format>
 #    include <string_view>
 
 #    include <nlohmann/json.hpp>
@@ -579,23 +579,24 @@ namespace detail
 
 #  define CUB_DETAIL_POLICY_WRAPPER_FIELD_VALUE(field) , (int) ap._CCCL_PP_CAT(runtime_, _CCCL_PP_FIRST field)
 
-#  define CUB_DETAIL_POLICY_WRAPPER_AGENT_POLICY(concept_name, ...)                                                    \
-    struct Runtime##concept_name                                                                                       \
-    {                                                                                                                  \
-      _CCCL_PP_FOR_EACH(CUB_DETAIL_POLICY_WRAPPER_FIELD, __VA_ARGS__)                                                  \
-      static std::pair<Runtime##concept_name, std::string>                                                             \
-      from_json(const nlohmann::json& json, std::string_view subpolicy_name)                                           \
-      {                                                                                                                \
-        auto subpolicy = json[subpolicy_name];                                                                         \
-        assert(subpolicy);                                                                                             \
-        Runtime##concept_name ap;                                                                                      \
-        _CCCL_PP_FOR_EACH(CUB_DETAIL_POLICY_WRAPPER_GET_FIELD, __VA_ARGS__)                                            \
-        return std::make_pair(                                                                                         \
-          ap,                                                                                                          \
-          std::format("struct {} {{\n" _CCCL_PP_FOR_EACH(CUB_DETAIL_POLICY_WRAPPER_FIELD_STRING, __VA_ARGS__) "}};\n", \
-                      subpolicy_name _CCCL_PP_FOR_EACH(CUB_DETAIL_POLICY_WRAPPER_FIELD_VALUE, __VA_ARGS__)));          \
-      }                                                                                                                \
+#  define CUB_DETAIL_POLICY_WRAPPER_AGENT_POLICY(concept_name, ...)                                    \
+    struct Runtime##concept_name                                                                       \
+    {                                                                                                  \
+      _CCCL_PP_FOR_EACH(CUB_DETAIL_POLICY_WRAPPER_FIELD, __VA_ARGS__)                                  \
+      static std::pair<Runtime##concept_name, std::string>                                             \
+      from_json(const nlohmann::json& json, std::string_view subpolicy_name)                           \
+      {                                                                                                \
+        auto subpolicy = json[subpolicy_name];                                                         \
+        assert(subpolicy);                                                                             \
+        Runtime##concept_name ap;                                                                      \
+        _CCCL_PP_FOR_EACH(CUB_DETAIL_POLICY_WRAPPER_GET_FIELD, __VA_ARGS__)                            \
+        std::stringstream ss;                                                                          \
+        ss << "struct " << subpolicy_name                                                              \
+           << " {\n" _CCCL_PP_FOR_EACH(CUB_DETAIL_POLICY_WRAPPER_FIELD_STRING, __VA_ARGS__) << "};\n"; \
+        return std::make_pair(ap, ss.str());                                                           \
+      }                                                                                                \
     };
+
 #else
 #  define CUB_DETAIL_POLICY_WRAPPER_AGENT_POLICY(...)
 #endif // defined(CUB_DEFINE_RUNTIME_POLICIES)

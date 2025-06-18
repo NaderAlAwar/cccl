@@ -64,11 +64,11 @@ std::pair<size_t, size_t> get_tile_state_bytes_per_tile(
   ptx_src.replace(ptx_src.find("{2}"), 3, accum_cpp);
   ptx_src.replace(ptx_src.find("{2}"), 3, accum_cpp);
   auto compile_result =
-    make_nvrtc_command_list()
-      .add_program(nvrtc_translation_unit{ptx_src.c_str(), "tile_state_info"})
-      .compile_program({ptx_args, num_ptx_args})
-      .cleanup_program()
-      .finalize_program(num_ptx_lto_args, ptx_lopts);
+    begin_linking_nvrtc_program(num_ptx_lto_args, ptx_lopts)
+      ->add_program(nvrtc_translation_unit{ptx_src.c_str(), "tile_state_info"})
+      ->compile_program({ptx_args, num_ptx_args})
+      ->link_program()
+      ->finalize_program();
   auto ptx_code = compile_result.data.get();
 
   size_t description_bytes_per_tile;
