@@ -108,17 +108,44 @@ _CCCL_HOST_DEVICE constexpr auto loaded_bytes_per_iteration() -> int
 constexpr int memcpy_async_alignment     = 16;
 constexpr int memcpy_async_size_multiple = 16;
 
-template <typename... RandomAccessIteratorsIn>
-_CCCL_HOST_DEVICE constexpr auto memcpy_async_smem_for_tile_size(int tile_size) -> int
+// template <typename... RandomAccessIteratorsIn>
+// _CCCL_HOST_DEVICE constexpr auto memcpy_async_smem_for_tile_size(int tile_size) -> int
+// {
+//   int smem_size                    = 0;
+//   [[maybe_unused]] auto count_smem = [&](int size, int alignment) {
+//     smem_size = round_up_to_po2_multiple(smem_size, alignment);
+//     // max aligned_base_ptr head_padding + max padding after == 16
+//     smem_size += size * tile_size + memcpy_async_alignment;
+//   };
+//   // left to right evaluation!
+//   (..., count_smem(sizeof(it_value_t<RandomAccessIteratorsIn>), alignof(it_value_t<RandomAccessIteratorsIn>)));
+//   return smem_size;
+// }
+
+_CCCL_HOST_DEVICE constexpr auto memcpy_async_smem_for_tile_size(
+  ::cuda::std::span<const ::cuda::std::size_t> it_value_sizes,
+  ::cuda::std::span<const ::cuda::std::size_t> it_value_alignments,
+  int tile_size) -> int
 {
-  int smem_size                    = 0;
+  // return static_cast<int>(
+  //   round_up_to_po2_multiple(int{sizeof(int64_t)}, input_alignment) /* bar */
+  //   // 128 bytes of padding for each input tile (handles before + after)
+  //   + tile_size * ::cuda::std::reduce(it_value_sizes.begin(), it_value_sizes.end())
+  //   + it_value_sizes.size() * bulk_copy_align);
+
+  int smem_size = 0;
+  for (size_t i = 0; i < it_value_sizes.size(); ++i)
+  {
+    smem_size = round_up_to_po2_multiple(smem_size, static_cast<int>(it_value_alignments[i]));
+    // max aligned_base_ptr head_padding + max padding after == 16
+    smem_size += it_value_sizes[i] * tile_size + memcpy_async_alignment;
+  }
   [[maybe_unused]] auto count_smem = [&](int size, int alignment) {
     smem_size = round_up_to_po2_multiple(smem_size, alignment);
     // max aligned_base_ptr head_padding + max padding after == 16
     smem_size += size * tile_size + memcpy_async_alignment;
   };
-  // left to right evaluation!
-  (..., count_smem(sizeof(it_value_t<RandomAccessIteratorsIn>), alignof(it_value_t<RandomAccessIteratorsIn>)));
+
   return smem_size;
 }
 

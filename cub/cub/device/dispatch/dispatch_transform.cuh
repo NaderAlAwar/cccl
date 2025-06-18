@@ -87,6 +87,12 @@ struct TransformKernelSource<Offset,
   {
     return detail::transform::make_iterator_kernel_arg(it);
   }
+
+  template <typename It>
+  CUB_RUNTIME_FUNCTION constexpr kernel_arg<It> MakeAlignedBasePtrKernelArg(It it, int align)
+  {
+    return detail::transform::make_aligned_base_ptr_kernel_arg(it, align);
+  }
 };
 
 enum class requires_stable_address
@@ -176,13 +182,13 @@ struct dispatch_t<StableAddress,
 
   template <typename ActivePolicy, typename SMemFunc>
   CUB_RUNTIME_FUNCTION _CCCL_VISIBILITY_HIDDEN _CCCL_FORCEINLINE auto
-  configure_async_kernel([[maybe_unused]] int alignment, SMemFunc smem_for_tile_size) -> cuda_expected<
-    ::cuda::std::
-      tuple<THRUST_NS_QUALIFIER::cuda_cub::detail::triple_chevron, decltype(kernel_source.TransformKernel()), int>>
+  configure_async_kernel([[maybe_unused]] int alignment, SMemFunc smem_for_tile_size, ActivePolicy policy = {})
+    -> cuda_expected<
+      ::cuda::std::tuple<decltype(launcher_factory(0, 0, 0, 0)), decltype(kernel_source.TransformKernel()), int>>
   {
     // Benchmarking shows that even for a few iteration, this loop takes around 4-7 us, so should not be a concern.
-    using policy_t              = typename ActivePolicy::algo_policy;
-    constexpr int block_threads = policy_t::block_threads;
+    // using policy_t              = typename ActivePolicy::algo_policy;
+    const int block_threads = policy.BlockThreads();
     _CCCL_ASSERT(block_threads % alignment == 0,
                  "block_threads needs to be a multiple of the copy alignment"); // then tile_size is a multiple
     auto determine_element_counts = [&]() -> cuda_expected<elem_counts> {
@@ -194,14 +200,15 @@ struct dispatch_t<StableAddress,
 
       elem_counts last_counts{};
       // Increase the number of output elements per thread until we reach the required bytes in flight.
-      for (int elem_per_thread = +policy_t::min_items_per_thread; elem_per_thread <= +policy_t::max_items_per_thread;
+      for (int elem_per_thread = +policy.MinItemsPerThread(); elem_per_thread <= +policy.MaxItemsPerThread();
            ++elem_per_thread)
       {
         // ensures the loop below runs at least once
-        static_assert(policy_t::min_items_per_thread <= policy_t::max_items_per_thread);
+        // static_assert(policy_t::min_items_per_thread <= policy_t::max_items_per_thread);
 
         const int tile_size = block_threads * elem_per_thread;
-        const int smem_size = smem_for_tile_size(tile_size);
+        const int smem_size =
+          smem_for_tile_size(kernel_source.ItValueSizes(), kernel_source.ItValueAlignments(), tile_size);
         if (smem_size > *max_smem)
         {
           // assert should be prevented by smem check in policy
@@ -256,10 +263,10 @@ struct dispatch_t<StableAddress,
   }
 
   template <typename ActivePolicy, typename SMemFunc, std::size_t... Is>
-  CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE cudaError_t
-  invoke_async_algorithm(int alignment, SMemFunc smem_for_tile_size, cuda::std::index_sequence<Is...>)
+  CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE cudaError_t invoke_async_algorithm(
+    int alignment, SMemFunc smem_for_tile_size, cuda::std::index_sequence<Is...>, ActivePolicy policy = {})
   {
-    auto ret = configure_async_kernel<ActivePolicy>(alignment, smem_for_tile_size);
+    auto ret = configure_async_kernel<ActivePolicy>(alignment, smem_for_tile_size, policy);
     if (!ret)
     {
       return ret.error();
@@ -271,7 +278,7 @@ struct dispatch_t<StableAddress,
       elem_per_thread,
       op,
       out,
-      make_aligned_base_ptr_kernel_arg(
+      kernel_source.MakeAlignedBasePtrKernelArg(
         THRUST_NS_QUALIFIER::try_unwrap_contiguous_iterator(::cuda::std::get<Is>(in)), alignment)...);
   }
 
@@ -357,7 +364,7 @@ struct dispatch_t<StableAddress,
     else if constexpr (Algorithm::memcpy_async == wrapped_policy.GetAlgorithm())
     {
       return invoke_async_algorithm<ActivePolicyT>(
-        memcpy_async_alignment, &memcpy_async_smem_for_tile_size<RandomAccessIteratorsIn...>, seq);
+        memcpy_async_alignment, &memcpy_async_smem_for_tile_size<RandomAccessIteratorsIn...>, seq, wrapped_policy);
     }
     else
     {

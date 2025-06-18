@@ -63,7 +63,7 @@ struct transform_runtime_tuning_policy
   // be able to keep this constexpr:
   static constexpr cub::detail::transform::Algorithm GetAlgorithm()
   {
-    return cub::detail::transform::Algorithm::prefetch;
+    return cub::detail::transform::Algorithm::memcpy_async;
   }
 
   int BlockThreads()
@@ -168,6 +168,8 @@ struct dynamic_transform_policy_t
 struct transform_kernel_source
 {
   cccl_device_transform_build_result_t& build;
+  std::vector<cuda::std::size_t> it_value_sizes;
+  std::vector<cuda::std::size_t> it_value_alignments;
 
   CUkernel TransformKernel() const
   {
@@ -183,6 +185,21 @@ struct transform_kernel_source
   constexpr It MakeIteratorKernelArg(It it)
   {
     return it;
+  }
+
+  cub::detail::transform::kernel_arg<char*> MakeAlignedBasePtrKernelArg(indirect_arg_t it, int align) const
+  {
+    return cub::detail::transform::make_aligned_base_ptr_kernel_arg(*static_cast<char**>(&it), align);
+  }
+
+  auto ItValueSizes() const
+  {
+    return cuda::std::span(it_value_sizes);
+  }
+
+  auto ItValueAlignments() const
+  {
+    return cuda::std::span(it_value_alignments);
   }
 };
 
@@ -235,7 +252,7 @@ struct prefetch_policy_t {{
 }};
 struct device_transform_policy {{
   struct ActivePolicy {{
-    static constexpr auto algorithm = cub::detail::transform::Algorithm::prefetch;
+    static constexpr auto algorithm = cub::detail::transform::Algorithm::memcpy_async;
     using algo_policy = prefetch_policy_t;
   }};
 }};
@@ -346,8 +363,13 @@ CUresult cccl_device_unary_transform(
       indirect_arg_t,
       transform::dynamic_transform_policy_t<&transform::get_policy>,
       transform::transform_kernel_source,
-      cub::detail::CudaDriverLauncherFactory>::
-      dispatch(d_in, d_out, num_items, op, stream, {build}, cub::detail::CudaDriverLauncherFactory{cu_device, build.cc});
+      cub::detail::CudaDriverLauncherFactory>::dispatch(d_in,
+                                                        d_out,
+                                                        num_items,
+                                                        op,
+                                                        stream,
+                                                        {build, {d_in.value_type.size}, {d_in.value_type.alignment}},
+                                                        cub::detail::CudaDriverLauncherFactory{cu_device, build.cc});
     if (cuda_error != cudaSuccess)
     {
       const char* errorString = cudaGetErrorString(cuda_error); // Get the error string
@@ -431,7 +453,7 @@ struct prefetch_policy_t {{
 
 struct device_transform_policy {{
   struct ActivePolicy {{
-    static constexpr auto algorithm = cub::detail::transform::Algorithm::prefetch;
+    static constexpr auto algorithm = cub::detail::transform::Algorithm::memcpy_async;
     using algo_policy = prefetch_policy_t;
   }};
 }};
@@ -543,7 +565,9 @@ CUresult cccl_device_binary_transform(
                num_items,
                op,
                stream,
-               {build},
+               {build,
+                {d_in1.value_type.size, d_in2.value_type.size},
+                {d_in1.value_type.alignment, d_in2.value_type.alignment}},
                cub::detail::CudaDriverLauncherFactory{cu_device, build.cc});
 
     error = static_cast<CUresult>(exec_status);
