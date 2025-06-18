@@ -108,7 +108,7 @@ _CCCL_DEVICE void transform_kernel_impl(
   auto process_tile = [&](auto full_tile, auto... ins2 /* nvcc fails to compile when just using the captured ins */) {
     // ahendriksen: various unrolling yields less <1% gains at much higher compile-time cost
     // bgruber: but A6000 and H100 show small gains without pragma
-    // _CCCL_PRAGMA_NOUNROLL()
+    _CCCL_PRAGMA_NOUNROLL()
     for (int j = 0; j < num_elem_per_thread; ++j)
     {
       const int idx = j * block_dim + threadIdx.x;
@@ -224,7 +224,8 @@ _CCCL_DEVICE void transform_kernel_impl(
       using load_t   = larger_t<load_store_t, input_t>;
       auto in_vec    = reinterpret_cast<const load_t*>(in);
       auto input_vec = reinterpret_cast<load_t*>(input.data());
-      _CCCL_PRAGMA_UNROLL_FULL()
+      // _CCCL_PRAGMA_UNROLL_FULL()
+      _CCCL_PRAGMA_NOUNROLL()
       for (int i = 0; i < loads; ++i)
       {
         input_vec[i] = in_vec[i * VectorizedPolicy::block_threads + threadIdx.x];
@@ -233,7 +234,8 @@ _CCCL_DEVICE void transform_kernel_impl(
     (load_tile_vectorized(ins, inputs), ...);
 
     // process
-    _CCCL_PRAGMA_UNROLL_FULL()
+    // _CCCL_PRAGMA_UNROLL_FULL()
+    _CCCL_PRAGMA_NOUNROLL()
     for (int i = 0; i < items_per_thread; ++i)
     {
       output[i] = f(inputs[i]...);
@@ -254,7 +256,8 @@ _CCCL_DEVICE void transform_kernel_impl(
     auto output_vec = reinterpret_cast<const store_t*>(output.data());
     auto out_vec    = reinterpret_cast<store_t*>(out);
 
-    _CCCL_PRAGMA_UNROLL_FULL()
+    // _CCCL_PRAGMA_UNROLL_FULL()
+    _CCCL_PRAGMA_NOUNROLL()
     for (int i = 0; i < stores; ++i)
     {
       out_vec[i * VectorizedPolicy::block_threads + threadIdx.x] = output_vec[i];
@@ -263,7 +266,8 @@ _CCCL_DEVICE void transform_kernel_impl(
   else
   {
     // serial path
-    _CCCL_PRAGMA_UNROLL_FULL()
+    // _CCCL_PRAGMA_UNROLL_FULL()
+    _CCCL_PRAGMA_NOUNROLL()
     for (int i = 0; i < items_per_thread; ++i)
     {
       out[i * VectorizedPolicy::block_threads + threadIdx.x] = output[i];
