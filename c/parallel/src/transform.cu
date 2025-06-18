@@ -59,13 +59,15 @@ struct transform_runtime_tuning_policy
   int max_items_per_thread;
   int items_per_thread_vectorized;
   int vector_load_length;
+  int items_per_thread;
+  int load_store_word_size;
 
   // Note: when we extend transform to support UBLKCP, we may no longer
   // be able to keep this constexpr:
   static constexpr cub::detail::transform::Algorithm GetAlgorithm()
   {
-    // return cub::detail::transform::Algorithm::vectorized;
-    return cub::detail::transform::Algorithm::prefetch;
+    return cub::detail::transform::Algorithm::vectorized;
+    // return cub::detail::transform::Algorithm::prefetch;
   }
 
   int BlockThreads()
@@ -97,13 +99,30 @@ struct transform_runtime_tuning_policy
   {
     return vector_load_length;
   }
-  static constexpr int min_bif = 1024 * 12;
+
+  int ItemsPerThread()
+  {
+    return items_per_thread;
+  }
+
+  int LoadStoreWordSize()
+  {
+    return load_store_word_size;
+  }
+
+  static constexpr int min_bif = 1024 * 16;
 };
 
-transform_runtime_tuning_policy get_policy()
+transform_runtime_tuning_policy get_policy(int output_size)
 {
   // return prefetch policy defaults:
-  return {256, 2, 1, 32, 16, 4};
+  constexpr int load_store_word_size = 8;
+  const int value_type_size          = ::cuda::std::max(output_size, 1);
+  const int bytes_per_tile           = ::cuda::round_up(32, ::cuda::std::lcm(load_store_word_size, value_type_size));
+  assert(bytes_per_tile % value_type_size == 0);
+  const int items_per_thread = bytes_per_tile / value_type_size;
+  assert((items_per_thread * value_type_size) % load_store_word_size == 0);
+  return {256, 2, 1, 32, 16, 4, items_per_thread, load_store_word_size};
 }
 
 template <typename StorageT>
@@ -130,8 +149,8 @@ std::string get_kernel_name(cccl_iterator_t input_it, cccl_iterator_t output_it,
   std::string transform_op_t;
   check(nvrtcGetTypeName<op_wrapper>(&transform_op_t));
 
-  return "cub::detail::transform::transform_kernel<" + chained_policy_t + ", " + offset_t + ", " + "::cuda::std::plus<>"
-       + ", " + output_iterator_t + ", " + input_iterator_t + ">";
+  return "cub::detail::transform::transform_kernel<" + chained_policy_t + ", " + offset_t + ", " + transform_op_t + ", "
+       + output_iterator_t + ", " + input_iterator_t + ">";
 }
 
 std::string
@@ -162,8 +181,10 @@ struct dynamic_transform_policy_t
   template <typename F>
   cudaError_t Invoke(int /*device_ptx_version*/, F& op)
   {
-    return op.template Invoke<transform_runtime_tuning_policy>(GetPolicy());
+    return op.template Invoke<transform_runtime_tuning_policy>(GetPolicy(output_size));
   }
+
+  int output_size;
 };
 
 struct transform_kernel_source
@@ -217,10 +238,10 @@ CUresult cccl_device_unary_transform_build(
     const char* name = "test";
 
     const int cc                 = cc_major * 10 + cc_minor;
-    const auto policy            = transform::get_policy();
+    const auto policy            = transform::get_policy(output_it.value_type.size);
     const auto input_it_value_t  = cccl_type_enum_to_name<input_storage_t>(input_it.value_type.type);
     const auto output_it_value_t = cccl_type_enum_to_name<output_storage_t>(output_it.value_type.type);
-    const auto offset_t          = cccl_type_enum_to_name(cccl_type_enum::CCCL_INT32);
+    const auto offset_t          = cccl_type_enum_to_name(cccl_type_enum::CCCL_INT64);
     const std::string input_iterator_src =
       make_kernel_input_iterator(offset_t, transform::input_iterator_name, input_it_value_t, input_it);
     const std::string output_iterator_src =
@@ -289,18 +310,23 @@ struct device_transform_policy {{
       + ";\n"
         "  static constexpr int items_per_thread_vectorized = "
       + std::to_string(policy.items_per_thread_vectorized)
-      + "};\n"
+      + ";\n"
         "  static constexpr int vector_load_length = "
       + std::to_string(policy.vector_load_length)
-      + "};\n"
+      + ";\n"
+        "  static constexpr int items_per_thread = "
+      + std::to_string(policy.items_per_thread)
+      + ";\n"
+        "  static constexpr int load_store_word_size = "
+      + std::to_string(policy.load_store_word_size)
+      + ";};\n"
         "struct device_transform_policy {\n"
         "  struct ActivePolicy {\n"
-        // "    static constexpr auto algorithm = cub::detail::transform::Algorithm::vectorized;\n"
-        "    static constexpr auto algorithm = cub::detail::transform::Algorithm::prefetch;\n"
+        "    static constexpr auto algorithm = cub::detail::transform::Algorithm::vectorized;\n"
         "    using algo_policy = vectorized_policy_t;\n"
         "  };\n"
-        "};\n";
-    // + op_src + "\n";
+        "};\n"
+      + op_src + "\n";
 
 #if false // CCCL_DEBUGGING_SWITCH
     fflush(stderr);
@@ -392,13 +418,15 @@ CUresult cccl_device_unary_transform(
       indirect_arg_t,
       transform::dynamic_transform_policy_t<&transform::get_policy>,
       transform::transform_kernel_source,
-      cub::detail::CudaDriverLauncherFactory>::dispatch(d_in,
-                                                        d_out,
-                                                        num_items,
-                                                        op,
-                                                        stream,
-                                                        {build, d_out.value_type.type, false},
-                                                        cub::detail::CudaDriverLauncherFactory{cu_device, build.cc});
+      cub::detail::CudaDriverLauncherFactory>::
+      dispatch(d_in,
+               d_out,
+               num_items,
+               op,
+               stream,
+               {build, d_out.value_type.type, false},
+               cub::detail::CudaDriverLauncherFactory{cu_device, build.cc},
+               {static_cast<int>(d_out.value_type.size)});
     if (cuda_error != cudaSuccess)
     {
       const char* errorString = cudaGetErrorString(cuda_error); // Get the error string
@@ -440,12 +468,12 @@ CUresult cccl_device_binary_transform_build(
     const char* name = "test";
 
     const int cc                 = cc_major * 10 + cc_minor;
-    const auto policy            = transform::get_policy();
+    const auto policy            = transform::get_policy(output_it.value_type.size);
     const auto input1_it_value_t = cccl_type_enum_to_name<input1_storage_t>(input1_it.value_type.type);
     const auto input2_it_value_t = cccl_type_enum_to_name<input2_storage_t>(input2_it.value_type.type);
 
     const auto output_it_value_t = cccl_type_enum_to_name<output_storage_t>(output_it.value_type.type);
-    const auto offset_t          = cccl_type_enum_to_name(cccl_type_enum::CCCL_INT32);
+    const auto offset_t          = cccl_type_enum_to_name(cccl_type_enum::CCCL_INT64);
     const std::string input1_iterator_src =
       make_kernel_input_iterator(offset_t, transform::input1_iterator_name, input1_it_value_t, input1_it);
     const std::string input2_iterator_src =
@@ -534,11 +562,17 @@ struct device_transform_policy {{
       + ";\n"
         "  static constexpr int vector_load_length = "
       + std::to_string(policy.vector_load_length)
+      + ";\n"
+        "  static constexpr int items_per_thread = "
+      + std::to_string(policy.items_per_thread)
+      + ";\n"
+        "  static constexpr int load_store_word_size = "
+      + std::to_string(policy.load_store_word_size)
       + ";};\n"
         "struct device_transform_policy {\n"
         "  struct ActivePolicy {\n"
-        // "    static constexpr auto algorithm = cub::detail::transform::Algorithm::vectorized;\n"
-        "    static constexpr auto algorithm = cub::detail::transform::Algorithm::prefetch;\n"
+        // "    static constexpr auto algorithm = cub::detail::transform::Algorithm::prefetch;\n"
+        "    static constexpr auto algorithm = cub::detail::transform::Algorithm::vectorized;\n"
         "    using algo_policy = vectorized_policy_t;\n"
         "  };\n"
         "};\n";
@@ -633,7 +667,8 @@ CUresult cccl_device_binary_transform(
                op,
                stream,
                {build, d_out.value_type.type, true},
-               cub::detail::CudaDriverLauncherFactory{cu_device, build.cc});
+               cub::detail::CudaDriverLauncherFactory{cu_device, build.cc},
+               {static_cast<int>(d_out.value_type.size)});
 
     error = static_cast<CUresult>(exec_status);
   }
