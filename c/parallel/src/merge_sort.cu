@@ -12,7 +12,7 @@
 #include <cub/detail/launcher/cuda_driver.cuh>
 #include <cub/device/device_merge_sort.cuh>
 
-#include <format>
+// #include <format>
 
 #include "kernels/iterators.h"
 #include "kernels/operators.h"
@@ -119,17 +119,21 @@ std::string get_iterator_name(cccl_iterator_t iterator, merge_sort_iterator_t wh
   }
 }
 
-merge_sort_runtime_tuning_policy get_policy(int cc, int key_size)
+merge_sort_runtime_tuning_policy get_policy(int /*cc*/, int /*key_size*/)
 {
-  merge_sort_tuning_t chain[] = {
-    {60, 256, nominal_4b_items_to_items(17, key_size)}, {35, 256, nominal_4b_items_to_items(11, key_size)}};
-  auto [_, block_size, items_per_thread] = find_tuning(cc, chain);
-  // TODO: we hardcode this value in order to make sure that the merge_sort test does not fail due to the memory op
-  // assertions. This currently happens when we pass in items and keys of type uint8_t or int16_t, and for the custom
-  // types test as well. This will be fixed after https://github.com/NVIDIA/cccl/issues/3570 is resolved.
-  items_per_thread = 1;
+  // merge_sort_tuning_t chain[] = {
+  //   {60, 256, nominal_4b_items_to_items(17, key_size)}, {35, 256, nominal_4b_items_to_items(11, key_size)};
+  // auto [_, block_size, items_per_thread] = find_tuning(cc, chain);
+  // // TODO: we hardcode this value in order to make sure that the merge_sort test does not fail due to the memory op
+  // // assertions. This currently happens when we pass in items and keys of type uint8_t or int16_t, and for the custom
+  // // types test as well. This will be fixed after https://github.com/NVIDIA/cccl/issues/3570 is resolved.
+  // items_per_thread = 2;
 
+  // return {block_size, items_per_thread, block_size * items_per_thread};
+  int block_size       = 256;
+  int items_per_thread = cub::Nominal4BItemsToItems<float>(17);
   return {block_size, items_per_thread, block_size * items_per_thread};
+  // return {block_size, items_per_thread, block_size * items_per_thread};
 }
 
 std::string get_merge_sort_kernel_name(
@@ -161,18 +165,9 @@ std::string get_merge_sort_kernel_name(
       ? "cub::NullType"
       : cccl_type_enum_to_name<items_storage_t>(output_items_it.value_type.type);
 
-  return std::format(
-    "cub::detail::merge_sort::{0}<{1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}, device_merge_sort_vsmem_helper>",
-    kernel_name,
-    chained_policy_t,
-    input_keys_iterator_t,
-    input_items_iterator_t,
-    output_keys_iterator_t,
-    output_items_iterator_t,
-    offset_t,
-    compare_op_t,
-    key_t,
-    value_t);
+  return "cub::detail::merge_sort::" + std::string(kernel_name) + "<" + chained_policy_t + ", " + input_keys_iterator_t
+       + ", " + input_items_iterator_t + ", " + output_keys_iterator_t + ", " + output_items_iterator_t + ", "
+       + offset_t + ", " + compare_op_t + ", " + key_t + ", " + value_t + ", " + "device_merge_sort_vsmem_helper>";
 }
 
 std::string get_partition_kernel_name(cccl_iterator_t output_keys_it)
@@ -187,12 +182,8 @@ std::string get_partition_kernel_name(cccl_iterator_t output_keys_it)
 
   std::string key_t = cccl_type_enum_to_name(output_keys_it.value_type.type);
 
-  return std::format(
-    "cub::detail::merge_sort::DeviceMergeSortPartitionKernel<{0}, {1}, {2}, {3}>",
-    output_keys_iterator_t,
-    offset_t,
-    compare_op_t,
-    key_t);
+  return "cub::detail::merge_sort::DeviceMergeSortPartitionKernel<" + output_keys_iterator_t + ", " + offset_t + ", "
+       + compare_op_t + ", " + key_t + ">";
 }
 
 template <auto* GetPolicy>
@@ -325,71 +316,70 @@ CUresult cccl_device_merge_sort_build(
 
     const std::string op_src = make_kernel_user_comparison_operator(input_keys_it_value_t, op);
 
-    constexpr std::string_view src_template = R"XXX(
+    const std::string src_template = R"XXX(
 #include <cub/device/dispatch/kernels/merge_sort.cuh>
 #include <cub/util_type.cuh> // needed for cub::NullType
-struct __align__({1}) storage_t {{
+struct __align__({1}) storage_t {
   char data[{0}];
-}};
-struct __align__({3}) items_storage_t {{
+};
+struct __align__({3}) items_storage_t {
   char data[{2}];
-}};
+};
 {7}
 {8}
 {9}
 {10}
-struct agent_policy_t {{
-  static constexpr int ITEMS_PER_TILE = {6};
-  static constexpr int ITEMS_PER_THREAD = {5};
-  static constexpr int BLOCK_THREADS = {4};
+struct agent_policy_t {
+  static constexpr int ITEMS_PER_THREAD = cub::Nominal4BItemsToItems<float>(17); // {5};
+  static constexpr int BLOCK_THREADS = 256;// {4};
+  static constexpr int ITEMS_PER_TILE = ITEMS_PER_THREAD * BLOCK_THREADS; // {6};
   static constexpr cub::BlockLoadAlgorithm LOAD_ALGORITHM = cub::BLOCK_LOAD_WARP_TRANSPOSE;
   static constexpr cub::CacheLoadModifier LOAD_MODIFIER = cub::LOAD_LDG;
   static constexpr cub::BlockStoreAlgorithm STORE_ALGORITHM = cub::BLOCK_STORE_WARP_TRANSPOSE;
-}};
-struct device_merge_sort_policy {{
-  struct ActivePolicy {{
+};
+struct device_merge_sort_policy {
+  struct ActivePolicy {
     using MergeSortPolicy = agent_policy_t;
-  }};
-}};
-struct device_merge_sort_vsmem_helper {{
+  };
+};
+struct device_merge_sort_vsmem_helper {
   template<typename ActivePolicyT, typename KeyInputIteratorT, typename ValueInputIteratorT, typename... Ts>
-  struct MergeSortVSMemHelperT {{
+  struct MergeSortVSMemHelperT {
     using policy_t = agent_policy_t;
     using block_sort_agent_t = cub::detail::merge_sort::AgentBlockSort<agent_policy_t, KeyInputIteratorT, ValueInputIteratorT, Ts...>;
     using merge_agent_t = cub::detail::merge_sort::AgentMerge<agent_policy_t, Ts...>;
-  }};
+  };
   template <typename AgentT>
-  struct VSmemHelperT {{
+  struct VSmemHelperT {
     using static_temp_storage_t = typename AgentT::TempStorage;
     static _CCCL_DEVICE _CCCL_FORCEINLINE static_temp_storage_t& get_temp_storage(
       static_temp_storage_t& static_temp_storage, cub::detail::vsmem_t& vsmem)
-    {{
+    {
         return static_temp_storage;
-    }}
+    }
     template <bool needs_vsmem_ = false, ::cuda::std::enable_if_t<!needs_vsmem_, int> = 0>
     static _CCCL_DEVICE _CCCL_FORCEINLINE bool discard_temp_storage(static_temp_storage_t& temp_storage)
-    {{
+    {
       return false;
-    }}
-  }};
-}};
+    }
+  };
+};
 {11};
 )XXX";
 
-    const std::string src = std::format(
-      src_template,
-      input_keys_it.value_type.size, // 0
-      input_keys_it.value_type.alignment, // 1
-      input_items_it.value_type.size, // 2
-      input_items_it.value_type.alignment, // 3
-      policy.block_size, // 4
-      policy.items_per_thread, // 5
-      policy.items_per_tile, // 6
-      input_keys_iterator_src, // 7
-      input_items_iterator_src, // 8
-      output_keys_iterator_src, // 9
-      output_items_iterator_src, // 10
-      op_src); // 11
+    std::string src = src_template;
+    src.replace(src.find("{0}"), 3, std::to_string(input_keys_it.value_type.size));
+    src.replace(src.find("{1}"), 3, std::to_string(input_keys_it.value_type.alignment));
+    src.replace(src.find("{2}"), 3, std::to_string(input_items_it.value_type.size));
+    src.replace(src.find("{3}"), 3, std::to_string(input_items_it.value_type.alignment));
+    src.replace(src.find("{4}"), 3, std::to_string(policy.block_size));
+    src.replace(src.find("{5}"), 3, std::to_string(policy.items_per_thread));
+    src.replace(src.find("{6}"), 3, std::to_string(policy.items_per_tile));
+    src.replace(src.find("{7}"), 3, input_keys_iterator_src);
+    src.replace(src.find("{8}"), 3, input_items_iterator_src);
+    src.replace(src.find("{9}"), 3, output_keys_iterator_src);
+    src.replace(src.find("{10}"), 4, output_items_iterator_src);
+    src.replace(src.find("{11}"), 4, op_src);
 
 #if false // CCCL_DEBUGGING_SWITCH
     fflush(stderr);
@@ -406,7 +396,7 @@ struct device_merge_sort_vsmem_helper {{
     std::string partition_kernel_lowered_name;
     std::string merge_kernel_lowered_name;
 
-    const std::string arch = std::format("-arch=sm_{0}{1}", cc_major, cc_minor);
+    const std::string arch = "-arch=sm_" + std::to_string(cc_major) + std::to_string(cc_minor);
 
     constexpr size_t num_args  = 8;
     const char* args[num_args] = {

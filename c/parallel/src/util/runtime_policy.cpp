@@ -12,7 +12,7 @@
 
 #include <cub/detail/ptx-json-parser.h>
 
-#include <format>
+// #include <format>
 
 #include "../nvrtc/command_list.h"
 
@@ -25,17 +25,30 @@ get_policy(std::string_view policy_wrapper_expr, std::string_view translation_un
   fixed_args.push_back("-default-device");
 
   std::string_view tag_name = "c_parallel_get_policy_tag";
-  std::string fixed_source  = std::format(
-    "{0}\n"
-     "__global__ void ptx_json_emitting_kernel()\n"
-     "{{\n"
-     "  auto wrapped = {1};\n"
-     "  ptx_json::id<ptx_json::string(\"{2}\")>() = wrapped.EncodedPolicy();\n"
-     "}}\n",
-    translation_unit,
-    policy_wrapper_expr,
-    tag_name);
-
+  // std::string fixed_source  = std::format(
+  //   "{0}\n"
+  //    "__global__ void ptx_json_emitting_kernel()\n"
+  //    "{{\n"
+  //    "  auto wrapped = {1};\n"
+  //    "  ptx_json::id<ptx_json::string(\"{2}\")>() = wrapped.EncodedPolicy();\n"
+  //    "}}\n",
+  //   translation_unit,
+  //   policy_wrapper_expr,
+  //   tag_name);
+  char buffer[4096];
+  std::snprintf(
+    buffer,
+    sizeof(buffer),
+    "%s\n"
+    "__global__ void ptx_json_emitting_kernel()\n"
+    "{\n"
+    "  auto wrapped = %s;\n"
+    "  ptx_json::id<ptx_json::string(\"%s\")>() = wrapped.EncodedPolicy();\n"
+    "}\n",
+    std::string(translation_unit).c_str(),
+    std::string(policy_wrapper_expr).c_str(),
+    std::string(tag_name).c_str());
+  std::string fixed_source = buffer;
   auto nvrtc_ptx =
     begin_linking_nvrtc_program(0, nullptr)
       ->add_program(nvrtc_translation_unit{fixed_source.c_str(), "runtime_policy.cu"})

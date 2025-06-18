@@ -10,7 +10,7 @@
 
 #include <cstdlib>
 #include <cstring>
-#include <format>
+// #include <format>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -59,17 +59,23 @@ using for_each_iterator_t = input_iterator_state_t;
   using for_each_iterator_t = {0}*;
 )XXX";
 
-  return (iter.type == cccl_iterator_kind_t::CCCL_ITERATOR)
-         ? std::format(
-             stateful_iterator,
-             offset_t, // 0 - type
-             iter.alignment, // 1 - iter alignment
-             iter.size, // 2 - iter size
-             input_it_value_t, // 3 - iter value type
-             iter.dereference.name, // 4 - deref
-             iter.advance.name // 5 - advance name
-             )
-         : std::format(stateless_iterator, input_it_value_t);
+  if (iter.type == cccl_iterator_kind_t::CCCL_ITERATOR)
+  {
+    std::string result = stateful_iterator.data();
+    result.replace(result.find("{0}"), 3, offset_t);
+    result.replace(result.find("{1}"), 3, std::to_string(iter.alignment));
+    result.replace(result.find("{2}"), 3, std::to_string(iter.size));
+    result.replace(result.find("{3}"), 3, input_it_value_t);
+    result.replace(result.find("{4}"), 3, iter.dereference.name);
+    result.replace(result.find("{5}"), 3, iter.advance.name);
+    return result;
+  }
+  else
+  {
+    std::string result = stateless_iterator.data();
+    result.replace(result.find("{0}"), 3, input_it_value_t);
+    return result;
+  }
 }
 
 static std::string get_for_kernel_user_op(cccl_op_t user_op, cccl_iterator_t iter)
@@ -110,14 +116,13 @@ struct user_op_t {{
 
   bool user_op_stateful = cccl_op_kind_t::CCCL_STATEFUL == user_op.type;
 
-  return std::format(
-    op_format,
-    user_op_stateful, // 0 - stateful user op
-    user_op.name, // 1 - user op function name
-    value_t, // 2 - user op input type
-    user_op.alignment, // 3 - state alignment
-    user_op.size // 4 - state size
-  );
+  std::string result = op_format.data();
+  result.replace(result.find("{0}"), 3, user_op_stateful ? "1" : "0");
+  result.replace(result.find("{1}"), 3, user_op.name);
+  result.replace(result.find("{2}"), 3, value_t);
+  result.replace(result.find("{3}"), 3, std::to_string(user_op.alignment));
+  result.replace(result.find("{4}"), 3, std::to_string(user_op.size));
+  return result;
 }
 
 std::string get_for_kernel(cccl_op_t user_op, cccl_iterator_t iter)
@@ -125,48 +130,45 @@ std::string get_for_kernel(cccl_op_t user_op, cccl_iterator_t iter)
   auto storage_align = iter.value_type.alignment;
   auto storage_size  = iter.value_type.size;
 
-  return std::format(
-    R"XXX(
-#include <cuda/std/iterator>
-#include <cub/agent/agent_for.cuh>
-#include <cub/device/dispatch/kernels/for_each.cuh>
+  std::string iterator_definition = get_for_kernel_iterator(iter);
+  std::string user_op_definition  = get_for_kernel_user_op(user_op, iter);
 
-struct __align__({2}) storage_t {{
-  char data[{3}];
-}};
+  std::string result;
+  result += "#include <cuda/std/iterator>\n";
+  result += "#include <cub/agent/agent_for.cuh>\n";
+  result += "#include <cub/device/dispatch/kernels/for_each.cuh>\n\n";
 
-// Iterator wrapper
-{0}
+  result += "struct __align__(" + std::to_string(storage_align) + ") storage_t {\n";
+  result += "  char data[" + std::to_string(storage_size) + "];\n";
+  result += "};\n\n";
 
-// User operator wrapper
-{1}
+  // Append iterator wrapper
+  result += iterator_definition + "\n\n";
 
-struct for_each_wrapper
-{{
-  for_each_iterator_t iterator;
-  user_op_t user_op;
+  // Append user operator wrapper
+  result += user_op_definition + "\n\n";
 
-  __device__ void operator()(unsigned long long idx)
-  {{
-    user_op(iterator + idx);
-  }}
-}};
+  result += "struct for_each_wrapper\n";
+  result += "{\n";
+  result += "  for_each_iterator_t iterator;\n";
+  result += "  user_op_t user_op;\n\n";
+  result += "  __device__ void operator()(unsigned long long idx)\n";
+  result += "  {\n";
+  result += "    user_op(iterator + idx);\n";
+  result += "  }\n";
+  result += "};\n\n";
 
-using policy_dim_t = cub::detail::for_each::policy_t<256, 2>;
+  result += "using policy_dim_t = cub::detail::for_each::policy_t<256, 2>;\n\n";
 
-struct device_for_policy
-{{
-  struct ActivePolicy
-  {{
-    using for_policy_t = policy_dim_t;
-  }};
-}};
-)XXX",
-    get_for_kernel_iterator(iter), // 0 - Iterator definition
-    get_for_kernel_user_op(user_op, iter), // 1 - User op wrapper definition,
-    storage_align, // 2 - User datatype alignment
-    storage_size // 3 - User datatype size
-  );
+  result += "struct device_for_policy\n";
+  result += "{\n";
+  result += "  struct ActivePolicy\n";
+  result += "  {\n";
+  result += "    using for_policy_t = policy_dim_t;\n";
+  result += "  };\n";
+  result += "};\n";
+
+  return result;
 }
 
 constexpr static std::tuple<size_t, size_t>

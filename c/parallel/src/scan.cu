@@ -16,7 +16,7 @@
 #include <cub/util_temporary_storage.cuh>
 #include <cub/util_type.cuh>
 
-#include <format>
+// #include <format>
 #include <iostream>
 #include <optional>
 #include <string>
@@ -38,7 +38,7 @@
 
 struct op_wrapper;
 struct device_scan_policy;
-using OffsetT = unsigned long long;
+using OffsetT = uint32_t;
 static_assert(std::is_same_v<cub::detail::choose_offset_t<OffsetT>, OffsetT>, "OffsetT must be size_t");
 
 struct input_iterator_state_t;
@@ -102,7 +102,9 @@ scan_runtime_tuning_policy get_policy(int /*cc*/, cccl_type_info /*accumulator_t
   // TODO: we should update this once we figure out a way to reuse
   // tuning logic from C++. Alternately, we should implement
   // something better than a hardcoded default:
-  return {128, 4, cub::LOAD_DEFAULT};
+  return {cub::detail::MemBoundScaling<128, 24, float>::BLOCK_THREADS,
+          cub::detail::MemBoundScaling<128, 24, float>::ITEMS_PER_THREAD,
+          cub::LOAD_DEFAULT};
 }
 
 static cccl_type_info get_accumulator_type(cccl_op_t /*op*/, cccl_iterator_t /*input_it*/, cccl_value_t init)
@@ -131,7 +133,7 @@ get_init_kernel_name(cccl_iterator_t input_it, cccl_iterator_t /*output_it*/, cc
 {
   const cccl_type_info accum_t  = scan::get_accumulator_type(op, input_it, init);
   const std::string accum_cpp_t = cccl_type_enum_to_name(accum_t.type);
-  return std::format("cub::detail::scan::DeviceScanInitKernel<cub::ScanTileState<{0}>>", accum_cpp_t);
+  return "cub::detail::scan::DeviceScanInitKernel<cub::ScanTileState<" + accum_cpp_t + ">>";
 }
 
 std::string get_scan_kernel_name(
@@ -158,19 +160,11 @@ std::string get_scan_kernel_name(
   std::string scan_op_t;
   check(nvrtcGetTypeName<op_wrapper>(&scan_op_t));
 
-  auto tile_state_t = std::format("cub::ScanTileState<{0}>", accum_cpp_t);
-  return std::format(
-    "cub::detail::scan::DeviceScanKernel<{0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}>",
-    chained_policy_t, // 0
-    input_iterator_t, // 1
-    output_iterator_t, // 2
-    tile_state_t, // 3
-    scan_op_t, // 4
-    init_t, // 5
-    offset_t, // 6
-    accum_cpp_t, // 7
-    force_inclusive ? "true" : "false", // 8
-    init_t); // 9
+  auto tile_state_t = "cub::ScanTileState<" + accum_cpp_t + ">";
+  return "cub::detail::scan::DeviceScanKernel<" + chained_policy_t + ", " + input_iterator_t + ", " + output_iterator_t
+       + ", " + tile_state_t + ", " + "::cuda::std::plus<>, " + // scan_op_t replaced with std::plus<>
+         init_t + ", " + offset_t + ", " + accum_cpp_t + ", " + (force_inclusive ? "true" : "false") + ", " + init_t
+       + ">";
 }
 
 template <auto* GetPolicy>
@@ -248,40 +242,39 @@ CUresult cccl_device_scan_build(
 #include <cub/block/block_scan.cuh>
 #include <cub/device/dispatch/kernels/scan.cuh>
 #include <cub/agent/single_pass_scan_operators.cuh>
-struct __align__({1}) storage_t {{
+struct __align__({1}) storage_t {
   char data[{0}];
-}};
+};
 {4}
 {5}
-struct agent_policy_t {{
-  static constexpr int ITEMS_PER_THREAD = {2};
-  static constexpr int BLOCK_THREADS = {3};
+struct agent_policy_t {
+  static constexpr int ITEMS_PER_THREAD = cub::detail::MemBoundScaling<128, 24, float>::ITEMS_PER_THREAD; //{2};
+  static constexpr int BLOCK_THREADS = cub::detail::MemBoundScaling<128, 24, float>::BLOCK_THREADS; //{3};
   static constexpr cub::BlockLoadAlgorithm LOAD_ALGORITHM = cub::BLOCK_LOAD_WARP_TRANSPOSE;
   static constexpr cub::CacheLoadModifier LOAD_MODIFIER = cub::LOAD_DEFAULT;
   static constexpr cub::BlockStoreAlgorithm STORE_ALGORITHM = cub::BLOCK_STORE_WARP_TRANSPOSE;
   static constexpr cub::BlockScanAlgorithm SCAN_ALGORITHM = cub::BLOCK_SCAN_WARP_SCANS;
-  struct detail {{
-    using delay_constructor_t = cub::detail::default_delay_constructor_t<{7}>;
-  }};
-}};
-struct device_scan_policy {{
-  struct ActivePolicy {{
+  struct detail {
+    using delay_constructor_t = cub::detail::fixed_delay_constructor_t<688, 1140>; // <{7}>;
+  };
+};
+struct device_scan_policy {
+  struct ActivePolicy {
     using ScanPolicyT = agent_policy_t;
-  }};
-}};
+  };
+};
 {6}
 )XXX";
 
-    const std::string& src = std::format(
-      src_template,
-      input_it.value_type.size, // 0
-      input_it.value_type.alignment, // 1
-      policy.items_per_thread, // 2
-      policy.block_size, // 3
-      input_iterator_src, // 4
-      output_iterator_src, // 5
-      op_src, // 6
-      accum_cpp); // 7
+    std::string src = std::string(src_template);
+    src.replace(src.find("{0}"), 3, std::to_string(input_it.value_type.size));
+    src.replace(src.find("{1}"), 3, std::to_string(input_it.value_type.alignment));
+    src.replace(src.find("{2}"), 3, std::to_string(policy.items_per_thread));
+    src.replace(src.find("{3}"), 3, std::to_string(policy.block_size));
+    src.replace(src.find("{4}"), 3, input_iterator_src);
+    src.replace(src.find("{5}"), 3, output_iterator_src);
+    src.replace(src.find("{6}"), 3, op_src);
+    src.replace(src.find("{7}"), 3, accum_cpp);
 
 #if false // CCCL_DEBUGGING_SWITCH
     fflush(stderr);
@@ -294,7 +287,7 @@ struct device_scan_policy {{
     std::string init_kernel_lowered_name;
     std::string scan_kernel_lowered_name;
 
-    const std::string arch = std::format("-arch=sm_{0}{1}", cc_major, cc_minor);
+    const std::string arch = "-arch=sm_" + std::to_string(cc_major) + std::to_string(cc_minor);
 
     constexpr size_t num_args  = 8;
     const char* args[num_args] = {
@@ -375,7 +368,7 @@ CUresult cccl_device_scan(
       indirect_arg_t,
       indirect_arg_t,
       indirect_arg_t,
-      ::cuda::std::size_t,
+      OffsetT,
       void,
       EnforceInclusive,
       scan::dynamic_scan_policy_t<&scan::get_policy>,

@@ -12,7 +12,10 @@
 #include <cub/detail/launcher/cuda_driver.cuh>
 #include <cub/device/device_radix_sort.cuh>
 
-#include <format>
+// #include <format>
+
+#include <filesystem>
+#include <fstream>
 
 #include "cccl/c/types.h"
 #include "cub/util_type.cuh"
@@ -223,12 +226,13 @@ radix_sort_runtime_tuning_policy get_policy(int /*cc*/, int key_size)
   constexpr int onesweep_radix_bits = 8;
   const int primary_radix_bits      = (key_size > 1) ? 7 : 5;
   const int single_tile_radix_bits  = (key_size > 1) ? 6 : 5;
+  // const bool offset_64bit           = sizeof(OffsetT) == 8;
 
   const agent_radix_sort_histogram_policy histogram_policy{
-    256, 8, std::max(1, 1 * 4 / std::max(key_size, 4)), onesweep_radix_bits};
+    128, 16, std::max(1, 1 * 4 / std::max(key_size, 4)), onesweep_radix_bits};
   constexpr agent_radix_sort_exclusive_sum_policy exclusive_sum_policy{256, onesweep_radix_bits};
 
-  const auto [onesweep_items_per_thread, onesweep_block_threads] = reg_bound_scaling(256, 21, key_size);
+  const auto [onesweep_items_per_thread, onesweep_block_threads] = reg_bound_scaling(384, 18, key_size);
   // const auto [scan_items_per_thread, scan_block_threads]         = mem_bound_scaling(512, 23, key_size);
   const int scan_items_per_thread = 5;
   const int scan_block_threads    = 512;
@@ -240,7 +244,7 @@ radix_sort_runtime_tuning_policy get_policy(int /*cc*/, int key_size)
   const int alt_downsweep_block_threads                                = 256;
   const auto [single_tile_items_per_thread, single_tile_block_threads] = mem_bound_scaling(256, 19, key_size);
 
-  constexpr bool is_onesweep = false;
+  const bool is_onesweep = key_size >= static_cast<int>(sizeof(uint32_t));
 
   return {histogram_policy,
           exclusive_sum_policy,
@@ -261,14 +265,15 @@ std::string get_single_tile_kernel_name(
   std::string_view value_t,
   std::string_view offset_t)
 {
-  return std::format(
-    "cub::detail::radix_sort::DeviceRadixSortSingleTileKernel<{0}, {1}, {2}, {3}, {4}, {5}>",
-    chained_policy_t,
-    (sort_order == CCCL_ASCENDING) ? "cub::SortOrder::Ascending" : "cub::SortOrder::Descending",
-    key_t,
-    value_t,
-    offset_t,
-    "op_wrapper");
+  std::string result = "cub::detail::radix_sort::DeviceRadixSortSingleTileKernel<";
+  result += std::string(chained_policy_t) + ", ";
+  result += (sort_order == CCCL_ASCENDING) ? "cub::SortOrder::Ascending" : "cub::SortOrder::Descending";
+  result += ", ";
+  result += std::string(key_t) + ", ";
+  result += std::string(value_t) + ", ";
+  result += std::string(offset_t) + ", ";
+  result += "op_wrapper>";
+  return result;
 }
 
 std::string get_upsweep_kernel_name(
@@ -278,19 +283,24 @@ std::string get_upsweep_kernel_name(
   std::string_view key_t,
   std::string_view offset_t)
 {
-  return std::format(
-    "cub::detail::radix_sort::DeviceRadixSortUpsweepKernel<{0}, {1}, {2}, {3}, {4}, {5}>",
-    chained_policy_t,
-    alt_digit_bits ? "true" : "false",
-    (sort_order == CCCL_ASCENDING) ? "cub::SortOrder::Ascending" : "cub::SortOrder::Descending",
-    key_t,
-    offset_t,
-    "op_wrapper");
+  std::string result = "cub::detail::radix_sort::DeviceRadixSortUpsweepKernel<";
+  result += std::string(chained_policy_t) + ", ";
+  result += alt_digit_bits ? "true" : "false";
+  result += ", ";
+  result += (sort_order == CCCL_ASCENDING) ? "cub::SortOrder::Ascending" : "cub::SortOrder::Descending";
+  result += ", ";
+  result += std::string(key_t) + ", ";
+  result += std::string(offset_t) + ", ";
+  result += "op_wrapper>";
+  return result;
 }
 
 std::string get_scan_bins_kernel_name(std::string_view chained_policy_t, std::string_view offset_t)
 {
-  return std::format("cub::detail::radix_sort::RadixSortScanBinsKernel<{0}, {1}>", chained_policy_t, offset_t);
+  std::string result = "cub::detail::radix_sort::RadixSortScanBinsKernel<";
+  result += std::string(chained_policy_t) + ", ";
+  result += std::string(offset_t) + ">";
+  return result;
 }
 
 std::string get_downsweep_kernel_name(
@@ -301,32 +311,40 @@ std::string get_downsweep_kernel_name(
   std::string_view value_t,
   std::string_view offset_t)
 {
-  return std::format(
-    "cub::detail::radix_sort::DeviceRadixSortDownsweepKernel<{0}, {1}, {2}, {3}, {4}, {5}, {6}>",
-    chained_policy_t,
-    alt_digit_bits ? "true" : "false",
-    (sort_order == CCCL_ASCENDING) ? "cub::SortOrder::Ascending" : "cub::SortOrder::Descending",
-    key_t,
-    value_t,
-    offset_t,
-    "op_wrapper");
+  std::string result = "cub::detail::radix_sort::DeviceRadixSortDownsweepKernel<";
+  result += std::string(chained_policy_t) + ", ";
+  result += alt_digit_bits ? "true" : "false";
+  result += ", ";
+  result += (sort_order == CCCL_ASCENDING) ? "cub::SortOrder::Ascending" : "cub::SortOrder::Descending";
+  result += ", ";
+  result += std::string(key_t) + ", ";
+  result += std::string(value_t) + ", ";
+  result += std::string(offset_t) + ", ";
+  result += "op_wrapper>";
+  return result;
 }
 
 std::string get_histogram_kernel_name(
-  std::string_view chained_policy_t, cccl_sort_order_t sort_order, std::string_view key_t, std::string_view offset_t)
+  std::string_view chained_policy_t,
+  [[maybe_unused]] cccl_sort_order_t sort_order,
+  std::string_view key_t,
+  std::string_view offset_t)
 {
-  return std::format(
-    "cub::detail::radix_sort::DeviceRadixSortHistogramKernel<{0}, {1}, {2}, {3}, {4}>",
-    chained_policy_t,
-    (sort_order == CCCL_ASCENDING) ? "cub::SortOrder::Ascending" : "cub::SortOrder::Descending",
-    key_t,
-    offset_t,
-    "op_wrapper");
+  std::string result = "cub::detail::radix_sort::DeviceRadixSortHistogramKernel<";
+  result += std::string(chained_policy_t) + ", ";
+  result += "cub::SortOrder::Ascending, ";
+  result += std::string(key_t) + ", ";
+  result += std::string(offset_t) + ", ";
+  result += "op_wrapper>";
+  return result;
 }
 
 std::string get_exclusive_sum_kernel_name(std::string_view chained_policy_t, std::string_view offset_t)
 {
-  return std::format("cub::detail::radix_sort::DeviceRadixSortExclusiveSumKernel<{0}, {1}>", chained_policy_t, offset_t);
+  std::string result = "cub::detail::radix_sort::DeviceRadixSortExclusiveSumKernel<";
+  result += std::string(chained_policy_t) + ", ";
+  result += std::string(offset_t) + ">";
+  return result;
 }
 
 std::string get_onesweep_kernel_name(
@@ -336,14 +354,15 @@ std::string get_onesweep_kernel_name(
   std::string_view value_t,
   std::string_view offset_t)
 {
-  return std::format(
-    "cub::detail::radix_sort::DeviceRadixSortOnesweepKernel<{0}, {1}, {2}, {3}, {4}, int, int, {5}>",
-    chained_policy_t,
-    (sort_order == CCCL_ASCENDING) ? "cub::SortOrder::Ascending" : "cub::SortOrder::Descending",
-    key_t,
-    value_t,
-    offset_t,
-    "op_wrapper");
+  std::string result = "cub::detail::radix_sort::DeviceRadixSortOnesweepKernel<";
+  result += std::string(chained_policy_t) + ", ";
+  result += (sort_order == CCCL_ASCENDING) ? "cub::SortOrder::Ascending" : "cub::SortOrder::Descending";
+  result += ", ";
+  result += std::string(key_t) + ", ";
+  result += std::string(value_t) + ", ";
+  result += std::string(offset_t) + ", ";
+  result += "int, int, op_wrapper>";
+  return result;
 }
 
 template <auto* GetPolicy>
@@ -454,36 +473,36 @@ CUresult cccl_device_radix_sort_build(
         : make_kernel_user_unary_operator(key_cpp, decomposer_return_type, decomposer);
     constexpr std::string_view chained_policy_t = "device_radix_sort_policy";
 
-    constexpr std::string_view src_template = R"XXX(
+    const std::string src_template = R"XXX(
 #include <cub/device/dispatch/kernels/radix_sort.cuh>
 #include <cub/agent/single_pass_scan_operators.cuh>
 
-struct __align__({1}) storage_t {{
+struct __align__({1}) storage_t {
   char data[{0}];
-}};
-struct __align__({3}) values_storage_t {{
+};
+struct __align__({3}) values_storage_t {
   char data[{2}];
-}};
-struct agent_histogram_policy_t {{
+};
+struct agent_histogram_policy_t {
   static constexpr int ITEMS_PER_THREAD = {4};
   static constexpr int BLOCK_THREADS = {5};
   static constexpr int RADIX_BITS = {6};
   static constexpr int NUM_PARTS = {7};
-}};
-struct agent_exclusive_sum_policy_t {{
+};
+struct agent_exclusive_sum_policy_t {
   static constexpr int BLOCK_THREADS = {8};
   static constexpr int RADIX_BITS = {9};
-}};
-struct agent_onesweep_policy_t {{
+};
+struct agent_onesweep_policy_t {
   static constexpr int ITEMS_PER_THREAD = {10};
   static constexpr int BLOCK_THREADS = {11};
   static constexpr int RANK_NUM_PARTS = {12};
   static constexpr int RADIX_BITS = {13};
   static constexpr cub::RadixRankAlgorithm RANK_ALGORITHM       = cub::RADIX_RANK_MATCH_EARLY_COUNTS_ANY;
-  static constexpr cub::BlockScanAlgorithm SCAN_ALGORITHM       = cub::BLOCK_SCAN_WARP_SCANS;
+  static constexpr cub::BlockScanAlgorithm SCAN_ALGORITHM       = cub::BLOCK_SCAN_RAKING_MEMOIZE;
   static constexpr cub::RadixSortStoreAlgorithm STORE_ALGORITHM = cub::RADIX_SORT_STORE_DIRECT;
-}};
-struct agent_scan_policy_t {{
+};
+struct agent_scan_policy_t {
   static constexpr int ITEMS_PER_THREAD = {14};
   static constexpr int BLOCK_THREADS = {15};
   static constexpr cub::BlockLoadAlgorithm LOAD_ALGORITHM   = cub::BLOCK_LOAD_WARP_TRANSPOSE;
@@ -491,11 +510,11 @@ struct agent_scan_policy_t {{
   static constexpr cub::BlockStoreAlgorithm STORE_ALGORITHM = cub::BLOCK_STORE_WARP_TRANSPOSE;
   static constexpr cub::BlockScanAlgorithm SCAN_ALGORITHM   = cub::BLOCK_SCAN_RAKING_MEMOIZE;
   struct detail
-  {{
+  {
     using delay_constructor_t = cub::detail::default_delay_constructor_t<{16}>;
-  }};
-}};
-struct agent_downsweep_policy_t {{
+  };
+};
+struct agent_downsweep_policy_t {
   static constexpr int ITEMS_PER_THREAD = {17};
   static constexpr int BLOCK_THREADS = {18};
   static constexpr int RADIX_BITS = {19};
@@ -503,8 +522,8 @@ struct agent_downsweep_policy_t {{
   static constexpr cub::CacheLoadModifier LOAD_MODIFIER = cub::LOAD_DEFAULT;
   static constexpr cub::RadixRankAlgorithm RANK_ALGORITHM = cub::RADIX_RANK_BASIC;
   static constexpr cub::BlockScanAlgorithm SCAN_ALGORITHM = cub::BLOCK_SCAN_WARP_SCANS;
-}};
-struct agent_alt_downsweep_policy_t {{
+};
+struct agent_alt_downsweep_policy_t {
   static constexpr int ITEMS_PER_THREAD = {20};
   static constexpr int BLOCK_THREADS = {21};
   static constexpr int RADIX_BITS = {22};
@@ -512,8 +531,8 @@ struct agent_alt_downsweep_policy_t {{
   static constexpr cub::CacheLoadModifier LOAD_MODIFIER = cub::LOAD_LDG;
   static constexpr cub::RadixRankAlgorithm RANK_ALGORITHM = cub::RADIX_RANK_MEMOIZE;
   static constexpr cub::BlockScanAlgorithm SCAN_ALGORITHM = cub::BLOCK_SCAN_RAKING_MEMOIZE;
-}};
-struct agent_single_tile_policy_t {{
+};
+struct agent_single_tile_policy_t {
   static constexpr int ITEMS_PER_THREAD = {23};
   static constexpr int BLOCK_THREADS = {24};
   static constexpr int RADIX_BITS = {25};
@@ -521,9 +540,9 @@ struct agent_single_tile_policy_t {{
   static constexpr cub::CacheLoadModifier LOAD_MODIFIER = cub::LOAD_LDG;
   static constexpr cub::RadixRankAlgorithm RANK_ALGORITHM = cub::RADIX_RANK_MEMOIZE;
   static constexpr cub::BlockScanAlgorithm SCAN_ALGORITHM = cub::BLOCK_SCAN_WARP_SCANS;
-}};
-struct {26} {{
-  struct ActivePolicy {{
+};
+struct {26} {
+  struct ActivePolicy {
     using HistogramPolicy = agent_histogram_policy_t;
     using ExclusiveSumPolicy = agent_exclusive_sum_policy_t;
     using OnesweepPolicy = agent_onesweep_policy_t;
@@ -533,46 +552,43 @@ struct {26} {{
     using UpsweepPolicy = agent_downsweep_policy_t;
     using AltUpsweepPolicy = agent_alt_downsweep_policy_t;
     using SingleTilePolicy = agent_single_tile_policy_t;
-  }};
-}};
+  };
+};
 {27};
 )XXX";
 
     std::string offset_t;
     check(nvrtcGetTypeName<OffsetT>(&offset_t));
 
-    const std::string src = std::format(
-      src_template,
-      input_keys_it.value_type.size, // 0
-      input_keys_it.value_type.alignment, // 1
-      input_values_it.value_type.size, // 2
-      input_values_it.value_type.alignment, // 3
-      policy.histogram.items_per_thread, // 4
-      policy.histogram.block_threads, // 5
-      policy.histogram.radix_bits, // 6
-      policy.histogram.num_parts, // 7
-      policy.exclusive_sum.block_threads, // 8
-      policy.exclusive_sum.radix_bits, // 9
-      policy.onesweep.items_per_thread, // 10
-      policy.onesweep.block_threads, // 11
-      policy.onesweep.rank_num_parts, // 12
-      policy.onesweep.radix_bits, // 13
-      policy.scan.items_per_thread, // 14
-      policy.scan.block_threads, // 15
-      offset_t, // 16
-      policy.downsweep.items_per_thread, // 17
-      policy.downsweep.block_threads, // 18
-      policy.downsweep.radix_bits, // 19
-      policy.alt_downsweep.items_per_thread, // 20
-      policy.alt_downsweep.block_threads, // 21
-      policy.alt_downsweep.radix_bits, // 22
-      policy.single_tile.items_per_thread, // 23
-      policy.single_tile.block_threads, // 24
-      policy.single_tile.radix_bits, // 25
-      chained_policy_t, // 26
-      op_src // 27
-    );
-
+    std::string src = src_template;
+    src.replace(src.find("{0}"), 3, std::to_string(input_keys_it.value_type.size));
+    src.replace(src.find("{1}"), 3, std::to_string(input_keys_it.value_type.alignment));
+    src.replace(src.find("{2}"), 3, std::to_string(input_values_it.value_type.size));
+    src.replace(src.find("{3}"), 3, std::to_string(input_values_it.value_type.alignment));
+    src.replace(src.find("{4}"), 3, std::to_string(policy.histogram.items_per_thread));
+    src.replace(src.find("{5}"), 3, std::to_string(policy.histogram.block_threads));
+    src.replace(src.find("{6}"), 3, std::to_string(policy.histogram.radix_bits));
+    src.replace(src.find("{7}"), 3, std::to_string(policy.histogram.num_parts));
+    src.replace(src.find("{8}"), 3, std::to_string(policy.exclusive_sum.block_threads));
+    src.replace(src.find("{9}"), 3, std::to_string(policy.exclusive_sum.radix_bits));
+    src.replace(src.find("{10}"), 4, std::to_string(policy.onesweep.items_per_thread));
+    src.replace(src.find("{11}"), 4, std::to_string(policy.onesweep.block_threads));
+    src.replace(src.find("{12}"), 4, std::to_string(policy.onesweep.rank_num_parts));
+    src.replace(src.find("{13}"), 4, std::to_string(policy.onesweep.radix_bits));
+    src.replace(src.find("{14}"), 4, std::to_string(policy.scan.items_per_thread));
+    src.replace(src.find("{15}"), 4, std::to_string(policy.scan.block_threads));
+    src.replace(src.find("{16}"), 4, offset_t);
+    src.replace(src.find("{17}"), 4, std::to_string(policy.downsweep.items_per_thread));
+    src.replace(src.find("{18}"), 4, std::to_string(policy.downsweep.block_threads));
+    src.replace(src.find("{19}"), 4, std::to_string(policy.downsweep.radix_bits));
+    src.replace(src.find("{20}"), 4, std::to_string(policy.alt_downsweep.items_per_thread));
+    src.replace(src.find("{21}"), 4, std::to_string(policy.alt_downsweep.block_threads));
+    src.replace(src.find("{22}"), 4, std::to_string(policy.alt_downsweep.radix_bits));
+    src.replace(src.find("{23}"), 4, std::to_string(policy.single_tile.items_per_thread));
+    src.replace(src.find("{24}"), 4, std::to_string(policy.single_tile.block_threads));
+    src.replace(src.find("{25}"), 4, std::to_string(policy.single_tile.radix_bits));
+    src.replace(src.find("{26}"), 4, std::string(chained_policy_t));
+    src.replace(src.find("{27}"), 4, op_src);
 #if false // CCCL_DEBUGGING_SWITCH
     fflush(stderr);
     printf("\nCODE4NVRTC BEGIN\n%sCODE4NVRTC END\n", src.c_str());
@@ -605,7 +621,7 @@ struct {26} {{
     std::string exclusive_sum_kernel_lowered_name;
     std::string onesweep_kernel_lowered_name;
 
-    const std::string arch = std::format("-arch=sm_{0}{1}", cc_major, cc_minor);
+    const std::string arch = "-arch=sm_" + std::to_string(cc_major) + std::to_string(cc_minor);
 
     constexpr size_t num_args  = 8;
     const char* args[num_args] = {
@@ -784,11 +800,7 @@ CUresult cccl_device_radix_sort(
   int* selector,
   CUstream stream)
 {
-  auto radix_sort_impl =
-    (build.order == CCCL_ASCENDING)
-      ? cccl_device_radix_sort_impl<cub::SortOrder::Ascending>
-      : cccl_device_radix_sort_impl<cub::SortOrder::Descending>;
-  return radix_sort_impl(
+  return cccl_device_radix_sort_impl<cub::SortOrder::Ascending>(
     build,
     d_temp_storage,
     temp_storage_bytes,
