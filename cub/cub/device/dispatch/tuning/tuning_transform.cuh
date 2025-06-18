@@ -48,13 +48,14 @@
 #include <cuda/std/__cccl/execution_space.h>
 #include <cuda/std/bit>
 
-// The ublkcp kernel needs PTX features that are only available and understood by nvcc >=12.
-// Also, cooperative groups do not support NVHPC yet.
-#if !_CCCL_CUDA_COMPILER(NVHPC)
-#  ifndef _CUB_HAS_TRANSFORM_UBLKCP
-#    define _CUB_HAS_TRANSFORM_UBLKCP 1
-#  endif // !_CUB_HAS_TRANSFORM_UBLKCP
-#endif // !_CCCL_CUDA_COMPILER(NVHPC)
+// The memcpy_async and ublkcp kernels need cooperative groups which are not support on NVHPC and from cccl.c yet.
+#if _CCCL_CUDA_COMPILER(NVHPC) || defined(CCCL_C_EXPERIMENTAL)
+#  define _CUB_HAS_TRANSFORM_MEMCPY_ASYNC() 0
+// #  define _CUB_HAS_TRANSFORM_UBLKCP()       0
+#else // _CCCL_CUDA_COMPILER(NVHPC) || defined(CCCL_C_EXPERIMENTAL))
+#  define _CUB_HAS_TRANSFORM_MEMCPY_ASYNC() 1
+// #  define _CUB_HAS_TRANSFORM_UBLKCP()       1
+#endif // _CCCL_CUDA_COMPILER(NVHPC) || defined(CCCL_C_EXPERIMENTAL))
 
 CUB_NAMESPACE_BEGIN
 
@@ -66,9 +67,8 @@ enum class Algorithm
   // is always superior to that fallback, so it was removed.
   prefetch,
   vectorized,
-#ifdef _CUB_HAS_TRANSFORM_UBLKCP
+  memcpy_async,
   ublkcp,
-#endif // _CUB_HAS_TRANSFORM_UBLKCP
 };
 
 template <int BlockThreads>
@@ -107,6 +107,42 @@ _CCCL_HOST_DEVICE _CCCL_FORCEINLINE constexpr auto round_up_to_po2_multiple(Inte
   return (x + mult - 1) & ~(mult - 1);
 }
 
+template <typename... Its>
+_CCCL_HOST_DEVICE constexpr auto loaded_bytes_per_iteration() -> int
+{
+  return (int{sizeof(it_value_t<Its>)} + ... + 0);
+}
+
+constexpr int memcpy_async_alignment     = 16;
+constexpr int memcpy_async_size_multiple = 16;
+
+_CCCL_HOST_DEVICE constexpr auto memcpy_async_smem_for_tile_size(
+  ::cuda::std::span<const ::cuda::std::size_t> it_value_sizes,
+  ::cuda::std::span<const ::cuda::std::size_t> it_value_alignments,
+  int tile_size) -> int
+{
+  // return static_cast<int>(
+  //   round_up_to_po2_multiple(int{sizeof(int64_t)}, input_alignment) /* bar */
+  //   // 128 bytes of padding for each input tile (handles before + after)
+  //   + tile_size * ::cuda::std::reduce(it_value_sizes.begin(), it_value_sizes.end())
+  //   + it_value_sizes.size() * bulk_copy_align);
+
+  int smem_size = 0;
+  for (size_t i = 0; i < it_value_sizes.size(); ++i)
+  {
+    smem_size = round_up_to_po2_multiple(smem_size, static_cast<int>(it_value_alignments[i]));
+    // max aligned_base_ptr head_padding + max padding after == 16
+    smem_size += it_value_sizes[i] * tile_size + memcpy_async_alignment;
+  }
+  [[maybe_unused]] auto count_smem = [&](int size, int alignment) {
+    smem_size = round_up_to_po2_multiple(smem_size, alignment);
+    // max aligned_base_ptr head_padding + max padding after == 16
+    smem_size += size * tile_size + memcpy_async_alignment;
+  };
+
+  return smem_size;
+}
+
 _CCCL_HOST_DEVICE constexpr int sum()
 {
   return 0;
@@ -117,12 +153,6 @@ template <typename... Ts>
 _CCCL_HOST_DEVICE constexpr int sum(int head, Ts... tail)
 {
   return head + sum(tail...);
-}
-
-template <typename... Its>
-_CCCL_HOST_DEVICE constexpr auto loaded_bytes_per_iteration() -> int
-{
-  return (int{sizeof(it_value_t<Its>)} + ... + 0);
 }
 
 constexpr int bulk_copy_size_multiple = 16;
@@ -189,6 +219,7 @@ struct TransformPolicyWrapper<StaticPolicyT, ::cuda::std::void_t<decltype(Static
     return StaticPolicyT::algo_policy::block_threads;
   }
 
+  template <typename = void>
   _CCCL_HOST_DEVICE static constexpr int ItemsPerThreadNoInput()
   {
     return StaticPolicyT::algo_policy::items_per_thread_no_input;
@@ -270,7 +301,25 @@ struct policy_hub<RequiresStableAddress, ::cuda::std::tuple<RandomAccessIterator
     using algo_policy = ::cuda::std::_If<use_fallback, prefetch_policy_t<256>, default_vectorized_policy_t>;
   };
 
-#ifdef _CUB_HAS_TRANSFORM_UBLKCP
+  template <Algorithm Alg, int AsyncBlockSize, int Alignment, int PtxVersion, int EnableAsyncCopy>
+  struct async_policy_base
+  {
+  private:
+    using async_policy = async_copy_policy_t<AsyncBlockSize, Alignment>;
+    static constexpr bool exhaust_smem =
+      bulk_copy_smem_for_tile_size<RandomAccessIteratorsIn...>(
+        AsyncBlockSize * async_policy::min_items_per_thread, Alignment)
+      > int{max_smem_per_block}; // TODO(bgruber): we should use the architecture specific limit for SMEM here
+    static constexpr bool any_type_is_overalinged = ((alignof(it_value_t<RandomAccessIteratorsIn>) > Alignment) || ...);
+    static constexpr bool use_fallback = RequiresStableAddress || !can_memcpy || no_input_streams || exhaust_smem
+                                      || any_type_is_overalinged || !EnableAsyncCopy;
+
+  public:
+    static constexpr int min_bif    = arch_to_min_bytes_in_flight(PtxVersion);
+    static constexpr auto algorithm = use_fallback ? Algorithm::prefetch : Alg;
+    using algo_policy               = ::cuda::std::_If<use_fallback, prefetch_policy_t<256>, async_policy>;
+  };
+
   template <int BlockSize, int PtxVersion>
   struct bulkcopy_policy
   {
@@ -293,27 +342,22 @@ struct policy_hub<RequiresStableAddress, ::cuda::std::tuple<RandomAccessIterator
     using algo_policy               = ::cuda::std::_If<use_fallback, prefetch_policy_t<BlockSize>, async_policy>;
   };
 
+  struct policy800
+      : async_policy_base<Algorithm::memcpy_async, 256, memcpy_async_alignment, 800, _CUB_HAS_TRANSFORM_MEMCPY_ASYNC()>
+      , ChainedPolicy<800, policy800, policy300>
+  {};
+
   struct policy900
-      : bulkcopy_policy<256, 900>
-      , ChainedPolicy<900, policy900, policy300>
+      : async_policy_base<Algorithm::ublkcp, 256, bulk_copy_alignment(900), 900, _CUB_HAS_TRANSFORM_UBLKCP>
+      , ChainedPolicy<900, policy900, policy800>
   {};
 
   struct policy1000
-      : bulkcopy_policy<128, 1000>
+      : async_policy_base<Algorithm::ublkcp, 128, bulk_copy_alignment(1000), 1000, _CUB_HAS_TRANSFORM_UBLKCP>
       , ChainedPolicy<1000, policy1000, policy900>
   {};
-#endif // _CUB_HAS_TRANSFORM_UBLKCP
-
   // UBLKCP is disabled on sm120 for now
-  struct policy1200
-      : ChainedPolicy<1200,
-                      policy1200,
-#ifdef _CUB_HAS_TRANSFORM_UBLKCP
-                      policy1000
-#else // _CUB_HAS_TRANSFORM_UBLKCP
-                      policy300
-#endif // _CUB_HAS_TRANSFORM_UBLKCP
-                      >
+  struct policy1200 : ChainedPolicy<1200, policy1200, policy1000>
   {
     static constexpr int min_bif    = arch_to_min_bytes_in_flight(1200);
     static constexpr auto algorithm = Algorithm::prefetch;

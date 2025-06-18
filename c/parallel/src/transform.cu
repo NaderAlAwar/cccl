@@ -68,7 +68,8 @@ struct transform_runtime_tuning_policy
   static constexpr cub::detail::transform::Algorithm GetAlgorithm()
   {
     // return cub::detail::transform::Algorithm::prefetch;
-    return cub::detail::transform::Algorithm::vectorized;
+    // return cub::detail::transform::Algorithm::vectorized;
+    return cub::detail::transform::Algorithm::memcpy_async;
   }
 
   int BlockThreads()
@@ -197,6 +198,8 @@ struct dynamic_transform_policy_t
 struct transform_kernel_source
 {
   cccl_device_transform_build_result_t& build;
+  std::vector<cuda::std::size_t> it_value_sizes;
+  std::vector<cuda::std::size_t> it_value_alignments;
   cccl_type_enum type;
   bool binary_transform;
 
@@ -221,6 +224,21 @@ struct transform_kernel_source
     // Here we just need to check that the data type is a primitive and this is a binary transform
     // return type != CCCL_STORAGE;
     return true;
+  }
+
+  auto ItValueSizes() const
+  {
+    return cuda::std::span(it_value_sizes);
+  }
+
+  auto ItValueAlignments() const
+  {
+    return cuda::std::span(it_value_alignments);
+  }
+
+  cub::detail::transform::kernel_arg<char*> MakeAlignedBasePtrKernelArg(indirect_arg_t it, int align) const
+  {
+    return cub::detail::transform::make_aligned_base_ptr_kernel_arg(*static_cast<char**>(&it), align);
   }
 };
 
@@ -330,7 +348,8 @@ struct device_transform_policy {{
         "struct device_transform_policy {\n"
         "  struct ActivePolicy {\n"
         // "    static constexpr auto algorithm = cub::detail::transform::Algorithm::prefetch;\n"
-        "    static constexpr auto algorithm = cub::detail::transform::Algorithm::vectorized;\n"
+        // "    static constexpr auto algorithm = cub::detail::transform::Algorithm::vectorized;\n"
+        "    static constexpr auto algorithm = cub::detail::transform::Algorithm::memcpy_async;\n"
         "    using algo_policy = vectorized_policy_t;\n"
         "  };\n"
         "};\n"
@@ -432,7 +451,7 @@ CUresult cccl_device_unary_transform(
                num_items,
                op,
                stream,
-               {build, d_out.value_type.type, false},
+               {build, {d_in.value_type.size}, {d_in.value_type.alignment}, d_out.value_type.type, false},
                cub::detail::CudaDriverLauncherFactory{cu_device, build.cc},
                {static_cast<int>(d_out.value_type.size)});
     if (cuda_error != cudaSuccess)
@@ -579,8 +598,9 @@ struct device_transform_policy {{
       + ";};\n"
         "struct device_transform_policy {\n"
         "  struct ActivePolicy {\n"
-        "    static constexpr auto algorithm = cub::detail::transform::Algorithm::vectorized;\n"
+        // "    static constexpr auto algorithm = cub::detail::transform::Algorithm::vectorized;\n"
         // "    static constexpr auto algorithm = cub::detail::transform::Algorithm::prefetch;\n"
+        "    static constexpr auto algorithm = cub::detail::transform::Algorithm::memcpy_async;\n"
         "    using algo_policy = vectorized_policy_t;\n"
         "  };\n"
         "};\n";
@@ -669,14 +689,19 @@ CUresult cccl_device_binary_transform(
       transform::dynamic_transform_policy_t<&transform::get_policy>,
       transform::transform_kernel_source,
       cub::detail::CudaDriverLauncherFactory>::
-      dispatch(::cuda::std::make_tuple<indirect_arg_t, indirect_arg_t>(d_in1, d_in2),
-               d_out,
-               num_items,
-               op,
-               stream,
-               {build, d_out.value_type.type, true},
-               cub::detail::CudaDriverLauncherFactory{cu_device, build.cc},
-               {static_cast<int>(d_out.value_type.size)});
+      dispatch(
+        ::cuda::std::make_tuple<indirect_arg_t, indirect_arg_t>(d_in1, d_in2),
+        d_out,
+        num_items,
+        op,
+        stream,
+        {build,
+         {d_in1.value_type.size, d_in2.value_type.size},
+         {d_in1.value_type.alignment, d_in2.value_type.alignment},
+         d_out.value_type.type,
+         true},
+        cub::detail::CudaDriverLauncherFactory{cu_device, build.cc},
+        {static_cast<int>(d_out.value_type.size)});
 
     error = static_cast<CUresult>(exec_status);
   }

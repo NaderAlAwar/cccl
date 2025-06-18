@@ -336,6 +336,111 @@ _CCCL_HOST_DEVICE auto make_aligned_base_ptr(const T* ptr, int alignment) -> ali
   return aligned_base_ptr<T>{base_ptr, static_cast<int>(reinterpret_cast<const char*>(ptr) - base_ptr)};
 }
 
+template <typename MemcpyAsyncPolicy, typename Offset, typename F, typename RandomAccessIteratorOut, typename... InTs>
+_CCCL_DEVICE void transform_kernel_impl(
+  ::cuda::std::integral_constant<Algorithm, Algorithm::memcpy_async>,
+  Offset num_items,
+  int num_elem_per_thread,
+  bool /*can_vectorize*/,
+  F f,
+  RandomAccessIteratorOut out,
+  aligned_base_ptr<InTs>... aligned_ptrs)
+{
+#if _CUB_HAS_TRANSFORM_MEMCPY_ASYNC()
+  extern __shared__ char smem[]; // this should be __attribute((aligned(memcpy_async_alignment))), but then it clashes
+                                 // with the ublkcp kernel, which sets a higher alignment, since they are both called
+                                 // from the same kernel entry point (albeit one is always discarded). However, SMEM is
+                                 // 16-byte aligned by default.
+
+  constexpr int block_threads = MemcpyAsyncPolicy::block_threads;
+  const int tile_size         = block_threads * num_elem_per_thread;
+  const Offset offset         = static_cast<Offset>(blockIdx.x) * tile_size;
+  const int valid_items       = static_cast<int>(::cuda::std::min(num_items - offset, Offset{tile_size}));
+
+  auto group                       = cooperative_groups::this_thread_block();
+  [[maybe_unused]] int smem_offset = 0;
+
+  auto copy_and_return_smem_dst = [&](auto aligned_ptr) {
+    using T = typename decltype(aligned_ptr)::value_type;
+    // because SMEM base pointer and bytes_to_copy are always multiples of 16-byte, we only need to align the SMEM start
+    // for types with larger alignment
+    if constexpr (alignof(T) > memcpy_async_alignment)
+    {
+      smem_offset = round_up_to_po2_multiple(smem_offset, int{alignof(T)});
+    }
+    const char* const src = aligned_ptr.ptr + offset * sizeof(T);
+    char* const dst       = smem + smem_offset;
+    _CCCL_ASSERT(reinterpret_cast<uintptr_t>(src) % memcpy_async_alignment == 0, "");
+    _CCCL_ASSERT(reinterpret_cast<uintptr_t>(dst) % memcpy_async_alignment == 0, "");
+    const int bytes_to_copy = round_up_to_po2_multiple(
+      aligned_ptr.head_padding + static_cast<int>(sizeof(T)) * valid_items, memcpy_async_size_multiple);
+    smem_offset += bytes_to_copy; // leave aligned address for follow-up copy
+    cooperative_groups::memcpy_async(
+      group, dst, src, ::cuda::aligned_size_t<memcpy_async_size_multiple>{static_cast<size_t>(bytes_to_copy)});
+
+    const char* const dst_start_of_data = dst + aligned_ptr.head_padding;
+    _CCCL_ASSERT(reinterpret_cast<uintptr_t>(dst_start_of_data) % alignof(T) == 0, "");
+    return reinterpret_cast<const T*>(dst_start_of_data);
+  };
+
+  auto copy_and_return_smem_dst_fallback = [&](auto aligned_ptr) {
+    using T = typename decltype(aligned_ptr)::value_type;
+    // TODO(ahendriksen): the codegen for memcpy_async for char and short is really verbose (300 instructions). we may
+    // rather want to just do an unrolled loop here.
+    smem_offset  = round_up_to_po2_multiple(smem_offset, int{alignof(T)});
+    const T* src = aligned_ptr.ptr_to_elements() + offset;
+    T* dst       = reinterpret_cast<T*>(smem + smem_offset);
+    _CCCL_ASSERT(reinterpret_cast<uintptr_t>(src) % alignof(T) == 0, "");
+    _CCCL_ASSERT(reinterpret_cast<uintptr_t>(dst) % alignof(T) == 0, "");
+    const int bytes_to_copy = int{sizeof(T)} * valid_items;
+    smem_offset += bytes_to_copy;
+    cooperative_groups::memcpy_async(group, dst, src, bytes_to_copy);
+
+    return dst;
+  };
+
+  // TODO(bgruber): if we used SMEM offsets instead of pointers, we only need half the registers
+  const bool inner_blocks               = 0 < blockIdx.x && blockIdx.x + 2 < gridDim.x;
+  [[maybe_unused]] const auto smem_ptrs = ::cuda::std::tuple<const InTs*...>{
+    (inner_blocks ? copy_and_return_smem_dst(aligned_ptrs) : copy_and_return_smem_dst_fallback(aligned_ptrs))...};
+  cooperative_groups::wait(group);
+
+  // move the whole index and iterator to the block/thread index, to reduce arithmetic in the loops below
+  out += offset;
+
+  // TODO(bgruber): fbusato suggests to move the valid_items and smem_base_ptrs by threadIdx.x before the loop below
+
+  auto process_tile = [&](auto full_tile) {
+    // Unroll 1 tends to improve performance, especially for smaller data types (confirmed by benchmark)
+    _CCCL_PRAGMA_NOUNROLL()
+    for (int j = 0; j < num_elem_per_thread; ++j)
+    {
+      const int idx = j * block_threads + threadIdx.x;
+      if (full_tile || idx < valid_items)
+      {
+        out[idx] = ::cuda::std::apply(
+          [&](const auto* __restrict__... smem_base_ptrs) {
+            return f(smem_base_ptrs[idx]...);
+          },
+          smem_ptrs);
+      }
+    }
+  };
+
+  // explicitly calling the lambda on literal true/false lets the compiler emit the lambda twice
+  if (tile_size == valid_items)
+  {
+    process_tile(::cuda::std::true_type{});
+  }
+  else
+  {
+    process_tile(::cuda::std::false_type{});
+  }
+#else // _CUB_HAS_TRANSFORM_MEMCPY_ASYNC()
+  _CCCL_ASSERT(false, "Disabled");
+#endif // _CUB_HAS_TRANSFORM_MEMCPY_ASYNC()
+}
+
 #ifdef _CUB_HAS_TRANSFORM_UBLKCP
 _CCCL_DEVICE _CCCL_FORCEINLINE static bool elect_one()
 {
@@ -495,10 +600,10 @@ _CCCL_DEVICE void transform_kernel_impl(
 template <typename It>
 union kernel_arg
 {
-#if _CUB_HAS_TRANSFORM_UBLKCP
+  // #if _CUB_HAS_TRANSFORM_UBLKCP
   aligned_base_ptr<it_value_t<It>> aligned_ptr; // first member is trivial
   static_assert(::cuda::std::is_trivial_v<decltype(aligned_ptr)>, "");
-#endif
+  // #endif
   It iterator; // may not be trivially [default|copy]-constructible
 
   // Sometimes It is not trivially [default|copy]-constructible (e.g.
@@ -536,25 +641,20 @@ _CCCL_HOST_DEVICE auto make_aligned_base_ptr_kernel_arg(It ptr, int alignment) -
 }
 
 template <Algorithm Alg>
-inline constexpr bool needs_aligned_ptr_v =
-  false
-#ifdef _CUB_HAS_TRANSFORM_UBLKCP
-  || Alg == Algorithm::ublkcp
-#endif // _CUB_HAS_TRANSFORM_UBLKCP
-  ;
+inline constexpr bool needs_aligned_ptr_v = Alg == Algorithm::memcpy_async || Alg == Algorithm::ublkcp;
 
 template <Algorithm Alg, typename It>
 _CCCL_DEVICE _CCCL_FORCEINLINE auto
 select_kernel_arg(::cuda::std::integral_constant<Algorithm, Alg>, kernel_arg<It>&& arg)
 {
-#ifdef _CUB_HAS_TRANSFORM_UBLKCP
   if constexpr (needs_aligned_ptr_v<Alg>)
   {
     return ::cuda::std::move(arg.aligned_ptr);
   }
   else
-#endif // _CUB_HAS_TRANSFORM_UBLKCP
+  {
     return ::cuda::std::move(arg.iterator);
+  }
 }
 
 // There is only one kernel for all algorithms, that dispatches based on the selected policy. It must be instantiated
