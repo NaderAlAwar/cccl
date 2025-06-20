@@ -124,10 +124,10 @@ transform_runtime_tuning_policy get_policy([[maybe_unused]] int output_size)
   // assert((items_per_thread * value_type_size) % load_store_word_size == 0);
 
   // Tried: tpb_640.alg_1.lsws_4.ipt_4
-  // return {640, 2, 1, 32, 4, 4, 4, 4};
+  return {640, 2, 1, 32, 4, 4, 4, 4};
 
   // Tried: tpb_512.alg_1.lsws_4.ipt_2
-  return {512, 2, 1, 32, 4, 4, 2, 4};
+  // return {512, 2, 1, 32, 4, 4, 2, 4};
 }
 
 template <typename StorageT>
