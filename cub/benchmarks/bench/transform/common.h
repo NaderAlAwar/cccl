@@ -5,8 +5,8 @@
 
 // keep checks at the top so compilation of discarded variants fails really fast
 #include <cub/device/dispatch/dispatch_transform.cuh>
-#if !TUNE_BASE && TUNE_ALGORITHM == 1
-#  if _CCCL_PP_COUNT(__CUDA_ARCH_LIST__) != 1
+#if !TUNE_BASE && TUNE_ALGORITHM == 2
+#  if _CCCL_PP_COUNT(__CUDA_ARCH_LIST__) != 2
 #    error "When tuning, this benchmark does not support being compiled for multiple architectures"
 #  endif
 #  if (__CUDA_ARCH_LIST__) < 900
@@ -17,6 +17,9 @@
 #  endif
 #endif
 
+#if !TUNE_BASE
+      static_assert((TUNE_ITEMS_PER_THREAD * sizeof(__half)) % TUNE_LOAD_STORE_WORD_SIZE == 0);
+#endif
 #include <cub/util_namespace.cuh>
 
 #include <cuda/std/type_traits>
@@ -38,27 +41,18 @@ struct policy_hub_t
     using algo_policy =
       ::cuda::std::_If<algorithm == cub::detail::transform::Algorithm::prefetch,
                        cub::detail::transform::prefetch_policy_t<TUNE_THREADS>,
-                       cub::detail::transform::async_copy_policy_t<TUNE_THREADS>>;
+                       cub::detail::transform::vectorized_policy_t<TUNE_THREADS, TUNE_ITEMS_PER_THREAD, TUNE_LOAD_STORE_WORD_SIZE>>;
   };
 };
 #endif
 
 #ifdef TUNE_T
-using element_types = nvbench::type_list<TUNE_T>;
+using element_types = nvbench::type_list<__half>;
 #else
 using element_types =
-  nvbench::type_list<std::int8_t,
-                     std::int16_t,
-                     float,
-                     double
-#  ifdef NVBENCH_HELPER_HAS_I128
-                     ,
-                     __int128
-#  endif
-                     >;
+  nvbench::type_list<__half>;
 #endif
-
-// BabelStream uses 2^25, H200 can fit 2^31 int128s
+  // BabelStream uses 2^25, H200 can fit 2^31 int128s
 // 2^20 chars / 2^16 int128 saturate V100 (min_bif =12 * SM count =80)
 // 2^21 chars / 2^17 int128 saturate A100 (min_bif =16 * SM count =108)
 // 2^23 chars / 2^19 int128 saturate H100/H200 HBM3 (min_bif =32or48 * SM count =132)
