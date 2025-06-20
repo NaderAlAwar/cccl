@@ -113,7 +113,7 @@ struct transform_runtime_tuning_policy
   static constexpr int min_bif = 1024 * 12;
 };
 
-transform_runtime_tuning_policy get_policy(int output_size)
+transform_runtime_tuning_policy get_policy([[maybe_unused]] int output_size)
 {
   // return prefetch policy defaults:
   // constexpr int load_store_word_size = 8;
