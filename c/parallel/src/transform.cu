@@ -66,8 +66,8 @@ struct transform_runtime_tuning_policy
   // be able to keep this constexpr:
   static constexpr cub::detail::transform::Algorithm GetAlgorithm()
   {
-    // return cub::detail::transform::Algorithm::vectorized;
-    return cub::detail::transform::Algorithm::prefetch;
+    return cub::detail::transform::Algorithm::vectorized;
+    // return cub::detail::transform::Algorithm::prefetch;
   }
 
   int BlockThreads()
@@ -122,7 +122,7 @@ transform_runtime_tuning_policy get_policy([[maybe_unused]] int output_size)
   // assert(bytes_per_tile % value_type_size == 0);
   // const int items_per_thread = bytes_per_tile / value_type_size;
   // assert((items_per_thread * value_type_size) % load_store_word_size == 0);
-  return {768, 6, 1, 32, 16, 4, 6, 8};
+  return {640, 2, 1, 32, 4, 4, 4, 4};
 }
 
 template <typename StorageT>
@@ -571,8 +571,8 @@ struct device_transform_policy {{
       + ";};\n"
         "struct device_transform_policy {\n"
         "  struct ActivePolicy {\n"
-        "    static constexpr auto algorithm = cub::detail::transform::Algorithm::prefetch;\n"
-        // "    static constexpr auto algorithm = cub::detail::transform::Algorithm::vectorized;\n"
+        // "    static constexpr auto algorithm = cub::detail::transform::Algorithm::prefetch;\n"
+        "    static constexpr auto algorithm = cub::detail::transform::Algorithm::vectorized;\n"
         "    using algo_policy = vectorized_policy_t;\n"
         "  };\n"
         "};\n";
