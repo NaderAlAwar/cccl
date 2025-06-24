@@ -178,35 +178,37 @@ struct BlockReduceWarpReductions
   template <bool FULL_TILE, typename ReductionOp>
   _CCCL_DEVICE _CCCL_FORCEINLINE T ApplyWarpAggregates(ReductionOp reduction_op, T warp_aggregate, int num_valid)
   {
-    // // Share lane aggregates
-    // if (lane_id == 0)
-    // {
-    //   detail::uninitialized_copy_single(temp_storage.warp_aggregates + warp_id, warp_aggregate);
-    // }
-
-    // __syncthreads();
-
-    // // Update total aggregate in warp 0, lane 0
-    // if (linear_tid == 0)
-    // {
-    //   warp_aggregate = ApplyWarpAggregates<FULL_TILE>(reduction_op, warp_aggregate, num_valid, constant_v<1>);
-    // }
-
-    if (linear_tid == 0)
+    // Share lane aggregates
+    if (lane_id == 0)
     {
       detail::uninitialized_copy_single(temp_storage.warp_aggregates + warp_id, warp_aggregate);
     }
 
     __syncthreads();
 
-    if (lane_id == 0 && warp_id != 0)
+    // Update total aggregate in warp 0, lane 0
+    if (linear_tid == 0)
     {
-      // printf("adding %f\n", warp_aggregate);
-      atomicAdd(temp_storage.warp_aggregates, warp_aggregate);
+      warp_aggregate = ApplyWarpAggregates<FULL_TILE>(reduction_op, warp_aggregate, num_valid, constant_v<1>);
     }
 
-    __syncthreads();
-    return temp_storage.warp_aggregates[0];
+    return warp_aggregate;
+
+    // if (linear_tid == 0)
+    // {
+    //   detail::uninitialized_copy_single(temp_storage.warp_aggregates + warp_id, warp_aggregate);
+    // }
+
+    // __syncthreads();
+
+    // if (lane_id == 0 && warp_id != 0)
+    // {
+    //   // printf("adding %f\n", warp_aggregate);
+    //   atomicAdd(temp_storage.warp_aggregates, warp_aggregate);
+    // }
+
+    // __syncthreads();
+    // return temp_storage.warp_aggregates[0];
   }
 
   /**
