@@ -1,4 +1,4 @@
-#define TUNE_USE_GRID_EVEN_SHARE     1
+// #define TUNE_USE_GRID_EVEN_SHARE 1
 #define TUNE_USE_ATOMIC_BLOCK_REDUCE 1
 //===----------------------------------------------------------------------===//
 //
