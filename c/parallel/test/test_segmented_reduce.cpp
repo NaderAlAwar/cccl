@@ -112,7 +112,8 @@ struct {0} {{
 }};
 )XXX";
 
-  const std::string it_state_def_src = std::format(it_state_src_tmpl, state_name, index_ty_name);
+  const std::string it_state_def_src =
+    std::string(it_state_src_tmpl) + std::string(state_name) + std::string(index_ty_name);
 
   static constexpr std::string_view it_def_src_tmpl = R"XXX(
 extern "C" __device__ void {0}({1}* state, {2} offset)
@@ -122,7 +123,7 @@ extern "C" __device__ void {0}({1}* state, {2} offset)
 )XXX";
 
   const std::string it_advance_fn_def_src =
-    std::format(it_def_src_tmpl, /*0*/ advance_fn_name, state_name, index_ty_name);
+    std::string(it_def_src_tmpl) + std::string(advance_fn_name) + std::string(state_name) + std::string(index_ty_name);
 
   static constexpr std::string_view it_deref_src_tmpl = R"XXX(
 extern "C" __device__ {2} {0}({1}* state)
@@ -132,7 +133,8 @@ extern "C" __device__ {2} {0}({1}* state)
 )XXX";
 
   const std::string it_deref_fn_def_src =
-    std::format(it_deref_src_tmpl, dereference_fn_name, state_name, index_ty_name);
+    std::string(it_deref_src_tmpl) + std::string(dereference_fn_name) + std::string(state_name)
+    + std::string(index_ty_name);
 
   return std::make_tuple(it_state_def_src, it_advance_fn_def_src, it_deref_fn_def_src);
 }
@@ -269,7 +271,7 @@ extern "C" __device__ void {0}(void* lhs_ptr, void* rhs_ptr, void* out_ptr) {{
 }}
 )XXX";
 
-  std::string plus_pair_op_src = std::format(plus_pair_op_template, device_op_name);
+  std::string plus_pair_op_src = std::string(plus_pair_op_template) + std::string(device_op_name);
 
   operation_t op = make_operation(device_op_name, plus_pair_op_src);
   pair v0        = pair{4, 2};
@@ -326,7 +328,10 @@ struct {0} {{
 )XXX";
 
   const std::string it_state_def_src =
-    std::format(it_state_src_tmpl, /* 0 */ state_name, /* 1 */ value_type_name, /* 2 */ index_type_name);
+    std::string(it_state_src_tmpl)
+      .replace(it_state_src_tmpl.find("{0}"), 3, std::string(state_name))
+      .replace(it_state_src_tmpl.find("{1}"), 3, std::string(value_type_name))
+      .replace(it_state_src_tmpl.find("{2}"), 3, std::string(index_type_name));
 
   static constexpr std::string_view it_advance_fn_def_src_tmpl = R"XXX(
 extern "C" __device__ void {0}({1}* state, {2} offset)
@@ -336,7 +341,10 @@ extern "C" __device__ void {0}({1}* state, {2} offset)
 )XXX";
 
   const std::string it_advance_fn_def_src =
-    std::format(it_advance_fn_def_src_tmpl, /*0*/ advance_fn_name, state_name, index_type_name);
+    std::string(it_advance_fn_def_src_tmpl)
+      .replace(it_advance_fn_def_src_tmpl.find("{0}"), 3, std::string(advance_fn_name))
+      .replace(it_advance_fn_def_src_tmpl.find("{1}"), 3, std::string(state_name))
+      .replace(it_advance_fn_def_src_tmpl.find("{2}"), 3, std::string(index_type_name));
 
   static constexpr std::string_view it_dereference_fn_src_tmpl = R"XXX(
 extern "C" __device__ {1} {0}({2} *state) {{
@@ -347,7 +355,10 @@ extern "C" __device__ {1} {0}({2} *state) {{
 )XXX";
 
   const std::string it_dereference_fn_def_src =
-    std::format(it_dereference_fn_src_tmpl, /* 0 */ dereference_fn_name, /*1*/ value_type_name, /*2*/ state_name);
+    std::string(it_dereference_fn_src_tmpl)
+      .replace(it_dereference_fn_src_tmpl.find("{0}"), 3, std::string(dereference_fn_name))
+      .replace(it_dereference_fn_src_tmpl.find("{1}"), 3, std::string(value_type_name))
+      .replace(it_dereference_fn_src_tmpl.find("{2}"), 3, std::string(state_name));
 
   return std::make_tuple(it_state_def_src, it_advance_fn_def_src, it_dereference_fn_def_src);
 }
@@ -589,7 +600,9 @@ struct {0} {{
 }};
 )XXX";
   const std::string offset_functor_state_src =
-    std::format(offset_functor_state_src_tmpl, offset_functor_state_name, index_ty_name);
+    std::string(offset_functor_state_src_tmpl)
+      .replace(offset_functor_state_src_tmpl.find("{0}"), 3, std::string(offset_functor_state_name))
+      .replace(offset_functor_state_src_tmpl.find("{1}"), 3, std::string(index_ty_name));
 
   static constexpr std::string_view offset_functor_src_tmpl = R"XXX(
 extern "C" __device__ {2} {0}({1} *functor_state, {2} n) {{
@@ -617,7 +630,10 @@ extern "C" __device__ {2} {0}({1} *functor_state, {2} n) {{
 }}
 )XXX";
   const std::string offset_functor_src =
-    std::format(offset_functor_src_tmpl, offset_functor_name, offset_functor_state_name, index_ty_name);
+    std::string(offset_functor_src_tmpl)
+      .replace(offset_functor_src_tmpl.find("{0}"), 3, std::string(offset_functor_name))
+      .replace(offset_functor_src_tmpl.find("{1}"), 3, std::string(offset_functor_state_name))
+      .replace(offset_functor_src_tmpl.find("{2}"), 3, std::string(index_ty_name));
 
   // Building transform_iterator
 
@@ -628,12 +644,12 @@ extern "C" __device__ {2} {0}({1} *functor_state, {2} n) {{
 
   auto start_offsets_it =
     make_stateful_transform_input_iterator<IndexT, counting_iterator_state_t<IndexT>, host_offset_functor_state<IndexT>>(
-      index_ty_name,
-      {counting_it_state_name, counting_it_state_src},
-      {counting_it_advance_fn_name, counting_it_advance_fn_src},
-      {counting_it_deref_fn_name, counting_it_deref_fn_src},
-      {offset_functor_state_name, offset_functor_state_src},
-      {offset_functor_name, offset_functor_src});
+      std::string(index_ty_name),
+      {std::string(counting_it_state_name), counting_it_state_src},
+      {std::string(counting_it_advance_fn_name), counting_it_advance_fn_src},
+      {std::string(counting_it_deref_fn_name), counting_it_deref_fn_src},
+      {std::string(offset_functor_state_name), offset_functor_state_src},
+      {std::string(offset_functor_name), offset_functor_src});
 
   // Initialize the state of start_offset_it
   start_offsets_it.state.base_it_state.value = IndexT(-1);
@@ -646,9 +662,9 @@ extern "C" __device__ {2} {0}({1} *functor_state, {2} n) {{
   constexpr std::string_view reuse_prior_definitions = "";
 
   auto end_offsets_it = make_iterator<IndexT, HostTransformStateT>(
-    {start_offsets_it.state_name, reuse_prior_definitions},
-    {start_offsets_it.advance.name, reuse_prior_definitions},
-    {start_offsets_it.dereference.name, reuse_prior_definitions});
+    {std::string(start_offsets_it.state_name), std::string(reuse_prior_definitions)},
+    {std::string(start_offsets_it.advance.name), std::string(reuse_prior_definitions)},
+    {std::string(start_offsets_it.dereference.name), std::string(reuse_prior_definitions)});
 
   // Initialize the state of end_offset_it
   end_offsets_it.state.base_it_state.value = IndexT(0);
@@ -664,8 +680,10 @@ extern "C" __device__ void {0}(const void *x1_p, const void *x2_p, void *out_p) 
 }}
 )XXX";
 
-  const std::string binary_op_src = std::format(binary_op_src_tmpl, binary_op_name, data_ty_name);
-
+  const std::string binary_op_src =
+    std::string(binary_op_src_tmpl)
+      .replace(binary_op_src_tmpl.find("{0}"), 3, std::string(binary_op_name))
+      .replace(binary_op_src_tmpl.find("{1}"), 3, std::string(data_ty_name));
   auto binary_op = make_operation(binary_op_name, binary_op_src);
 
   // allocate memory for the result
@@ -700,9 +718,9 @@ extern "C" __device__ void {0}(const void *x1_p, const void *x2_p, void *out_p) 
   constexpr std::string_view cmp_ty_name = "int";
 
   // check functor transforms computed values to comparison value against the expected result
-  static constexpr std::string_view check_functor_name           = "check_functor";
-  static constexpr std::string_view check_functor_state_name     = "check_functor_state";
-  static constexpr std::string_view check_functor_state_src_tmpl = R"XXX(
+  static constexpr std::string check_functor_name           = "check_functor";
+  static constexpr std::string check_functor_state_name     = "check_functor_state";
+  static constexpr std::string check_functor_state_src_tmpl = R"XXX(
 struct {0} {{
   {1} m_p;
   {1} m_min;
@@ -710,9 +728,12 @@ struct {0} {{
 }};
 )XXX";
   const std::string check_functor_state_src =
-    std::format(check_functor_state_src_tmpl, check_functor_state_name, index_ty_name, data_ty_name);
+    std::string(check_functor_state_src_tmpl)
+      .replace(check_functor_state_src_tmpl.find("{0}"), 3, check_functor_state_name)
+      .replace(check_functor_state_src_tmpl.find("{1}"), 3, std::string(index_ty_name))
+      .replace(check_functor_state_src_tmpl.find("{2}"), 3, std::string(data_ty_name));
 
-  static constexpr std::string_view check_functor_src_tmpl = R"XXX(
+  static constexpr std::string check_functor_src_tmpl = R"XXX(
 extern "C" __device__ {4} {0}({1} *functor_state, {2} n) {{
   /*
     def expected_fn(n, ptr):
@@ -728,18 +749,23 @@ extern "C" __device__ {4} {0}({1} *functor_state, {2} n) {{
   return (expected == actual);
 }}
 )XXX";
-  static constexpr std::string_view common_ty_name         = index_ty_name;
-  const std::string check_functor_src                      = std::format(
-    check_functor_src_tmpl, check_functor_name, check_functor_state_name, index_ty_name, common_ty_name, cmp_ty_name);
+  static constexpr std::string common_ty_name         = std::string(index_ty_name);
+  const std::string check_functor_src =
+    std::string(check_functor_src_tmpl)
+      .replace(check_functor_src_tmpl.find("{0}"), 3, check_functor_name)
+      .replace(check_functor_src_tmpl.find("{1}"), 3, check_functor_state_name)
+      .replace(check_functor_src_tmpl.find("{2}"), 3, std::string(index_ty_name))
+      .replace(check_functor_src_tmpl.find("{3}"), 3, common_ty_name)
+      .replace(check_functor_src_tmpl.find("{4}"), 3, std::string(cmp_ty_name));
 
   // Building transform_iterator
   auto check_it = make_stateful_transform_input_iterator<CmpT,
                                                          counting_iterator_state_t<IndexT>,
                                                          host_check_functor_state<IndexT, DataT>>(
-    cmp_ty_name,
-    {counting_it_state_name, counting_it_state_src},
-    {counting_it_advance_fn_name, counting_it_advance_fn_src},
-    {counting_it_deref_fn_name, counting_it_deref_fn_src},
+    std::string(cmp_ty_name),
+    {std::string(counting_it_state_name), counting_it_state_src},
+    {std::string(counting_it_advance_fn_name), counting_it_advance_fn_src},
+    {std::string(counting_it_deref_fn_name), counting_it_deref_fn_src},
     {check_functor_state_name, check_functor_state_src},
     {check_functor_name, check_functor_src});
 
@@ -754,8 +780,8 @@ extern "C" __device__ {4} {0}({1} *functor_state, {2} n) {{
   CmpT expected_value{1};
   value_t<CmpT> _true{expected_value};
 
-  static constexpr std::string_view cmp_combine_op_name = "_logical_and";
-  static constexpr std::string_view cmp_combine_op_src_tmpl =
+  static constexpr std::string cmp_combine_op_name = "_logical_and";
+  static constexpr std::string cmp_combine_op_src_tmpl =
     R"XXX(
 extern "C" __device__ void {0}(const void *x1_p, const void *x2_p, void *out_p) {{
   const {1} one = 1;
@@ -765,7 +791,10 @@ extern "C" __device__ void {0}(const void *x1_p, const void *x2_p, void *out_p) 
   *static_cast<{1}*>(out_p) = b1 * b2;
 }}
 )XXX";
-  const std::string cmp_combine_op_src = std::format(cmp_combine_op_src_tmpl, cmp_combine_op_name, cmp_ty_name);
+  const std::string cmp_combine_op_src =
+    std::string(cmp_combine_op_src_tmpl)
+      .replace(cmp_combine_op_src_tmpl.find("{0}"), 3, cmp_combine_op_name)
+      .replace(cmp_combine_op_src_tmpl.find("{1}"), 3, std::string(cmp_ty_name));
 
   auto cmp_combine_op = make_operation(cmp_combine_op_name, cmp_combine_op_src);
 

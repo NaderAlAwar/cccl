@@ -8,7 +8,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include <format>
 #include <regex>
 
 #include "scan_tile_state.h"
@@ -24,7 +23,7 @@ static constexpr auto ptx_u64_assignment_regex = R"(\.visible\s+\.global\s+\.ali
 
 std::optional<size_t> find_size_t(char* ptx, std::string_view name)
 {
-  std::regex regex(std::format(ptx_u64_assignment_regex, name));
+  std::regex regex(std::string(ptx_u64_assignment_regex) + std::string(name));
   std::cmatch match;
   if (std::regex_search(ptx, match, regex))
   {
@@ -54,7 +53,11 @@ std::pair<size_t, size_t> get_tile_state_bytes_per_tile(
         __device__ size_t payload_bytes_per_tile = cub::ScanTileState<{2}>::payload_bytes_per_tile;
         )XXX";
 
-  const std::string ptx_src = std::format(ptx_src_template, accum_t.size, accum_t.alignment, accum_cpp);
+  const std::string ptx_src =
+    std::string(ptx_src_template)
+      .replace(ptx_src_template.find("{0}"), 3, std::to_string(accum_t.size))
+      .replace(ptx_src_template.find("{1}"), 3, std::to_string(accum_t.alignment))
+      .replace(ptx_src_template.find("{2}"), 3, std::string(accum_cpp));
   auto compile_result =
     begin_linking_nvrtc_program(num_ptx_lto_args, ptx_lopts)
       ->add_program(nvrtc_translation_unit{ptx_src.c_str(), "tile_state_info"})

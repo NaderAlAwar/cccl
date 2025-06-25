@@ -14,7 +14,6 @@
 #include <cub/thread/thread_load.cuh> // cub::LoadModifier
 
 #include <exception> // std::exception
-#include <format> // std::format
 #include <string> // std::string
 #include <string_view> // std::string_view
 #include <type_traits> // std::is_same_v
@@ -100,17 +99,12 @@ std::string get_device_segmented_reduce_kernel_name(
             typename AccumT>               // 8
    DeviceSegmentedReduceKernel(...);
   */
-  return std::format(
-    "cub::detail::reduce::DeviceSegmentedReduceKernel<{0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}>",
-    chained_policy_t, // 0
-    input_iterator_t, // 1
-    output_iterator_t, // 2
-    start_offset_iterator_t, // 3
-    end_offset_iterator_t, // 4
-    offset_t, // 5
-    reduction_op_t, // 6
-    init_t, // 7
-    accum_t); // 8
+  return std::string("cub::detail::segmented_reduce::DeviceSegmentedReduceKernel<") + std::string(chained_policy_t)
+       + std::string(", ") + std::string(input_iterator_t) + std::string(", ") + std::string(output_iterator_t)
+       + std::string(", ") + std::string(start_offset_iterator_t) + std::string(", ")
+       + std::string(end_offset_iterator_t) + std::string(", ") + std::string(offset_t) + std::string(", ")
+       + std::string(reduction_op_t) + std::string(", ") + std::string(init_t) + std::string(", ")
+       + std::string(accum_t) + std::string(">");
 }
 
 struct segmented_reduce_kernel_source
@@ -178,40 +172,33 @@ CUresult cccl_device_segmented_reduce_build(
     // OffsetT is checked to match have 64-bit size
     const auto offset_t = cccl_type_enum_to_name(cccl_type_enum::CCCL_UINT64);
 
-    const std::string dependent_definitions_src = std::format(
-      R"XXX(
-struct __align__({1}) storage_t {{
-  char data[{0}];
-}};
-{2}
-{3}
-{4}
-{5}
-{6}
-)XXX",
-      input_it.value_type.size, // 0
-      input_it.value_type.alignment, // 1
-      input_iterator_src, // 2
-      output_iterator_src, // 3
-      op_src, // 4
-      start_offset_iterator_src, // 5
-      end_offset_iterator_src); // 6
+    const std::string dependent_definitions_src =
+      std::string("\n#include <cub/device/dispatch/kernels/segmented_reduce.cuh>\n")
+      + std::string("#include <cub/util_type.cuh> // needed for cub::NullType\n") + std::string("struct __align__(")
+      + std::to_string(input_it.value_type.alignment) + std::string(") storage_t {\n") + std::string("  char data[")
+      + std::to_string(input_it.value_type.size) + std::string("];\n") + std::string("};\n")
+      + std::string(input_iterator_src) + std::string("\n") + std::string(output_iterator_src) + std::string("\n")
+      + std::string(start_offset_iterator_src) + std::string("\n") + std::string(end_offset_iterator_src)
+      + std::string("\n") + std::string(op_src) + std::string("\n")
+      + std::string("struct device_segmented_reduce_policy {\n") + std::string("  struct ActivePolicy {\n")
+      + std::string("    using SegmentedReducePolicy = agent_policy_t;\n") + std::string("  };\n")
+      + std::string("};\n");
 
     // Runtime parameter tuning
 
-    const std::string ptx_arch = std::format("-arch=compute_{}{}", cc_major, cc_minor);
+    const std::string ptx_arch = std::string("-arch=compute_") + std::to_string(cc_major) + std::to_string(cc_minor);
 
     constexpr size_t ptx_num_args      = 5;
     const char* ptx_args[ptx_num_args] = {ptx_arch.c_str(), cub_path, thrust_path, libcudacxx_path, "-rdc=true"};
 
-    static constexpr std::string_view policy_wrapper_expr_tmpl =
-      R"XXXX(cub::detail::reduce::MakeReducePolicyWrapper(cub::detail::reduce::policy_hub<{0}, {1}, {2}>::MaxPolicy::ActivePolicy{{}}))XXXX";
+    [[maybe_unused]] static constexpr std::string_view policy_wrapper_expr_tmpl =
+      R"XXXX(cub::detail::segmented_reduce::MakeSegmentedReducePolicyWrapper(cub::detail::segmented_reduce::policy_hub<{0}, {1}, {2}>::MaxPolicy::ActivePolicy{{}}))XXXX";
 
-    const auto policy_wrapper_expr = std::format(
-      policy_wrapper_expr_tmpl,
-      accum_cpp, // 0
-      offset_t, // 1
-      op_name); // 2
+    const auto policy_wrapper_expr =
+      std::string("cub::detail::segmented_reduce::MakeSegmentedReducePolicyWrapper(")
+      + std::string("cub::detail::segmented_reduce::policy_hub<") + std::string(accum_cpp) + std::string(", ")
+      + std::string(input_iterator_name) + std::string(", ") + std::string(output_iterator_name)
+      + std::string(">::MaxPolicy::ActivePolicy{})");
 
     static constexpr std::string_view ptx_query_tu_src_tmpl = R"XXXX(
 #include <cub/block/block_reduce.cuh>
@@ -220,8 +207,8 @@ struct __align__({1}) storage_t {{
 {1}
 )XXXX";
 
-    const auto ptx_query_tu_src =
-      std::format(ptx_query_tu_src_tmpl, jit_template_header_contents, dependent_definitions_src);
+    const auto ptx_query_tu_src = std::string(ptx_query_tu_src_tmpl) + std::string(jit_template_header_contents)
+                                + std::string(dependent_definitions_src);
 
     nlohmann::json runtime_policy = get_policy(policy_wrapper_expr, ptx_query_tu_src, ptx_args);
 
@@ -230,7 +217,7 @@ struct __align__({1}) storage_t {{
           segmented_reduce_policy_str] = RuntimeReduceAgentPolicy::from_json(runtime_policy, "ReducePolicy");
 
     // agent_policy_t is to specify parameters like policy_hub does in dispatch_reduce.cuh
-    constexpr std::string_view program_preamble_template = R"XXX(
+    [[maybe_unused]] constexpr std::string_view program_preamble_template = R"XXX(
 #include <cub/block/block_reduce.cuh>
 #include <cub/device/dispatch/kernels/segmented_reduce.cuh>
 {0}
@@ -242,11 +229,8 @@ struct device_segmented_reduce_policy {{
 }};
 )XXX";
 
-    std::string final_src = std::format(
-      program_preamble_template,
-      jit_template_header_contents, // 0
-      dependent_definitions_src, // 1
-      segmented_reduce_policy_str); // 2
+    std::string final_src = std::string(ptx_query_tu_src_tmpl) + std::string(jit_template_header_contents)
+                          + std::string(dependent_definitions_src);
 
     std::string segmented_reduce_kernel_name = segmented_reduce::get_device_segmented_reduce_kernel_name(
       op_name,
@@ -258,7 +242,7 @@ struct device_segmented_reduce_policy {{
       accum_cpp);
     std::string segmented_reduce_kernel_lowered_name;
 
-    const std::string arch = std::format("-arch=sm_{0}{1}", cc_major, cc_minor);
+    const std::string arch = std::string("-arch=sm_") + std::to_string(cc_major) + std::to_string(cc_minor);
 
     constexpr size_t num_args  = 9;
     const char* args[num_args] = {

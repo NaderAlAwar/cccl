@@ -12,7 +12,7 @@
 #include <cub/detail/launcher/cuda_driver.cuh>
 #include <cub/device/device_merge_sort.cuh>
 
-#include <format>
+#include <string>
 
 #include "kernels/iterators.h"
 #include "kernels/operators.h"
@@ -161,18 +161,12 @@ std::string get_merge_sort_kernel_name(
       ? "cub::NullType"
       : cccl_type_enum_to_name<items_storage_t>(output_items_it.value_type.type);
 
-  return std::format(
-    "cub::detail::merge_sort::{0}<{1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}, device_merge_sort_vsmem_helper>",
-    kernel_name,
-    chained_policy_t,
-    input_keys_iterator_t,
-    input_items_iterator_t,
-    output_keys_iterator_t,
-    output_items_iterator_t,
-    offset_t,
-    compare_op_t,
-    key_t,
-    value_t);
+  return std::string("cub::detail::merge_sort::") + std::string(kernel_name) + std::string("<")
+       + std::string(chained_policy_t) + std::string(", ") + std::string(input_keys_iterator_t) + std::string(", ")
+       + std::string(input_items_iterator_t) + std::string(", ") + std::string(output_keys_iterator_t)
+       + std::string(", ") + std::string(output_items_iterator_t) + std::string(", ") + std::string(offset_t)
+       + std::string(", ") + std::string(compare_op_t) + std::string(", ") + std::string(key_t) + std::string(", ")
+       + std::string(value_t) + std::string(", device_merge_sort_vsmem_helper>");
 }
 
 std::string get_partition_kernel_name(cccl_iterator_t output_keys_it)
@@ -187,12 +181,9 @@ std::string get_partition_kernel_name(cccl_iterator_t output_keys_it)
 
   std::string key_t = cccl_type_enum_to_name(output_keys_it.value_type.type);
 
-  return std::format(
-    "cub::detail::merge_sort::DeviceMergeSortPartitionKernel<{0}, {1}, {2}, {3}>",
-    output_keys_iterator_t,
-    offset_t,
-    compare_op_t,
-    key_t);
+  return std::string("cub::detail::merge_sort::DeviceMergeSortPartitionKernel<") + std::string(output_keys_iterator_t)
+       + std::string(", ") + std::string(offset_t) + std::string(", ") + std::string(compare_op_t) + std::string(", ")
+       + std::string(key_t) + std::string(">");
 }
 
 template <auto* GetPolicy>
@@ -325,71 +316,43 @@ CUresult cccl_device_merge_sort_build(
 
     const std::string op_src = make_kernel_user_comparison_operator(input_keys_it_value_t, op);
 
-    constexpr std::string_view src_template = R"XXX(
-#include <cub/device/dispatch/kernels/merge_sort.cuh>
-#include <cub/util_type.cuh> // needed for cub::NullType
-struct __align__({1}) storage_t {{
-  char data[{0}];
-}};
-struct __align__({3}) items_storage_t {{
-  char data[{2}];
-}};
-{7}
-{8}
-{9}
-{10}
-struct agent_policy_t {{
-  static constexpr int ITEMS_PER_TILE = {6};
-  static constexpr int ITEMS_PER_THREAD = {5};
-  static constexpr int BLOCK_THREADS = {4};
-  static constexpr cub::BlockLoadAlgorithm LOAD_ALGORITHM = cub::BLOCK_LOAD_WARP_TRANSPOSE;
-  static constexpr cub::CacheLoadModifier LOAD_MODIFIER = cub::LOAD_LDG;
-  static constexpr cub::BlockStoreAlgorithm STORE_ALGORITHM = cub::BLOCK_STORE_WARP_TRANSPOSE;
-}};
-struct device_merge_sort_policy {{
-  struct ActivePolicy {{
-    using MergeSortPolicy = agent_policy_t;
-  }};
-}};
-struct device_merge_sort_vsmem_helper {{
-  template<typename ActivePolicyT, typename KeyInputIteratorT, typename ValueInputIteratorT, typename... Ts>
-  struct MergeSortVSMemHelperT {{
-    using policy_t = agent_policy_t;
-    using block_sort_agent_t = cub::detail::merge_sort::AgentBlockSort<agent_policy_t, KeyInputIteratorT, ValueInputIteratorT, Ts...>;
-    using merge_agent_t = cub::detail::merge_sort::AgentMerge<agent_policy_t, Ts...>;
-  }};
-  template <typename AgentT>
-  struct VSmemHelperT {{
-    using static_temp_storage_t = typename AgentT::TempStorage;
-    static _CCCL_DEVICE _CCCL_FORCEINLINE static_temp_storage_t& get_temp_storage(
-      static_temp_storage_t& static_temp_storage, cub::detail::vsmem_t& vsmem)
-    {{
-        return static_temp_storage;
-    }}
-    template <bool needs_vsmem_ = false, ::cuda::std::enable_if_t<!needs_vsmem_, int> = 0>
-    static _CCCL_DEVICE _CCCL_FORCEINLINE bool discard_temp_storage(static_temp_storage_t& temp_storage)
-    {{
-      return false;
-    }}
-  }};
-}};
-{11};
-)XXX";
-
-    const std::string src = std::format(
-      src_template,
-      input_keys_it.value_type.size, // 0
-      input_keys_it.value_type.alignment, // 1
-      input_items_it.value_type.size, // 2
-      input_items_it.value_type.alignment, // 3
-      policy.block_size, // 4
-      policy.items_per_thread, // 5
-      policy.items_per_tile, // 6
-      input_keys_iterator_src, // 7
-      input_items_iterator_src, // 8
-      output_keys_iterator_src, // 9
-      output_items_iterator_src, // 10
-      op_src); // 11
+    const std::string src =
+      std::string("\n#include <cub/device/dispatch/kernels/merge_sort.cuh>\n")
+      + std::string("#include <cub/util_type.cuh> // needed for cub::NullType\n") + std::string("struct __align__(")
+      + std::to_string(input_keys_it.value_type.alignment) + std::string(") storage_t {\n")
+      + std::string("  char data[") + std::to_string(input_keys_it.value_type.size) + std::string("];\n")
+      + std::string("};\n") + std::string("struct __align__(") + std::to_string(input_items_it.value_type.alignment)
+      + std::string(") items_storage_t {\n") + std::string("  char data[")
+      + std::to_string(input_items_it.value_type.size) + std::string("];\n") + std::string(input_keys_iterator_src)
+      + std::string("\n") + std::string(input_items_iterator_src) + std::string("\n")
+      + std::string(output_keys_iterator_src) + std::string("\n") + std::string(output_items_iterator_src)
+      + std::string("\n") + std::string("struct agent_policy_t {\n")
+      + std::string("  static constexpr int ITEMS_PER_TILE = ") + std::to_string(policy.items_per_tile)
+      + std::string(";\n") + std::string("  static constexpr int ITEMS_PER_THREAD = ")
+      + std::to_string(policy.items_per_thread) + std::string(";\n")
+      + std::string("  static constexpr int BLOCK_THREADS = ") + std::to_string(policy.block_size) + std::string(";\n")
+      + std::string("  static constexpr cub::BlockLoadAlgorithm LOAD_ALGORITHM = cub::BLOCK_LOAD_WARP_TRANSPOSE;\n")
+      + std::string("  static constexpr cub::CacheLoadModifier LOAD_MODIFIER = cub::LOAD_LDG;\n")
+      + std::string("  static constexpr cub::BlockStoreAlgorithm STORE_ALGORITHM = cub::BLOCK_STORE_WARP_TRANSPOSE;\n")
+      + std::string("};\n") + std::string("struct device_merge_sort_policy {\n")
+      + std::string("  struct ActivePolicy {\n") + std::string("    using MergeSortPolicy = agent_policy_t;\n")
+      + std::string("  };\n") + std::string("};\n") + std::string("struct device_merge_sort_vsmem_helper {\n")
+      + std::string("  template<typename ActivePolicyT, typename KeyInputIteratorT, typename ValueInputIteratorT, "
+                    "typename... Ts>\n")
+      + std::string("  struct MergeSortVSMemHelperT {\n") + std::string("    using policy_t = agent_policy_t;\n")
+      + std::string("    using block_sort_agent_t = cub::detail::merge_sort::AgentBlockSort<agent_policy_t, "
+                    "KeyInputIteratorT, ValueInputIteratorT, Ts...>;\n")
+      + std::string("    using merge_agent_t = cub::detail::merge_sort::AgentMerge<agent_policy_t, Ts...>;\n")
+      + std::string("  };\n") + std::string("  template <typename AgentT>\n") + std::string("  struct VSmemHelperT {\n")
+      + std::string("    using static_temp_storage_t = typename AgentT::TempStorage;\n")
+      + std::string("    static _CCCL_DEVICE _CCCL_FORCEINLINE static_temp_storage_t& get_temp_storage(\n")
+      + std::string("      static_temp_storage_t& static_temp_storage, cub::detail::vsmem_t& vsmem)\n")
+      + std::string("    {\n") + std::string("        return static_temp_storage;\n") + std::string("    }\n")
+      + std::string("    template <bool needs_vsmem_ = false, ::cuda::std::enable_if_t<!needs_vsmem_, int> = 0>\n")
+      + std::string("    static _CCCL_DEVICE _CCCL_FORCEINLINE bool discard_temp_storage(static_temp_storage_t& "
+                    "temp_storage)\n")
+      + std::string("    {\n") + std::string("      return false;\n") + std::string("    }\n") + std::string("  };\n")
+      + std::string("};\n") + std::string(op_src);
 
 #if false // CCCL_DEBUGGING_SWITCH
     fflush(stderr);
@@ -406,7 +369,7 @@ struct device_merge_sort_vsmem_helper {{
     std::string partition_kernel_lowered_name;
     std::string merge_kernel_lowered_name;
 
-    const std::string arch = std::format("-arch=sm_{0}{1}", cc_major, cc_minor);
+    const std::string arch = std::string("-arch=sm_") + std::to_string(cc_major) + std::to_string(cc_minor);
 
     constexpr size_t num_args  = 8;
     const char* args[num_args] = {

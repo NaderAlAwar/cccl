@@ -12,7 +12,7 @@
 #include <cub/detail/launcher/cuda_driver.cuh>
 #include <cub/device/device_select.cuh>
 
-#include <format>
+#include <string>
 
 #include "cub/block/block_scan.cuh"
 #include "kernels/iterators.h"
@@ -116,8 +116,8 @@ std::string get_compact_init_kernel_name(cccl_iterator_t output_num_selected_it)
   const std::string num_selected_iterator_t =
     get_iterator_name(output_num_selected_it, unique_by_key_iterator_t::num_selected);
 
-  return std::format(
-    "cub::detail::scan::DeviceCompactInitKernel<cub::ScanTileState<{0}>, {1}>", offset_t, num_selected_iterator_t);
+  return std::string("cub::detail::scan::DeviceCompactInitKernel<cub::ScanTileState<") + offset_t + std::string(">, ")
+       + num_selected_iterator_t + std::string(">");
 }
 
 std::string get_sweep_kernel_name(
@@ -142,23 +142,16 @@ std::string get_sweep_kernel_name(
   std::string offset_t;
   check(nvrtcGetTypeName<OffsetT>(&offset_t));
 
-  auto tile_state_t = std::format("cub::ScanTileState<{0}>", offset_t);
+  auto tile_state_t = std::string("cub::ScanTileState<") + offset_t + std::string(">");
 
   std::string equality_op_t;
   check(nvrtcGetTypeName<op_wrapper>(&equality_op_t));
 
-  return std::format(
-    "cub::detail::unique_by_key::DeviceUniqueByKeySweepKernel<{0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, "
-    "device_unique_by_key_vsmem_helper>",
-    chained_policy_t,
-    input_keys_iterator_t,
-    input_values_iterator_t,
-    output_keys_iterator_t,
-    output_values_iterator_t,
-    output_num_selected_iterator_t,
-    tile_state_t,
-    equality_op_t,
-    offset_t);
+  return std::string("cub::detail::unique_by_key::DeviceUniqueByKeySweepKernel<") + chained_policy_t + std::string(", ")
+       + input_keys_iterator_t + std::string(", ") + input_values_iterator_t + std::string(", ")
+       + output_keys_iterator_t + std::string(", ") + output_values_iterator_t + std::string(", ")
+       + output_num_selected_iterator_t + std::string(", ") + tile_state_t + std::string(", ") + equality_op_t
+       + std::string(", ") + offset_t + std::string(">");
 }
 
 template <auto* GetPolicy>
@@ -239,8 +232,8 @@ CUresult cccl_device_unique_by_key_build(
   {
     const char* name = "test";
 
-    const int cc      = cc_major * 10 + cc_minor;
-    const auto policy = unique_by_key::get_policy(cc, input_keys_it.value_type.size);
+    const int cc                       = cc_major * 10 + cc_minor;
+    [[maybe_unused]] const auto policy = unique_by_key::get_policy(cc, input_keys_it.value_type.size);
 
     const auto input_keys_it_value_t          = cccl_type_enum_to_name(input_keys_it.value_type.type);
     const auto input_values_it_value_t        = cccl_type_enum_to_name(input_values_it.value_type.type);
@@ -278,7 +271,7 @@ CUresult cccl_device_unique_by_key_build(
 
     const std::string op_src = make_kernel_user_comparison_operator(input_keys_it_value_t, op);
 
-    constexpr std::string_view src_template = R"XXX(
+    [[maybe_unused]] constexpr std::string_view src_template = R"XXX(
 #include <cub/device/dispatch/kernels/scan.cuh>
 #include <cub/device/dispatch/kernels/unique_by_key.cuh>
 #include <cub/agent/single_pass_scan_operators.cuh>
@@ -332,22 +325,20 @@ struct device_unique_by_key_vsmem_helper {{
 {13}
 )XXX";
 
-    const std::string src = std::format(
-      src_template,
-      input_keys_it.value_type.size, // 0
-      input_keys_it.value_type.alignment, // 1
-      input_values_it.value_type.size, // 2
-      input_values_it.value_type.alignment, // 3
-      output_values_it.value_type.size, // 4
-      output_values_it.value_type.alignment, // 5
-      policy.block_size, // 6
-      policy.items_per_thread, // 7
-      input_keys_iterator_src, // 8
-      input_values_iterator_src, // 9
-      output_keys_iterator_src, // 10
-      output_values_iterator_src, // 11
-      output_num_selected_iterator_src, // 12
-      op_src); // 13
+    const std::string src =
+      std::string("\n#include <cub/device/dispatch/kernels/unique_by_key.cuh>\n")
+      + std::string("#include <cub/util_type.cuh> // needed for cub::NullType\n") + std::string("struct __align__(")
+      + std::to_string(input_keys_it.value_type.alignment) + std::string(") storage_t {\n")
+      + std::string("  char data[") + std::to_string(input_keys_it.value_type.size) + std::string("];\n")
+      + std::string("};\n") + std::string("struct __align__(") + std::to_string(input_values_it.value_type.alignment)
+      + std::string(") items_storage_t {\n") + std::string("  char data[")
+      + std::to_string(input_values_it.value_type.size) + std::string("];\n") + std::string("};\n")
+      + std::string(input_keys_iterator_src) + std::string("\n") + std::string(input_values_iterator_src)
+      + std::string("\n") + std::string(output_keys_iterator_src) + std::string("\n")
+      + std::string(output_values_iterator_src) + std::string("\n") + std::string(output_num_selected_iterator_src)
+      + std::string("\n") + std::string(op_src) + std::string("\n")
+      + std::string("struct device_unique_by_key_policy {\n") + std::string("  struct ActivePolicy {\n")
+      + std::string("    using UniqueByKeyPolicy = agent_policy_t;\n") + std::string("  };\n") + std::string("};\n");
 
 #if false // CCCL_DEBUGGING_SWITCH
       fflush(stderr);
@@ -361,7 +352,7 @@ struct device_unique_by_key_vsmem_helper {{
     std::string compact_init_kernel_lowered_name;
     std::string sweep_kernel_lowered_name;
 
-    const std::string arch = std::format("-arch=sm_{0}{1}", cc_major, cc_minor);
+    const std::string arch = std::string("-arch=sm_") + std::to_string(cc_major) + std::to_string(cc_minor);
 
     constexpr size_t num_args  = 8;
     const char* args[num_args] = {

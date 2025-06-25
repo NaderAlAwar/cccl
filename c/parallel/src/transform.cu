@@ -15,7 +15,6 @@
 #include <cub/util_temporary_storage.cuh>
 #include <cub/util_type.cuh>
 
-#include <format>
 #include <string>
 #include <type_traits>
 
@@ -77,13 +76,8 @@ std::string get_kernel_name(cccl_iterator_t input_it, cccl_iterator_t output_it,
   std::string transform_op_t;
   check(nvrtcGetTypeName<op_wrapper>(&transform_op_t));
 
-  return std::format(
-    "cub::detail::transform::transform_kernel<{0}, {1}, {2}, {3}, {4}>",
-    chained_policy_t, // 0
-    offset_t, // 1
-    transform_op_t, // 2
-    output_iterator_t, // 3
-    input_iterator_t); // 4
+  return std::string("cub::detail::transform::transform_kernel<") + chained_policy_t + ", " + offset_t + ", "
+       + transform_op_t + ", " + output_iterator_t + ", " + input_iterator_t + ">";
 }
 
 std::string
@@ -102,14 +96,8 @@ get_kernel_name(cccl_iterator_t input1_it, cccl_iterator_t input2_it, cccl_itera
   std::string transform_op_t;
   check(nvrtcGetTypeName<op_wrapper>(&transform_op_t));
 
-  return std::format(
-    "cub::detail::transform::transform_kernel<{0}, {1}, {2}, {3}, {4}, {5}>",
-    chained_policy_t, // 0
-    offset_t, // 1
-    transform_op_t, // 2
-    output_iterator_t, // 3
-    input1_iterator_t, // 4
-    input2_iterator_t); // 5
+  return std::string("cub::detail::transform::transform_kernel<") + chained_policy_t + ", " + offset_t + ", "
+       + transform_op_t + ", " + output_iterator_t + ", " + input1_iterator_t + ", " + input2_iterator_t + ">";
 }
 
 namespace cdt = cub::detail::transform;
@@ -227,36 +215,25 @@ CUresult cccl_device_unary_transform_build(
       make_kernel_output_iterator(offset_t, transform::output_iterator_name, output_it_value_t, output_it);
     const std::string op_src = make_kernel_user_unary_operator(input_it_value_t, output_it_value_t, op);
 
-    const std::string ptx_arch = std::format("-arch=compute_{}{}", cc_major, cc_minor);
+    const std::string ptx_arch = std::string("-arch=compute_") + std::to_string(cc_major) + std::to_string(cc_minor);
 
     constexpr size_t ptx_num_args      = 5;
     const char* ptx_args[ptx_num_args] = {ptx_arch.c_str(), cub_path, thrust_path, libcudacxx_path, "-rdc=true"};
 
-    std::string src = std::format(
-      R"XXX(
-#include <cub/device/dispatch/tuning/tuning_transform.cuh>
-struct __align__({1}) input_storage_t {{
-  char data[{0}];
-}};
-struct __align__({3}) output_storage_t {{
-  char data[{2}];
-}};
-{4}
-{5}
-{6}
-)XXX",
-      input_it.value_type.size, // 0
-      input_it.value_type.alignment, // 1
-      output_it.value_type.size, // 2
-      output_it.value_type.alignment, // 3
-      input_iterator_src, // 4
-      output_iterator_src, // 5
-      op_src); // 6
+    std::string src =
+      std::string("#include <cub/device/dispatch/tuning/tuning_transform.cuh>\n") + std::string("struct __align__(")
+      + std::to_string(input_it.value_type.alignment) + std::string(") input_storage_t {\n")
+      + std::string("  char data[") + std::to_string(input_it.value_type.size) + std::string("];\n")
+      + std::string("};\n") + std::string("struct __align__(") + std::to_string(output_it.value_type.alignment)
+      + std::string(") output_storage_t {\n") + std::string("  char data[") + std::to_string(output_it.value_type.size)
+      + std::string("];\n") + std::string("};\n") + input_iterator_src + std::string("\n") + output_iterator_src
+      + std::string("\n") + op_src;
 
     nlohmann::json runtime_policy = get_policy(
-      std::format("cub::detail::transform::MakeTransformPolicyWrapper(cub::detail::transform::policy_hub<false, "
-                  "::cuda::std::tuple<{0}>>::max_policy::ActivePolicy{{}})",
-                  transform::get_iterator_name<input_storage_t>(input_it, transform::input_iterator_name)),
+      std::string("cub::detail::transform::MakeTransformPolicyWrapper(cub::detail::transform::policy_hub<false, "
+                  "::cuda::std::tuple<")
+        + std::string(transform::get_iterator_name<input_storage_t>(input_it, transform::input_iterator_name))
+        + std::string(">>::max_policy::ActivePolicy{})"),
       "#include <cub/device/dispatch/tuning/tuning_transform.cuh>\n" + src,
       ptx_args);
 
@@ -277,22 +254,13 @@ struct __align__({3}) output_storage_t {{
       _CCCL_UNREACHABLE();
     }();
 
-    std::string final_src = std::format(
-      R"XXX(
-#include <cub/device/dispatch/kernels/transform.cuh>
-{0}
-struct device_transform_policy {{
-  struct ActivePolicy {{
-    static constexpr auto algorithm = static_cast<cub::detail::transform::Algorithm>({1});
-    static constexpr int min_bif = {2};
-    {3}
-  }};
-}};
-)XXX",
-      src,
-      static_cast<int>(algorithm),
-      min_bif,
-      transform_policy_src);
+    std::string final_src =
+      std::string("#include <cub/device/dispatch/kernels/transform.cuh>\n") + src + std::string("\n")
+      + std::string("struct device_transform_policy {\n") + std::string("  struct ActivePolicy {\n")
+      + std::string("    static constexpr auto algorithm = static_cast<cub::detail::transform::Algorithm>(")
+      + std::to_string(static_cast<int>(algorithm)) + std::string(");\n")
+      + std::string("    static constexpr int min_bif = ") + std::to_string(min_bif) + std::string(";\n")
+      + transform_policy_src + std::string("\n") + std::string("  };\n") + std::string("};\n");
 
 #if false // CCCL_DEBUGGING_SWITCH
     fflush(stderr);
@@ -303,7 +271,7 @@ struct device_transform_policy {{
     std::string kernel_name = transform::get_kernel_name(input_it, output_it, op);
     std::string kernel_lowered_name;
 
-    const std::string arch = std::format("-arch=sm_{0}{1}", cc_major, cc_minor);
+    const std::string arch = std::string("-arch=sm_") + std::to_string(cc_major) + std::to_string(cc_minor);
 
     // Note: `-default-device` is needed because of the use of lambdas
     // in the transform kernel code. Qualifying those explicitly with
@@ -455,45 +423,29 @@ CUresult cccl_device_binary_transform_build(
     const std::string op_src =
       make_kernel_user_binary_operator(input1_it_value_t, input2_it_value_t, output_it_value_t, op);
 
-    const std::string ptx_arch = std::format("-arch=compute_{}{}", cc_major, cc_minor);
+    const std::string ptx_arch = std::string("-arch=compute_") + std::to_string(cc_major) + std::to_string(cc_minor);
 
     constexpr size_t ptx_num_args      = 5;
     const char* ptx_args[ptx_num_args] = {ptx_arch.c_str(), cub_path, thrust_path, libcudacxx_path, "-rdc=true"};
 
-    std::string src = std::format(
-      R"XXX(
-#include <cub/device/dispatch/kernels/transform.cuh>
-struct __align__({1}) input1_storage_t {{
-  char data[{0}];
-}};
-struct __align__({3}) input2_storage_t {{
-  char data[{2}];
-}};
-
-struct __align__({5}) output_storage_t {{
-  char data[{4}];
-}};
-{6}
-{7}
-{8}
-{9}
-)XXX",
-      input1_it.value_type.size, // 0
-      input1_it.value_type.alignment, // 1
-      input2_it.value_type.size, // 2
-      input2_it.value_type.alignment, // 3
-      output_it.value_type.size, // 4
-      output_it.value_type.alignment, // 5
-      input1_iterator_src, // 6
-      input2_iterator_src, // 7
-      output_iterator_src, // 8
-      op_src); // 9
+    std::string src =
+      std::string("#include <cub/device/dispatch/kernels/transform.cuh>\n") + std::string("struct __align__(")
+      + std::to_string(input1_it.value_type.alignment) + std::string(") input1_storage_t {\n")
+      + std::string("  char data[") + std::to_string(input1_it.value_type.size) + std::string("];\n")
+      + std::string("};\n") + std::string("struct __align__(") + std::to_string(input2_it.value_type.alignment)
+      + std::string(") input2_storage_t {\n") + std::string("  char data[") + std::to_string(input2_it.value_type.size)
+      + std::string("];\n") + std::string("};\n") + std::string("struct __align__(")
+      + std::to_string(output_it.value_type.alignment) + std::string(") output_storage_t {\n")
+      + std::string("  char data[") + std::to_string(output_it.value_type.size) + std::string("];\n")
+      + std::string("};\n") + input1_iterator_src + std::string("\n") + input2_iterator_src + std::string("\n")
+      + output_iterator_src + std::string("\n") + op_src;
 
     nlohmann::json runtime_policy = get_policy(
-      std::format("cub::detail::transform::MakeTransformPolicyWrapper(cub::detail::transform::policy_hub<false, "
-                  "::cuda::std::tuple<{0}, {1}>>::max_policy::ActivePolicy{{}})",
-                  transform::get_iterator_name<input1_storage_t>(input1_it, transform::input1_iterator_name),
-                  transform::get_iterator_name<input2_storage_t>(input2_it, transform::input2_iterator_name)),
+      std::string("cub::detail::transform::MakeTransformPolicyWrapper(cub::detail::transform::policy_hub<false, "
+                  "::cuda::std::tuple<")
+        + transform::get_iterator_name<input1_storage_t>(input1_it, transform::input1_iterator_name) + std::string(", ")
+        + transform::get_iterator_name<input2_storage_t>(input2_it, transform::input2_iterator_name)
+        + std::string(">>::max_policy::ActivePolicy{})"),
       "#include <cub/device/dispatch/tuning/tuning_transform.cuh>\n" + src,
       ptx_args);
 
@@ -514,22 +466,13 @@ struct __align__({5}) output_storage_t {{
       _CCCL_UNREACHABLE();
     }();
 
-    std::string final_src = std::format(
-      R"XXX(
-#include <cub/device/dispatch/kernels/transform.cuh>
-{0}
-struct device_transform_policy {{
-  struct ActivePolicy {{
-    static constexpr auto algorithm = static_cast<cub::detail::transform::Algorithm>({1});
-    static constexpr int min_bif = {2};
-    {3}
-  }};
-}};
-)XXX",
-      src,
-      static_cast<int>(algorithm),
-      min_bif,
-      transform_policy_src);
+    std::string final_src =
+      std::string("#include <cub/device/dispatch/kernels/transform.cuh>\n") + src + std::string("\n")
+      + std::string("struct device_transform_policy {\n") + std::string("  struct ActivePolicy {\n")
+      + std::string("    static constexpr auto algorithm = static_cast<cub::detail::transform::Algorithm>(")
+      + std::to_string(static_cast<int>(algorithm)) + std::string(");\n")
+      + std::string("    static constexpr int min_bif = ") + std::to_string(min_bif) + std::string(";\n")
+      + transform_policy_src + std::string("\n") + std::string("  };\n") + std::string("};\n");
 
 #if false // CCCL_DEBUGGING_SWITCH
     fflush(stderr);
@@ -540,7 +483,7 @@ struct device_transform_policy {{
     std::string kernel_name = transform::get_kernel_name(input1_it, input2_it, output_it, op);
     std::string kernel_lowered_name;
 
-    const std::string arch = std::format("-arch=sm_{0}{1}", cc_major, cc_minor);
+    const std::string arch = std::string("-arch=sm_") + std::to_string(cc_major) + std::to_string(cc_minor);
 
     constexpr size_t num_args  = 10;
     const char* args[num_args] = {
