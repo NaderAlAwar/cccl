@@ -228,6 +228,7 @@ _CCCL_DEVICE void transform_kernel_ublkcp(
     // use one thread to setup the entire bulk copy
     if (elect_one())
     {
+      printf("doing ublkcp\n");
       ptx::mbarrier_init(&bar, 1);
       ptx::fence_proxy_async(ptx::space_shared);
 
