@@ -27,7 +27,8 @@
 
 template <typename... RandomAccessIteratorsIn>
 #if TUNE_BASE
-using policy_hub_t = cub::detail::transform::policy_hub<false, ::cuda::std::tuple<RandomAccessIteratorsIn...>>;
+using policy_hub_t =
+  cub::detail::transform::policy_hub<false, ::cuda::std::tuple<RandomAccessIteratorsIn...>>;
 #else
 struct policy_hub_t
 {
@@ -38,10 +39,25 @@ struct policy_hub_t
     using algo_policy =
       ::cuda::std::_If<algorithm == cub::detail::transform::Algorithm::prefetch,
                        cub::detail::transform::prefetch_policy_t<TUNE_THREADS>,
-                       cub::detail::transform::async_copy_policy_t<TUNE_THREADS, __CUDA_ARCH_LIST__ == 900 ? 128 : 16>>;
+                       cub::detail::transform::async_copy_policy_t<TUNE_THREADS>>;
   };
 };
 #endif
+
+#ifdef TUNE_T
+using element_types = nvbench::type_list<TUNE_T>;
+#else
+using element_types =
+  nvbench::type_list<__half
+                    >;
+#endif
+
+// BabelStream uses 2^25, H200 can fit 2^31 int128s
+// 2^20 chars / 2^16 int128 saturate V100 (min_bif =12 * SM count =80)
+// 2^21 chars / 2^17 int128 saturate A100 (min_bif =16 * SM count =108)
+// 2^23 chars / 2^19 int128 saturate H100/H200 HBM3 (min_bif =32or48 * SM count =132)
+// inline auto array_size_powers = std::vector<nvbench::int64_t>{28};
+inline auto array_size_powers = nvbench::range(16, 28, 4);
 
 template <typename OffsetT,
           typename... RandomAccessIteratorsIn,
@@ -57,15 +73,21 @@ void bench_transform(
   ExecTag exec_tag = nvbench::exec_tag::no_batch)
 {
   state.exec(nvbench::exec_tag::gpu | exec_tag, [&](const nvbench::launch& launch) {
-    cub::detail::transform::dispatch_t<
-      cub::detail::transform::requires_stable_address::no,
-      OffsetT,
-      ::cuda::std::tuple<RandomAccessIteratorsIn...>,
-      RandomAccessIteratorOut,
-      TransformOp,
-      policy_hub_t<RandomAccessIteratorsIn...>>::dispatch(inputs, output, num_items, transform_op, launch.get_stream());
+    cub::detail::transform::dispatch_t<cub::detail::transform::requires_stable_address::no,
+                                       OffsetT,
+                                       ::cuda::std::tuple<RandomAccessIteratorsIn...>,
+                                       RandomAccessIteratorOut,
+                                       TransformOp,
+                                       policy_hub_t<RandomAccessIteratorsIn...>>::
+      dispatch(inputs, output, num_items, transform_op, launch.get_stream());
   });
 }
+
+// Modified from BabelStream to also work for integers
+inline constexpr auto startA      = 1; // BabelStream: 0.1
+inline constexpr auto startB      = 2; // BabelStream: 0.2
+inline constexpr auto startC      = 3; // BabelStream: 0.1
+inline constexpr auto startScalar = 4; // BabelStream: 0.4
 
 // TODO(bgruber): we should put those somewhere into libcu++:
 // from C++ GSL
