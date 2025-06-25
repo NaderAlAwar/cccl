@@ -99,8 +99,8 @@ get_kernel_name(cccl_iterator_t input1_it, cccl_iterator_t input2_it, cccl_itera
   // return std::string("cub::detail::transform::transform_kernel<") + chained_policy_t + ", " + offset_t + ", "
   //      + transform_op_t + ", " + output_iterator_t + ", " + input1_iterator_t + ", " + input2_iterator_t + ">";
   return std::string("cub::detail::transform::transform_kernel<") + chained_policy_t + ", " + offset_t + ", "
-       + std::string("::cuda::std::plus<>") + ", " + output_iterator_t + ", " + input1_iterator_t + ", "
-       + input2_iterator_t + ">";
+       + std::string("::cuda::std::plus<>") + ", " + std::string("__half*") + ", " + std::string("__half*") + ", "
+       + std::string("__half*") + ">";
 }
 
 namespace cdt = cub::detail::transform;
