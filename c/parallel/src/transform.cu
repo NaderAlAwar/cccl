@@ -469,6 +469,8 @@ CUresult cccl_device_binary_transform_build(
       _CCCL_UNREACHABLE();
     }();
 
+    std::cout << "transform_policy_src: " << transform_policy_src << std::endl;
+
     std::string final_src =
       std::string("#include <cub/device/dispatch/kernels/transform.cuh>\n") + src + std::string("\n")
       + std::string("struct device_transform_policy {\n") + std::string("  struct ActivePolicy {\n")
