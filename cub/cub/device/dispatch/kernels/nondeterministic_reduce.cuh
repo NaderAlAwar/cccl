@@ -273,14 +273,15 @@ __launch_bounds__(int(ChainedPolicyT::ActivePolicy::ReduceAtomicPolicy::BLOCK_TH
   {
     // ony thread 0 has valid value in block aggregate
     // detail::uninitialized_copy_single(d_block_reductions + blockIdx.x, block_aggregate);
-    if (blockIdx.x == 0)
-    {
-      atomicAdd(d_out, block_aggregate + init);
-    }
-    else
-    {
-      atomicAdd(d_out, block_aggregate);
-    }
+    atomicAdd(d_out, block_aggregate + ((blockIdx.x == 0) * init));
+    // if (blockIdx.x == 0)
+    // {
+    //   atomicAdd(d_out, block_aggregate + init);
+    // }
+    // else
+    // {
+    //   atomicAdd(d_out, block_aggregate);
+    // }
   }
 }
 
