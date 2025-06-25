@@ -205,8 +205,8 @@ _CCCL_HOST_DEVICE constexpr int arch_to_min_bytes_in_flight(int sm_arch)
   }
   if (sm_arch >= 900)
   {
-    // return 48 * 1024; // 32 for H100, 48 for H200
-    return 32 * 1024; // 32 for H100, 48 for H200
+    return 48 * 1024; // 32 for H100, 48 for H200
+    // return 32 * 1024; // 32 for H100, 48 for H200
   }
   if (sm_arch >= 800)
   {
