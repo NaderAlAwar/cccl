@@ -275,10 +275,12 @@ __launch_bounds__(int(ChainedPolicyT::ActivePolicy::ReduceAtomicPolicy::BLOCK_TH
     // detail::uninitialized_copy_single(d_block_reductions + blockIdx.x, block_aggregate);
     if (blockIdx.x == 0)
     {
-      atomicAdd(d_out, init);
+      atomicAdd(d_out, block_aggregate + init);
     }
-
-    atomicAdd(d_out, block_aggregate);
+    else
+    {
+      atomicAdd(d_out, block_aggregate);
+    }
   }
 }
 
