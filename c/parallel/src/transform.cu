@@ -279,7 +279,7 @@ CUresult cccl_device_unary_transform_build(
     // Note: `-default-device` is needed because of the use of lambdas
     // in the transform kernel code. Qualifying those explicitly with
     // `__device__` seems not to be supported by NVRTC.
-    constexpr size_t num_args  = 10;
+    constexpr size_t num_args  = 9;
     const char* args[num_args] = {
       arch.c_str(),
       cub_path,
@@ -289,8 +289,7 @@ CUresult cccl_device_unary_transform_build(
       "-rdc=true",
       "-dlto",
       "-default-device",
-      "-DCUB_DISABLE_CDP",
-      "-lineinfo"};
+      "-DCUB_DISABLE_CDP"};
 
     constexpr size_t num_lto_args   = 2;
     const char* lopts[num_lto_args] = {"-lto", arch.c_str()};
@@ -490,7 +489,7 @@ CUresult cccl_device_binary_transform_build(
 
     const std::string arch = std::string("-arch=sm_") + std::to_string(cc_major) + std::to_string(cc_minor);
 
-    constexpr size_t num_args  = 10;
+    constexpr size_t num_args  = 9;
     const char* args[num_args] = {
       arch.c_str(),
       cub_path,
@@ -500,8 +499,7 @@ CUresult cccl_device_binary_transform_build(
       "-rdc=true",
       "-dlto",
       "-default-device",
-      "-DCUB_DISABLE_CDP",
-      "-lineinfo"};
+      "-DCUB_DISABLE_CDP"};
 
     constexpr size_t num_lto_args   = 2;
     const char* lopts[num_lto_args] = {"-lto", arch.c_str()};
