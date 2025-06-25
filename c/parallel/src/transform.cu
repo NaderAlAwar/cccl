@@ -35,7 +35,7 @@
 struct op_wrapper;
 struct device_transform_policy;
 
-using OffsetT = long;
+using OffsetT = int;
 static_assert(std::is_same_v<cub::detail::choose_signed_offset_t<OffsetT>, OffsetT>,
               "OffsetT must be signed int32 or int64");
 
@@ -93,11 +93,14 @@ get_kernel_name(cccl_iterator_t input1_it, cccl_iterator_t input2_it, cccl_itera
   std::string offset_t;
   check(nvrtcGetTypeName<OffsetT>(&offset_t));
 
-  std::string transform_op_t;
-  check(nvrtcGetTypeName<op_wrapper>(&transform_op_t));
+  // std::string transform_op_t;
+  // check(nvrtcGetTypeName<op_wrapper>(&transform_op_t));
 
+  // return std::string("cub::detail::transform::transform_kernel<") + chained_policy_t + ", " + offset_t + ", "
+  //      + transform_op_t + ", " + output_iterator_t + ", " + input1_iterator_t + ", " + input2_iterator_t + ">";
   return std::string("cub::detail::transform::transform_kernel<") + chained_policy_t + ", " + offset_t + ", "
-       + transform_op_t + ", " + output_iterator_t + ", " + input1_iterator_t + ", " + input2_iterator_t + ">";
+       + std::string("::cuda::std::plus<>") + ", " + std::string("__half*") + ", " + std::string("__half*") + ", "
+       + std::string("__half*") + ">";
 }
 
 namespace cdt = cub::detail::transform;
