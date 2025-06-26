@@ -113,6 +113,7 @@ reduce_runtime_tuning_policy get_policy(int cc, cccl_type_info accumulator_type)
 
   // return {block_size, items_per_thread, vector_load_length};
   // sf_5.uabr_0.uges_0.ipt_23.tpb_544.ipv_1
+  // sf_5.uabr_0.uges_0.ipt_21.tpb_224.ipv_1
   return {544, 23, 1};
 }
 
