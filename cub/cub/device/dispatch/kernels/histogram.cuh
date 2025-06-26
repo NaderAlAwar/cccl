@@ -15,14 +15,15 @@
 
 #include <cub/agent/agent_histogram.cuh>
 #include <cub/grid/grid_queue.cuh>
+#include <cub/thread/thread_reduce.cuh>
 
 #include <cuda/__barrier/aligned_size.h>
-#include <cuda/__memcpy_async/check_preconditions.h>
 #include <cuda/__memcpy_async/completion_mechanism.h>
 #include <cuda/__memcpy_async/memcpy_async_barrier.h>
 #include <cuda/__ptx/instructions/get_sreg.h>
 #include <cuda/atomic>
-#if _CCCL_PTX_ARCH() >= 700
+#include <cuda/std/__cccl/execution_space.h>
+#if _CCCL_PTX_ARCH >= 700
 #  include <cuda/barrier>
 #endif
 #include <cuda/std/__algorithm/max.h>
@@ -463,7 +464,7 @@ template <typename ChainedPolicyT,
           typename OutputDecodeOpT,
           typename OffsetT>
 __launch_bounds__(int(ChainedPolicyT::ActivePolicy::AgentHistogramPolicyT::BLOCK_THREADS)) CUB_DETAIL_KERNEL_ATTRIBUTES
-#if _CCCL_PTX_ARCH() >= 700
+#if _CCCL_PTX_ARCH >= 700
 typename ::cuda::std::enable_if<(PRIVATIZED_SMEM_BINS == 0)>::type
 #else
 void
@@ -520,7 +521,7 @@ void
 
 #define ATOMIC_RED
 
-#if _CCCL_PTX_ARCH() >= 700
+#if _CCCL_PTX_ARCH >= 700
 
 template <typename ChainedPolicyT,
           int PRIVATIZED_SMEM_BINS,
