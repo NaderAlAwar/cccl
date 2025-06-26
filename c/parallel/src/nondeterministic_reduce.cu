@@ -1,5 +1,5 @@
 // #define TUNE_USE_GRID_EVEN_SHARE 1
-#define TUNE_USE_ATOMIC_BLOCK_REDUCE 1
+// #define TUNE_USE_ATOMIC_BLOCK_REDUCE 1
 //===----------------------------------------------------------------------===//
 //
 // Part of CUDA Experimental in CUDA C++ Core Libraries,
@@ -111,7 +111,9 @@ reduce_runtime_tuning_policy get_policy(int cc, cccl_type_info accumulator_type)
   auto max_block_size = cuda::round_up(work_per_sm, 32);
   block_size          = _CUDA_VSTD::min<decltype(block_size)>(block_size, max_block_size);
 
-  return {block_size, items_per_thread, vector_load_length};
+  // return {block_size, items_per_thread, vector_load_length};
+  // sf_5.uabr_0.uges_0.ipt_23.tpb_544.ipv_1
+  return {544, 23, 1}
 }
 
 static cccl_type_info get_accumulator_type(cccl_op_t /*op*/, cccl_iterator_t /*input_it*/, cccl_value_t init)
