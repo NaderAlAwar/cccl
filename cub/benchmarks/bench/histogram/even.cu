@@ -129,15 +129,17 @@ static void even(nvbench::state& state, nvbench::type_list<SampleT, CounterT, Of
 using counter_types     = nvbench::type_list<int32_t>;
 using some_offset_types = nvbench::type_list<int32_t>;
 
-#ifdef TUNE_SampleT
-using sample_types = nvbench::type_list<TUNE_SampleT>;
-#else // !defined(TUNE_SampleT)
-using sample_types = nvbench::type_list<int8_t, int16_t, int32_t, int64_t, float, double>;
-#endif // TUNE_SampleT
+// #ifdef TUNE_SampleT
+// using sample_types = nvbench::type_list<TUNE_SampleT>;
+// #else // !defined(TUNE_SampleT)
+// using sample_types = nvbench::type_list<int8_t, int16_t, int32_t, int64_t, float, double>;
+// #endif // TUNE_SampleT
+
+using sample_types = nvbench::type_list<uint8_t>;
 
 NVBENCH_BENCH_TYPES(even, NVBENCH_TYPE_AXES(sample_types, counter_types, some_offset_types))
   .set_name("base")
   .set_type_axes_names({"SampleT{ct}", "CounterT{ct}", "OffsetT{ct}"})
-  .add_int64_power_of_two_axis("Elements{io}", nvbench::range(16, 28, 4))
-  .add_int64_axis("Bins", {32, 128, 2048, 2097152})
+  .add_int64_power_of_two_axis("Elements{io}", nvbench::range(28, 28, 4))
+  .add_int64_axis("Bins", {256})
   .add_string_axis("Entropy", {"0.201", "1.000"});

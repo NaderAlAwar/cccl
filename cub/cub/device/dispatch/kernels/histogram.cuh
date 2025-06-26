@@ -518,7 +518,10 @@ void
   agent.StoreOutput();
 }
 
+#define ATOMIC_RED
+
 #if _CCCL_PTX_ARCH() >= 700
+
 template <typename ChainedPolicyT,
           int PRIVATIZED_SMEM_BINS,
           int NUM_CHANNELS,
@@ -546,56 +549,83 @@ typename ::cuda::std::enable_if<(PRIVATIZED_SMEM_BINS > 0)>::type DeviceHistogra
   using value_t         = uint8_t;
   using count_t         = int;
   constexpr int NumBins = PRIVATIZED_SMEM_BINS;
-  // constexpr int NumBins  = 256;
-  constexpr int NumWarps = 4;
-  auto warp_id           = threadIdx.x / 32;
-  auto lane_id           = ::cuda::ptx::get_sreg_laneid();
+  static_assert(NumBins == 256);
+  constexpr int BlockThreads   = ChainedPolicyT::ActivePolicy::AgentHistogramPolicyT::BLOCK_THREADS;
+  constexpr int NumWarps       = BlockThreads / warp_threads;
+  using VecType                = uchar4;
+  constexpr int VecSize        = 4;
+  constexpr int ItemsPerThread = NumBins / warp_threads;
+  auto warp_id                 = threadIdx.x / warp_threads;
+  auto lane_id                 = ::cuda::ptx::get_sreg_laneid();
   __shared__ count_t histogram_warp_smem[NumWarps][NumBins];
   __shared__ count_t histogram_block_smem[NumBins];
   if (warp_id == 0)
   {
-    // memset shared memory to zero
-    reinterpret_cast<uint32_t*>(histogram_block_smem)[threadIdx.x] = 0;
+    auto histogram_block_smem_th = histogram_block_smem + threadIdx.x;
+#  pragma unroll
+    for (int i = 0; i < NumBins; i += BlockThreads)
+    {
+      if (NumBins % BlockThreads == 0 || i < NumBins - threadIdx.x)
+      {
+        histogram_block_smem_th[i] = 0;
+      }
+    }
+  }
+  auto histogram_warp_smem_lane = histogram_warp_smem[warp_id] + lane_id;
+#  pragma unroll
+  for (int i = 0; i < NumBins; i += warp_threads)
+  {
+    histogram_warp_smem_lane[i] = 0;
   }
   __syncthreads();
-  constexpr int items_per_threads = NumBins / warp_threads;
-  auto size                       = num_row_pixels;
-  auto start                      = static_cast<OffsetT>(blockIdx.x * blockDim.x + threadIdx.x);
-  auto stride                     = static_cast<OffsetT>(blockDim.x * gridDim.x);
-  // unroll first iteration (need to handle start < size)
-  auto first_value                          = static_cast<int>(d_samples[start]);
-  histogram_warp_smem[warp_id][first_value] = __popc(::__match_any_sync(0xFFFFFFFF, first_value));
-  __syncwarp();
+  auto size          = num_row_pixels;
+  auto start         = static_cast<OffsetT>(blockIdx.x * BlockThreads + threadIdx.x);
+  auto stride        = static_cast<OffsetT>(BlockThreads * gridDim.x);
+  auto d_samples_vec = reinterpret_cast<const VecType*>(d_samples);
+  auto size_vec      = size / VecSize;
   // main loop (should be vectorized as well)
-  for (auto i = start + stride; i < size; i += stride)
+  for (auto i = start + stride; i < size_vec; i += stride)
   {
-    auto value                          = static_cast<int>(d_samples[i]);
-    auto prev                           = histogram_warp_smem[warp_id][value];
-    histogram_warp_smem[warp_id][value] = prev + __popc(::__match_any_sync(0xFFFFFFFF, value));
-    __syncwarp();
+    auto array = unsafe_bitcast<cuda::std::array<value_t, VecSize>>(d_samples_vec[i]);
+    for (int j = 0; j < VecSize; j++)
+    {
+      auto value                          = static_cast<int>(array[j]);
+      auto prev                           = histogram_warp_smem[warp_id][value];
+      histogram_warp_smem[warp_id][value] = prev + __popc(::__match_any_sync(0xFFFFFFFF, value));
+      __syncwarp();
+    }
   }
+  // warp -> block
+  auto histogram_block_smem_lane = histogram_block_smem + lane_id;
   _CCCL_PRAGMA_UNROLL_FULL()
-  for (int i = 0; i < items_per_threads; i++)
+  for (int i = 0; i < NumBins; i += warp_threads)
   {
-    auto index = i * items_per_threads + lane_id;
-    auto value = histogram_warp_smem[warp_id][index];
-    atomicAdd(histogram_block_smem + index, value);
-    // asm volatile("red.shared.s32 [%0], %1;" :: "l"(histogram_block_smem + index), "r"(value) : "memory");
+    if (NumBins % warp_threads == 0 || i < NumBins - lane_id)
+    {
+#  if !defined(ATOMIC_RED)
+      atomicAdd(histogram_block_smem_lane + i, histogram_warp_smem_lane[i]);
+#  else
+      asm volatile("red.shared.add.s32 [%0], %1;" ::"l"(histogram_block_smem_lane + i), "r"(histogram_warp_smem_lane[i])
+                   : "memory");
+#  endif
+    }
   }
   __syncthreads();
   if (warp_id == 0)
   {
-    auto d_histogram = d_output_histograms_wrapper[0];
+    auto d_histogram = d_output_histograms_wrapper[0] + lane_id;
     _CCCL_PRAGMA_UNROLL_FULL()
-    for (int i = 0; i < items_per_threads; i++)
+    for (int i = 0; i < NumBins; i += warp_threads)
     {
-      auto index = i * items_per_threads + lane_id;
-      atomicAdd(d_histogram + index, histogram_block_smem[index]);
-      // asm volatile("red.global.s32 [%0], %1;" :: "l"(d_histogram + index), "r"(histogram_block_smem[index]) :
-      // "memory");
+#  if !defined(ATOMIC_RED)
+      atomicAdd(d_histogram + i, histogram_block_smem_lane[i]);
+#  else
+      asm volatile("red.global.add.s32 [%0], %1;" ::"l"(d_histogram + i), "r"(histogram_block_smem_lane[i]) : "memory");
+#  endif
     }
   }
 }
+
 #endif // _CCCL_PTX_ARCH() >= 700
 } // namespace detail::histogram
 CUB_NAMESPACE_END
