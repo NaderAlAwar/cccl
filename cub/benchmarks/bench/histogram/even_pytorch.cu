@@ -82,7 +82,7 @@ static void even(nvbench::state& state, nvbench::type_list<SampleT, CounterT, Of
                            OffsetT>;
 #endif // TUNE_BASE
 
-  const auto entropy   = str_to_entropy(state.get_string("Entropy"));
+  // const auto entropy   = str_to_entropy(state.get_string("Entropy"));
   const auto elements  = state.get_int64("Elements{io}");
   const auto num_bins  = state.get_int64("Bins");
   const int num_levels = static_cast<int>(num_bins) + 1;
@@ -90,7 +90,7 @@ static void even(nvbench::state& state, nvbench::type_list<SampleT, CounterT, Of
   const SampleT lower_level = 0;
   const SampleT upper_level = get_upper_level<SampleT>(num_bins, elements);
 
-  thrust::device_vector<SampleT> input = generate(elements, entropy, lower_level, upper_level);
+  // thrust::device_vector<SampleT> input = generate(elements, entropy, lower_level, upper_level);
 
   std::string file_name = "data.npy";
   auto npy_data         = npy::read_npy<uint8_t>(file_name);
@@ -98,10 +98,10 @@ static void even(nvbench::state& state, nvbench::type_list<SampleT, CounterT, Of
   size_t n_elems = npy_data.data.size();
   std::cout << "Read " << n_elems << " elements from " << file_name << std::endl;
 
-  thrust::device_vector<uint8_t> d_input_data(n_elems);
+  thrust::device_vector<uint8_t> input(n_elems);
 
   cudaError_t err = check(cudaMemcpy(
-    static_cast<void*>(thrust::raw_pointer_cast(d_input_data.data())),
+    static_cast<void*>(thrust::raw_pointer_cast(input.data())),
     static_cast<void*>(thrust::raw_pointer_cast(npy_data.data.data())),
     npy_data.data.size() * sizeof(uint8_t),
     cudaMemcpyHostToDevice));
@@ -163,7 +163,8 @@ using some_offset_types = nvbench::type_list<int32_t>;
 #ifdef TUNE_SampleT
 using sample_types = nvbench::type_list<TUNE_SampleT>;
 #else // !defined(TUNE_SampleT)
-using sample_types = nvbench::type_list<int8_t, int16_t, int32_t, int64_t, float, double>;
+using sample_types = nvbench::type_list<uint8_t>;
+// using sample_types = nvbench::type_list<int8_t, int16_t, int32_t, int64_t, float, double>;
 #endif // TUNE_SampleT
 
 NVBENCH_BENCH_TYPES(even, NVBENCH_TYPE_AXES(sample_types, counter_types, some_offset_types))
