@@ -518,7 +518,7 @@ void
   agent.StoreOutput();
 }
 
-#define ATOMIC_RED
+// #define ATOMIC_RED
 
 #if _CCCL_PTX_ARCH() >= 700
 
@@ -559,32 +559,30 @@ typename ::cuda::std::enable_if<(PRIVATIZED_SMEM_BINS > 0)>::type DeviceHistogra
   auto lane_id                 = ::cuda::ptx::get_sreg_laneid();
   __shared__ count_t histogram_warp_smem[NumWarps][NumBins];
   __shared__ count_t histogram_block_smem[NumBins];
-  if (warp_id == 0)
-  {
-    auto histogram_block_smem_th = histogram_block_smem + threadIdx.x;
+  auto histogram_block_smem_th = histogram_block_smem + threadIdx.x;
 #  pragma unroll
-    for (int i = 0; i < NumBins; i += BlockThreads)
+  for (int i = 0; i < NumBins; i += BlockThreads)
+  {
+    if (NumBins % BlockThreads == 0 || i < NumBins - threadIdx.x)
     {
-      if (NumBins % BlockThreads == 0 || i < NumBins - threadIdx.x)
-      {
-        histogram_block_smem_th[i] = 0;
-      }
+      histogram_block_smem_th[i] = 0;
     }
   }
+  __syncthreads();
   auto histogram_warp_smem_lane = histogram_warp_smem[warp_id] + lane_id;
 #  pragma unroll
   for (int i = 0; i < NumBins; i += warp_threads)
   {
     histogram_warp_smem_lane[i] = 0;
   }
-  __syncthreads();
+  __syncwarp();
   auto size          = num_row_pixels;
   auto start         = static_cast<OffsetT>(blockIdx.x * BlockThreads + threadIdx.x);
   auto stride        = static_cast<OffsetT>(BlockThreads * gridDim.x);
   auto d_samples_vec = reinterpret_cast<const VecType*>(d_samples);
   auto size_vec      = size / VecSize;
   // main loop (should be vectorized as well)
-  for (auto i = start + stride; i < size_vec; i += stride)
+  for (auto i = start; i < size_vec; i += stride)
   {
     auto array = unsafe_bitcast<cuda::std::array<value_t, VecSize>>(d_samples_vec[i]);
     for (int j = 0; j < VecSize; j++)
@@ -600,15 +598,12 @@ typename ::cuda::std::enable_if<(PRIVATIZED_SMEM_BINS > 0)>::type DeviceHistogra
   _CCCL_PRAGMA_UNROLL_FULL()
   for (int i = 0; i < NumBins; i += warp_threads)
   {
-    if (NumBins % warp_threads == 0 || i < NumBins - lane_id)
-    {
 #  if !defined(ATOMIC_RED)
-      atomicAdd(histogram_block_smem_lane + i, histogram_warp_smem_lane[i]);
+    atomicAdd(histogram_block_smem_lane + i, histogram_warp_smem_lane[i]);
 #  else
-      asm volatile("red.shared.add.s32 [%0], %1;" ::"l"(histogram_block_smem_lane + i), "r"(histogram_warp_smem_lane[i])
-                   : "memory");
+    asm volatile("red.shared.add.s32 [%0], %1;" ::"l"(histogram_block_smem_lane + i), "r"(histogram_warp_smem_lane[i])
+                 : "memory");
 #  endif
-    }
   }
   __syncthreads();
   if (warp_id == 0)
