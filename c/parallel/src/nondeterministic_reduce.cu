@@ -104,16 +104,17 @@ reduce_runtime_tuning_policy get_policy(int cc, cccl_type_info accumulator_type)
   auto [_, block_size, items_per_thread, vector_load_length] = find_tuning(cc, chain);
 
   // Implement part of MemBoundScaling
-  auto four_bytes_per_thread = items_per_thread * 4 / accumulator_type.size;
-  items_per_thread = _CUDA_VSTD::clamp<decltype(items_per_thread)>(four_bytes_per_thread, 1, items_per_thread * 2);
+  [[maybe_unused]] auto four_bytes_per_thread = items_per_thread * 4 / accumulator_type.size;
+  [[maybe_unused]] items_per_thread =
+    _CUDA_VSTD::clamp<decltype(items_per_thread)>(four_bytes_per_thread, 1, items_per_thread * 2);
 
-  auto work_per_sm    = cub::detail::max_smem_per_block / (accumulator_type.size * items_per_thread);
-  auto max_block_size = cuda::round_up(work_per_sm, 32);
-  block_size          = _CUDA_VSTD::min<decltype(block_size)>(block_size, max_block_size);
+  [[maybe_unused]] auto work_per_sm    = cub::detail::max_smem_per_block / (accumulator_type.size * items_per_thread);
+  [[maybe_unused]] auto max_block_size = cuda::round_up(work_per_sm, 32);
+  [[maybe_unused]] block_size          = _CUDA_VSTD::min<decltype(block_size)>(block_size, max_block_size);
 
   // return {block_size, items_per_thread, vector_load_length};
   // sf_5.uabr_0.uges_0.ipt_23.tpb_544.ipv_1
-  return {544, 23, 1}
+  return {544, 23, 1};
 }
 
 static cccl_type_info get_accumulator_type(cccl_op_t /*op*/, cccl_iterator_t /*input_it*/, cccl_value_t init)
