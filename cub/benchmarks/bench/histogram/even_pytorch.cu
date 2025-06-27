@@ -84,11 +84,13 @@ static void even(nvbench::state& state, nvbench::type_list<SampleT, CounterT, Of
 
   // const auto entropy   = str_to_entropy(state.get_string("Entropy"));
   const auto elements  = state.get_int64("Elements{io}");
-  const auto num_bins  = state.get_int64("Bins");
+  const auto num_bins  = 256;
   const int num_levels = static_cast<int>(num_bins) + 1;
 
+  // const SampleT lower_level = 0;
+  // const SampleT upper_level = get_upper_level<SampleT, OffsetT>(num_bins, elements);
   const SampleT lower_level = 0;
-  const SampleT upper_level = get_upper_level<SampleT>(num_bins, elements);
+  const SampleT upper_level = 256;
 
   // thrust::device_vector<SampleT> input = generate(elements, entropy, lower_level, upper_level);
 

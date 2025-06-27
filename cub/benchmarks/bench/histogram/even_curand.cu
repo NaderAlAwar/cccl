@@ -106,8 +106,10 @@ static void even(nvbench::state& state, nvbench::type_list<SampleT, CounterT, Of
   const auto num_bins  = 256;
   const int num_levels = static_cast<int>(num_bins) + 1;
 
+  //   const SampleT lower_level = 0;
+  //   const SampleT upper_level = get_upper_level<SampleT, OffsetT>(num_bins, elements);
   const SampleT lower_level = 0;
-  const SampleT upper_level = get_upper_level<SampleT, OffsetT>(num_bins, elements);
+  const SampleT upper_level = 256;
 
   ////////////////////////////
   // thrust::device_vector<SampleT> input = generate(elements, entropy, lower_level, upper_level);
