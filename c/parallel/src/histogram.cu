@@ -98,7 +98,8 @@ get_policy(int /*cc*/, [[maybe_unused]] cccl_type_info sample_t, [[maybe_unused]
 
   int pixels_per_thread = (::cuda::std::max)(nominal_items_per_thread / num_active_channels / v_scale, 1);
 
-  return {384, pixels_per_thread};
+  // return {384, pixels_per_thread};
+  return {256, pixels_per_thread};
   // return {896, 12};
   // return {960, 12};
 }
