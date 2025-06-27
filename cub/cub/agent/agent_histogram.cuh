@@ -676,8 +676,11 @@ struct AgentHistogram
     {
       auto sample = static_cast<int>(samples[i][0]);
       auto prev   = histogram_warp_smem[warp_id][sample];
-      histogram_warp_smem[warp_id][sample] =
-        (IS_FULL_TILE || is_valid[i]) ? prev + ::__popc(::__match_any_sync(0xFFFFFFFF, sample)) : prev;
+      auto match  = ::__match_any_sync(0xFFFFFFFF, sample);
+      if (IS_FULL_TILE || is_valid[i])
+      {
+        histogram_warp_smem[warp_id][sample] = prev + ::__popc(match);
+      }
       __syncwarp();
     }
     // warp -> block
