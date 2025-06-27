@@ -607,16 +607,16 @@ typename ::cuda::std::enable_if<(PRIVATIZED_SMEM_BINS > 0)>::type DeviceHistogra
 #  endif
   }
   __syncthreads();
-  if (warp_id == 0)
+  auto d_histogram = d_output_histograms_wrapper[0] + threadIdx.x;
+#  pragma unroll
+  for (int i = 0; i < NumBins; i += BlockThreads)
   {
-    auto d_histogram = d_output_histograms_wrapper[0] + lane_id;
-    _CCCL_PRAGMA_UNROLL_FULL()
-    for (int i = 0; i < NumBins; i += warp_threads)
+    if (NumBins % BlockThreads == 0 || i < NumBins - threadIdx.x)
     {
 #  if !defined(ATOMIC_RED)
-      atomicAdd(d_histogram + i, histogram_block_smem_lane[i]);
+      atomicAdd(d_histogram + i, histogram_block_smem_th[i]);
 #  else
-      asm volatile("red.global.add.s32 [%0], %1;" ::"l"(d_histogram + i), "r"(histogram_block_smem_lane[i]) : "memory");
+      asm volatile("red.global.add.s32 [%0], %1;" ::"l"(d_histogram + i), "r"(histogram_block_smem_th[i]) : "memory");
 #  endif
     }
   }
