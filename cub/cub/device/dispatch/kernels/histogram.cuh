@@ -585,6 +585,7 @@ typename ::cuda::std::enable_if<(PRIVATIZED_SMEM_BINS > 0)>::type DeviceHistogra
   for (auto i = start; i < size_vec; i += stride)
   {
     auto array = unsafe_bitcast<cuda::std::array<value_t, VecSize>>(d_samples_vec[i]);
+#  pragma unroll
     for (int j = 0; j < VecSize; j++)
     {
       auto value                          = static_cast<int>(array[j]);
