@@ -25,8 +25,11 @@
  *
  ******************************************************************************/
 
+#include <cstdint>
+#include <random>
+
 #include "histogram_common.cuh"
-#include "npy.hpp"
+#include <curand_kernel.h>
 #include <nvbench_helper.cuh>
 
 // %RANGE% TUNE_ITEMS ipt 4:28:1
@@ -38,29 +41,48 @@
 // %RANGE% TUNE_LOAD_ALGORITHM_ID laid 0:2:1
 // %RANGE% TUNE_VEC_SIZE_POW vec 0:2:1
 
-cudaError_t check(cudaError_t status)
+// Generate random input with contention
+struct evil_functor_philox
 {
-  if (cudaSuccess == status)
+  unsigned int seed;
+  float contention;
+
+  evil_functor_philox(unsigned int seed, float contention)
+      : seed(seed)
+      , contention(contention)
+  {}
+
+  __device__ unsigned char operator()(unsigned int n) const
   {
-    return cudaSuccess;
+    // Philox4x32_10, like PyTorch CUDA
+    curandStatePhilox4_32_10_t state;
+    curand_init(seed, n, 0, &state);
+
+    // Generate random uint in [0,255] for the main value
+    unsigned char val = static_cast<unsigned char>(curand(&state) % 256);
+
+    // Generate random float in [0,1) for contention decision
+    float p = curand_uniform(&state);
+
+    if (p < (contention / 100.0f))
+    {
+      // Generate evil_value using the same generator
+      unsigned char evil_value = static_cast<unsigned char>(curand(&state) % 256);
+      return evil_value;
+    }
+    return val;
   }
+};
 
-  std::stringstream ss;
-
-  ss << "Cuda error '";
-  ss << cudaGetErrorString(status);
-  ss << "' encountered on line ";
-
-  throw std::runtime_error(ss.str());
-}
-
-template <typename SampleT, typename CounterT, typename OffsetT>
-static void even(nvbench::state& state, nvbench::type_list<SampleT, CounterT, OffsetT>)
+template <typename OffsetT>
+static void even(nvbench::state& state, nvbench::type_list<OffsetT>)
 {
   constexpr int num_channels        = 1;
   constexpr int num_active_channels = 1;
+  using SampleT                     = int8_t;
+  using sample_iterator_t           = SampleT*;
 
-  using sample_iterator_t = SampleT*;
+  using CounterT = int32_t;
 
 #if !TUNE_BASE
   using policy_t = policy_hub_t<key_t, num_channels, num_active_channels>;
@@ -84,27 +106,24 @@ static void even(nvbench::state& state, nvbench::type_list<SampleT, CounterT, Of
 
   // const auto entropy   = str_to_entropy(state.get_string("Entropy"));
   const auto elements  = state.get_int64("Elements{io}");
-  const auto num_bins  = state.get_int64("Bins");
+  const auto num_bins  = 256;
   const int num_levels = static_cast<int>(num_bins) + 1;
 
   const SampleT lower_level = 0;
-  const SampleT upper_level = get_upper_level<SampleT>(num_bins, elements);
+  const SampleT upper_level = get_upper_level<SampleT, OffsetT>(num_bins, elements);
 
+  ////////////////////////////
   // thrust::device_vector<SampleT> input = generate(elements, entropy, lower_level, upper_level);
+  float contention  = 10.0f; // percent
+  unsigned int seed = 42;
 
-  std::string file_name = "data.npy";
-  auto npy_data         = npy::read_npy<uint8_t>(file_name);
-
-  size_t n_elems = npy_data.data.size();
-  std::cout << "Read " << n_elems << " elements from " << file_name << std::endl;
-
-  thrust::device_vector<uint8_t> input(n_elems);
-
-  cudaError_t err = check(cudaMemcpy(
-    static_cast<void*>(thrust::raw_pointer_cast(input.data())),
-    static_cast<void*>(thrust::raw_pointer_cast(npy_data.data.data())),
-    npy_data.data.size() * sizeof(uint8_t),
-    cudaMemcpyHostToDevice));
+  // Generate input
+  thrust::device_vector<SampleT> input(elements);
+  thrust::transform(thrust::counting_iterator<unsigned int>(0),
+                    thrust::counting_iterator<unsigned int>(elements),
+                    input.begin(),
+                    evil_functor_philox(seed, contention));
+  ////////////////////////////
 
   thrust::device_vector<CounterT> hist(num_bins);
 
