@@ -74,15 +74,12 @@ struct evil_functor_philox
   }
 };
 
-template <typename OffsetT>
-static void even(nvbench::state& state, nvbench::type_list<OffsetT>)
+template <typename SampleT, typename CounterT, typename OffsetT>
+static void even(nvbench::state& state, nvbench::type_list<SampleT, CounterT, OffsetT>)
 {
   constexpr int num_channels        = 1;
   constexpr int num_active_channels = 1;
-  using SampleT                     = int8_t;
   using sample_iterator_t           = SampleT*;
-
-  using CounterT = int32_t;
 
 #if !TUNE_BASE
   using policy_t = policy_hub_t<key_t, num_channels, num_active_channels>;
@@ -181,7 +178,7 @@ using some_offset_types = nvbench::type_list<int32_t>;
 
 using sample_types = nvbench::type_list<int8_t, uint8_t>;
 
-NVBENCH_BENCH_TYPES(even, NVBENCH_TYPE_AXES(some_offset_types))
+NVBENCH_BENCH_TYPES(even, NVBENCH_TYPE_AXES(sample_types, counter_types, some_offset_types))
   .set_name("base")
   .set_type_axes_names({"SampleT{ct}", "CounterT{ct}", "OffsetT{ct}"})
   .add_int64_axis("Elements{io}", {10485760});

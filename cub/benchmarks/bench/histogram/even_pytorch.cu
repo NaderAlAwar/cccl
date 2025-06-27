@@ -160,9 +160,9 @@ static void even(nvbench::state& state, nvbench::type_list<SampleT, CounterT, Of
 using counter_types     = nvbench::type_list<int32_t>;
 using some_offset_types = nvbench::type_list<int32_t>;
 
-using sample_types = nvbench::type_list<int8_t, uint8_t>;
+using sample_types = nvbench::type_list<uint8_t>;
 
-NVBENCH_BENCH_TYPES(even, NVBENCH_TYPE_AXES(some_offset_types))
+NVBENCH_BENCH_TYPES(even, NVBENCH_TYPE_AXES(sample_types, counter_types, some_offset_types))
   .set_name("base")
   .set_type_axes_names({"SampleT{ct}", "CounterT{ct}", "OffsetT{ct}"})
   .add_int64_axis("Elements{io}", {10485760});
