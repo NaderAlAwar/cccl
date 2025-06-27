@@ -16,12 +16,7 @@ from ..typing import DeviceArrayLike
 
 
 class _UnaryTransform:
-    __slots__ = [
-        "d_in_cccl",
-        "d_out_cccl",
-        "op_wrapper",
-        "build_result",
-    ]
+    __slots__ = ["d_in_cccl", "d_out_cccl", "op_wrapper", "build_result", "first_call"]
 
     def __init__(
         self,
@@ -43,6 +38,7 @@ class _UnaryTransform:
             self.d_out_cccl,
             self.op_wrapper,
         )
+        self.first_call = True
 
     def __call__(
         self,
@@ -51,17 +47,29 @@ class _UnaryTransform:
         num_items: int,
         stream=None,
     ):
-        set_cccl_iterator_state(self.d_in_cccl, d_in)
-        set_cccl_iterator_state(self.d_out_cccl, d_out)
-        stream_handle = protocols.validate_and_get_stream(stream)
+        self.d_in_cccl.state = d_in.data_ptr()
+        self.d_out_cccl.state = d_out.data_ptr()
+
+        if self.first_call:
+            set_cccl_iterator_state(self.d_in_cccl, d_in)
+            set_cccl_iterator_state(self.d_out_cccl, d_out)
+            stream_handle = protocols.validate_and_get_stream(stream)
+            self.build_result.compute(
+                self.d_in_cccl,
+                self.d_out_cccl,
+                num_items,
+                self.op_wrapper,
+                stream_handle,
+            )
+            self.first_call = False
+
         self.build_result.compute(
             self.d_in_cccl,
             self.d_out_cccl,
             num_items,
             self.op_wrapper,
-            stream_handle,
+            None,
         )
-        return None
 
 
 class _BinaryTransform:
