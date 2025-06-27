@@ -658,7 +658,7 @@ struct AgentHistogram
     _CCCL_PRAGMA_UNROLL_FULL()
     for (int i = 0; i < NumBins; i += BLOCK_THREADS)
     {
-      if (NumBins % BLOCK_THREADS == 0 || i < NumBins - threadIdx.x)
+      if (NumBins % BLOCK_THREADS == 0 || i < NumBins - static_cast<int>(threadIdx.x))
       {
         histogram_block_smem_th[i] = 0;
       }
@@ -697,7 +697,7 @@ struct AgentHistogram
     _CCCL_PRAGMA_UNROLL_FULL()
     for (int i = 0; i < NumBins; i += BLOCK_THREADS)
     {
-      if (NumBins % BLOCK_THREADS == 0 || i < NumBins - threadIdx.x)
+      if (NumBins % BLOCK_THREADS == 0 || i < NumBins - static_cast<int>(threadIdx.x))
       {
 #if !defined(ATOMIC_RED)
         atomicAdd(d_histogram_th + i, histogram_block_smem_th[i]);
