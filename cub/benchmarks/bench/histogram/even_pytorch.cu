@@ -61,6 +61,7 @@ static void even(nvbench::state& state, nvbench::type_list<SampleT, CounterT, Of
   constexpr int num_active_channels = 1;
 
   using sample_iterator_t = SampleT*;
+  using LevelT            = int;
 
 #if !TUNE_BASE
   using policy_t = policy_hub_t<key_t, num_channels, num_active_channels>;
@@ -69,7 +70,7 @@ static void even(nvbench::state& state, nvbench::type_list<SampleT, CounterT, Of
                            num_active_channels,
                            sample_iterator_t,
                            CounterT,
-                           SampleT,
+                           LevelT,
                            OffsetT,
                            policy_t>;
 #else // TUNE_BASE
@@ -78,7 +79,7 @@ static void even(nvbench::state& state, nvbench::type_list<SampleT, CounterT, Of
                            num_active_channels,
                            sample_iterator_t,
                            CounterT,
-                           /* LevelT = */ SampleT,
+                           /* LevelT = */ LevelT,
                            OffsetT>;
 #endif // TUNE_BASE
 
@@ -89,8 +90,8 @@ static void even(nvbench::state& state, nvbench::type_list<SampleT, CounterT, Of
 
   // const SampleT lower_level = 0;
   // const SampleT upper_level = get_upper_level<SampleT, OffsetT>(num_bins, elements);
-  const SampleT lower_level = 0;
-  const SampleT upper_level = 256;
+  const LevelT lower_level = 0;
+  const LevelT upper_level = 256;
 
   // thrust::device_vector<SampleT> input = generate(elements, entropy, lower_level, upper_level);
 
