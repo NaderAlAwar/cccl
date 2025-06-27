@@ -464,11 +464,11 @@ template <typename ChainedPolicyT,
           typename OutputDecodeOpT,
           typename OffsetT>
 __launch_bounds__(int(ChainedPolicyT::ActivePolicy::AgentHistogramPolicyT::BLOCK_THREADS)) CUB_DETAIL_KERNEL_ATTRIBUTES
-#if _CCCL_PTX_ARCH >= 700
-typename ::cuda::std::enable_if<(PRIVATIZED_SMEM_BINS == 0)>::type
-#else
+// #if _CCCL_PTX_ARCH >= 700
+// typename ::cuda::std::enable_if<(PRIVATIZED_SMEM_BINS == 0)>::type
+// #else
 void
-#endif // _CCCL_PTX_ARCH >= 700
+  // #endif // _CCCL_PTX_ARCH >= 700
   DeviceHistogramSweepKernel(
     SampleIteratorT d_samples,
     ::cuda::std::array<int, NUM_ACTIVE_CHANNELS> num_output_bins_wrapper,
@@ -521,7 +521,8 @@ void
 
 // #define ATOMIC_RED
 
-#if _CCCL_PTX_ARCH >= 700
+#if false
+// #if _CCCL_PTX_ARCH >= 700
 
 template <typename ChainedPolicyT,
           int PRIVATIZED_SMEM_BINS,
