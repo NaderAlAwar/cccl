@@ -257,7 +257,7 @@ struct dispatch_t<StableAddress,
 
     const auto grid_dim = static_cast<unsigned int>(::cuda::ceil_div(num_items, Offset{config->tile_size}));
     return ::cuda::std::make_tuple(
-      launcher_factory(grid_dim, block_dim, config->smem_size, stream),
+      launcher_factory(grid_dim, block_dim, config->smem_size, stream, true),
       kernel_source.TransformKernel(),
       config->elem_per_thread);
   }
@@ -398,7 +398,7 @@ struct dispatch_t<StableAddress,
     const int tile_size = block_dim * items_per_thread_clamped;
     const auto grid_dim = static_cast<unsigned int>(::cuda::ceil_div(num_items, Offset{tile_size}));
     return CubDebug(
-      launcher_factory(grid_dim, block_dim, 0, stream)
+      launcher_factory(grid_dim, block_dim, 0, stream, true)
         .doit(kernel_source.TransformKernel(),
               num_items,
               items_per_thread_clamped,

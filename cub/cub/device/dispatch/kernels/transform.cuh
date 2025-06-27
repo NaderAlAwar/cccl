@@ -95,7 +95,11 @@ _CCCL_DEVICE void transform_kernel_impl(
     out += offset;
   }
 
+  _CCCL_PDL_GRID_DEPENDENCY_SYNC();
+
   (..., prefetch_tile<block_dim>(THRUST_NS_QUALIFIER::raw_reference_cast(ins), tile_size));
+
+  _CCCL_PDL_TRIGGER_NEXT_LAUNCH();
 
   auto process_tile = [&](auto full_tile, auto... ins2 /* nvcc fails to compile when just using the captured ins */) {
     // ahendriksen: various unrolling yields less <1% gains at much higher compile-time cost
@@ -223,6 +227,9 @@ _CCCL_DEVICE void transform_kernel_ublkcp(
   const int tile_size     = (::cuda::std::min)(num_items - offset, Offset{tile_stride});
 
   const bool inner_blocks = 0 < blockIdx.x && blockIdx.x + 2 < gridDim.x;
+
+  _CCCL_PDL_GRID_DEPENDENCY_SYNC();
+
   if (inner_blocks)
   {
     // use one thread to setup the entire bulk copy
@@ -262,6 +269,8 @@ _CCCL_DEVICE void transform_kernel_ublkcp(
 
       while (!ptx::mbarrier_try_wait_parity(&bar, 0))
         ;
+
+      _CCCL_PDL_TRIGGER_NEXT_LAUNCH();
     }
 
     // all threads wait for bulk copy
