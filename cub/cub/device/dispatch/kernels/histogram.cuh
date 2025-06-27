@@ -546,12 +546,12 @@ typename ::cuda::std::enable_if<(PRIVATIZED_SMEM_BINS > 0)>::type DeviceHistogra
   int tiles_per_row,
   GridQueue<int> tile_queue)
 {
-  using value_t         = uint8_t;
-  using count_t         = int;
-  constexpr int NumBins = PRIVATIZED_SMEM_BINS;
-  static_assert(NumBins == 256);
-  constexpr int BlockThreads   = ChainedPolicyT::ActivePolicy::AgentHistogramPolicyT::BLOCK_THREADS;
-  constexpr int NumWarps       = BlockThreads / warp_threads;
+  using value_t              = uint8_t;
+  using count_t              = int;
+  constexpr int NumBins      = PRIVATIZED_SMEM_BINS;
+  constexpr int BlockThreads = ChainedPolicyT::ActivePolicy::AgentHistogramPolicyT::BLOCK_THREADS;
+  constexpr int NumWarps     = BlockThreads / warp_threads;
+  static_assert(NumBins % warp_threads == 0);
   using VecType                = uchar4;
   constexpr int VecSize        = 4;
   constexpr int ItemsPerThread = NumBins / warp_threads;
@@ -559,8 +559,9 @@ typename ::cuda::std::enable_if<(PRIVATIZED_SMEM_BINS > 0)>::type DeviceHistogra
   auto lane_id                 = ::cuda::ptx::get_sreg_laneid();
   __shared__ count_t histogram_warp_smem[NumWarps][NumBins];
   __shared__ count_t histogram_block_smem[NumBins];
+
   auto histogram_block_smem_th = histogram_block_smem + threadIdx.x;
-#  pragma unroll
+  _CCCL_PRAGMA_UNROLL_FULL()
   for (int i = 0; i < NumBins; i += BlockThreads)
   {
     if (NumBins % BlockThreads == 0 || i < NumBins - threadIdx.x)
@@ -570,7 +571,7 @@ typename ::cuda::std::enable_if<(PRIVATIZED_SMEM_BINS > 0)>::type DeviceHistogra
   }
   __syncthreads();
   auto histogram_warp_smem_lane = histogram_warp_smem[warp_id] + lane_id;
-#  pragma unroll
+  _CCCL_PRAGMA_UNROLL_FULL()
   for (int i = 0; i < NumBins; i += warp_threads)
   {
     histogram_warp_smem_lane[i] = 0;
@@ -581,11 +582,12 @@ typename ::cuda::std::enable_if<(PRIVATIZED_SMEM_BINS > 0)>::type DeviceHistogra
   auto stride        = static_cast<OffsetT>(BlockThreads * gridDim.x);
   auto d_samples_vec = reinterpret_cast<const VecType*>(d_samples);
   auto size_vec      = size / VecSize;
-  // main loop (should be vectorized as well)
+  _CCCL_ASSERT(size % VecSize == 0, "size must be a multiple of VecSize");
+  _CCCL_ASSERT(size_vec % warp_threads == 0, "size must be a multiple of warp_threads");
   for (auto i = start; i < size_vec; i += stride)
   {
     auto array = unsafe_bitcast<cuda::std::array<value_t, VecSize>>(d_samples_vec[i]);
-#  pragma unroll
+    _CCCL_PRAGMA_UNROLL_FULL()
     for (int j = 0; j < VecSize; j++)
     {
       auto value                          = static_cast<int>(array[j]);
