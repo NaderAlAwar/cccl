@@ -93,14 +93,14 @@ struct histogram_kernel_source
 histogram_runtime_tuning_policy
 get_policy(int /*cc*/, [[maybe_unused]] cccl_type_info sample_t, [[maybe_unused]] int num_active_channels)
 {
-  // const int v_scale                      = (sample_t.size + sizeof(int) - 1) / sizeof(int);
-  // constexpr int nominal_items_per_thread = 16;
+  const int v_scale                      = (sample_t.size + sizeof(int) - 1) / sizeof(int);
+  constexpr int nominal_items_per_thread = 16;
 
-  // int pixels_per_thread = (::cuda::std::max)(nominal_items_per_thread / num_active_channels / v_scale, 1);
+  int pixels_per_thread = (::cuda::std::max)(nominal_items_per_thread / num_active_channels / v_scale, 1);
 
-  // return {384, pixels_per_thread};
+  return {384, pixels_per_thread};
   // return {896, 12};
-  return {960, 12};
+  // return {960, 12};
 }
 
 std::string get_init_kernel_name(int num_active_channels, std::string_view counter_t, std::string_view offset_t)
@@ -133,7 +133,8 @@ std::string get_sweep_kernel_name(
       : samples_iterator_name;
 
   std::string transforms_t = "cub::detail::histogram::Transforms<";
-  transforms_t += std::string(level_t) + ", ";
+  // transforms_t += std::string(level_t) + ", ";
+  transforms_t += "::cuda::std::uint8_t, ";
   transforms_t += std::string(offset_t) + ", ";
   transforms_t += cccl_type_enum_to_name(d_samples.value_type.type) + ">";
   // const std::string transforms_t = std::format(
@@ -239,12 +240,12 @@ struct __align__({1}) storage_t {
 struct agent_policy_t {
   static constexpr int BLOCK_THREADS = {3};
   static constexpr int PIXELS_PER_THREAD = {4};
-  static constexpr bool IS_RLE_COMPRESS = false;
+  static constexpr bool IS_RLE_COMPRESS = true;
   static constexpr cub::BlockHistogramMemoryPreference MEM_PREFERENCE = cub::SMEM;
   static constexpr bool IS_WORK_STEALING = false;
-  static constexpr int VEC_SIZE = 1 << 1;
-  static constexpr cub::BlockLoadAlgorithm LOAD_ALGORITHM = cub::BLOCK_LOAD_WARP_TRANSPOSE;
-  static constexpr cub::CacheLoadModifier LOAD_MODIFIER = cub::LOAD_DEFAULT;
+  static constexpr int VEC_SIZE = 1 << 2;
+  static constexpr cub::BlockLoadAlgorithm LOAD_ALGORITHM = cub::BLOCK_LOAD_DIRECT;
+  static constexpr cub::CacheLoadModifier LOAD_MODIFIER = cub::LOAD_LDG;
 };
 struct {5} {
   struct ActivePolicy {
@@ -297,6 +298,9 @@ struct {5} {
       offset_cpp,
       is_evenly_segmented,
       is_byte_sample);
+
+    std::cout << "init_kernel_name: " << init_kernel_name << std::endl;
+    std::cout << "sweep_kernel_name: " << sweep_kernel_name << std::endl;
 
     std::string init_kernel_lowered_name;
     std::string sweep_kernel_lowered_name;
@@ -370,6 +374,7 @@ CUresult cccl_device_histogram_even_impl(
   bool pushed    = false;
   try
   {
+    printf("even impl called\n");
     pushed = try_push_context();
 
     CUdevice cu_device;
