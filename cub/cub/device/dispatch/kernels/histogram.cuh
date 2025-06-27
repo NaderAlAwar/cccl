@@ -546,6 +546,41 @@ typename ::cuda::std::enable_if<(PRIVATIZED_SMEM_BINS > 0)>::type DeviceHistogra
   int tiles_per_row,
   GridQueue<int> tile_queue)
 {
+  // Thread block type for compositing input tiles
+  using AgentHistogramPolicyT = typename ChainedPolicyT::ActivePolicy::AgentHistogramPolicyT;
+  using AgentHistogramT =
+    AgentHistogram<AgentHistogramPolicyT,
+                   PRIVATIZED_SMEM_BINS,
+                   NUM_CHANNELS,
+                   NUM_ACTIVE_CHANNELS,
+                   SampleIteratorT,
+                   CounterT,
+                   PrivatizedDecodeOpT,
+                   OutputDecodeOpT,
+                   OffsetT>;
+
+  // Shared memory for AgentHistogram
+  __shared__ typename AgentHistogramT::TempStorage temp_storage;
+
+  AgentHistogramT agent(
+    temp_storage,
+    d_samples,
+    num_output_bins_wrapper.data(),
+    num_privatized_bins_wrapper.data(),
+    d_output_histograms_wrapper.data(),
+    d_privatized_histograms_wrapper.data(),
+    output_decode_op_wrapper.data(),
+    privatized_decode_op_wrapper.data());
+
+  // Initialize counters
+  agent.InitBinCounters();
+
+  // Consume input tiles
+  agent.ConsumeTiles(num_row_pixels, num_rows, row_stride_samples, tiles_per_row, tile_queue);
+
+  // Store output to global (if necessary)
+  agent.StoreOutput();
+#  if 0
   using value_t              = uint8_t;
   using count_t              = int;
   constexpr int NumBins      = PRIVATIZED_SMEM_BINS;
@@ -601,27 +636,28 @@ typename ::cuda::std::enable_if<(PRIVATIZED_SMEM_BINS > 0)>::type DeviceHistogra
   _CCCL_PRAGMA_UNROLL_FULL()
   for (int i = 0; i < NumBins; i += warp_threads)
   {
-#  if !defined(ATOMIC_RED)
+#    if !defined(ATOMIC_RED)
     atomicAdd(histogram_block_smem_lane + i, histogram_warp_smem_lane[i]);
-#  else
+#    else
     asm volatile("red.shared.add.s32 [%0], %1;" ::"l"(histogram_block_smem_lane + i), "r"(histogram_warp_smem_lane[i])
                  : "memory");
-#  endif
+#    endif
   }
   __syncthreads();
   auto d_histogram = d_output_histograms_wrapper[0] + threadIdx.x;
-#  pragma unroll
+#    pragma unroll
   for (int i = 0; i < NumBins; i += BlockThreads)
   {
     if (NumBins % BlockThreads == 0 || i < NumBins - threadIdx.x)
     {
-#  if !defined(ATOMIC_RED)
+#    if !defined(ATOMIC_RED)
       atomicAdd(d_histogram + i, histogram_block_smem_th[i]);
-#  else
+#    else
       asm volatile("red.global.add.s32 [%0], %1;" ::"l"(d_histogram + i), "r"(histogram_block_smem_th[i]) : "memory");
-#  endif
+#    endif
     }
   }
+#  endif
 }
 
 #endif // _CCCL_PTX_ARCH() >= 700

@@ -188,7 +188,6 @@ struct AgentHistogram
 
   /// The sample type of the input iterator
   using SampleT = cub::detail::it_value_t<SampleIteratorT>;
-
   /// The pixel type of SampleT
   using PixelT = typename CubVector<SampleT, NUM_CHANNELS>::Type;
 
@@ -198,6 +197,7 @@ struct AgentHistogram
 
   /// Constants
   static constexpr int BLOCK_THREADS = AgentHistogramPolicyT::BLOCK_THREADS;
+  static constexpr int NUM_WARPS     = BLOCK_THREADS / warp_threads;
 
   static constexpr int PIXELS_PER_THREAD  = AgentHistogramPolicyT::PIXELS_PER_THREAD;
   static constexpr int SAMPLES_PER_THREAD = PIXELS_PER_THREAD * NUM_CHANNELS;
@@ -242,10 +242,13 @@ struct AgentHistogram
   /// Shared memory type required by this thread block
   struct _TempStorage
   {
-    // Smem needed for block-privatized smem histogram (with 1 word of padding)
-    CounterT histograms[NUM_ACTIVE_CHANNELS][PRIVATIZED_SMEM_BINS + 1];
+    CounterT histograms_warps[NUM_WARPS][PRIVATIZED_SMEM_BINS];
+    CounterT histograms_block[PRIVATIZED_SMEM_BINS];
 
-    int tile_idx;
+    // Smem needed for block-privatized smem histogram (with 1 word of padding)
+    //  CounterT histograms[NUM_ACTIVE_CHANNELS][PRIVATIZED_SMEM_BINS + 1];
+
+    //  int tile_idx;
 
     // Aliasable storage layout
     union Aliasable
@@ -308,31 +311,31 @@ struct AgentHistogram
   _CCCL_DEVICE _CCCL_FORCEINLINE void InitBinCounters(CounterT* privatized_histograms[NUM_ACTIVE_CHANNELS])
   {
     // Initialize histogram bin counts to zeros
-    _CCCL_PRAGMA_UNROLL_FULL()
-    for (int CHANNEL = 0; CHANNEL < NUM_ACTIVE_CHANNELS; ++CHANNEL)
-    {
-      for (int privatized_bin = threadIdx.x; privatized_bin < num_privatized_bins[CHANNEL];
-           privatized_bin += BLOCK_THREADS)
-      {
-        privatized_histograms[CHANNEL][privatized_bin] = 0;
-      }
-    }
+    //_CCCL_PRAGMA_UNROLL_FULL()
+    // for (int CHANNEL = 0; CHANNEL < NUM_ACTIVE_CHANNELS; ++CHANNEL)
+    //{
+    //  for (int privatized_bin = threadIdx.x; privatized_bin < num_privatized_bins[CHANNEL];
+    //       privatized_bin += BLOCK_THREADS)
+    //  {
+    //    privatized_histograms[CHANNEL][privatized_bin] = 0;
+    //  }
+    //}
 
     // Barrier to make sure all threads are done updating counters
-    __syncthreads();
+    //__syncthreads();
   }
 
   // Initialize privatized bin counters.  Specialized for privatized shared-memory counters
   _CCCL_DEVICE _CCCL_FORCEINLINE void InitSmemBinCounters()
   {
-    CounterT* privatized_histograms[NUM_ACTIVE_CHANNELS];
+    // CounterT* privatized_histograms[NUM_ACTIVE_CHANNELS];
 
-    for (int CHANNEL = 0; CHANNEL < NUM_ACTIVE_CHANNELS; ++CHANNEL)
-    {
-      privatized_histograms[CHANNEL] = temp_storage.histograms[CHANNEL];
-    }
+    // for (int CHANNEL = 0; CHANNEL < NUM_ACTIVE_CHANNELS; ++CHANNEL)
+    //{
+    //   privatized_histograms[CHANNEL] = temp_storage.histograms[CHANNEL];
+    // }
 
-    InitBinCounters(privatized_histograms);
+    // InitBinCounters(privatized_histograms);
   }
 
   // Initialize privatized bin counters.  Specialized for privatized global-memory counters
@@ -637,13 +640,72 @@ struct AgentHistogram
       is_valid, valid_samples, bool_constant_v < AgentHistogramPolicyT::LOAD_ALGORITHM == BLOCK_LOAD_STRIPED >);
 
     // Accumulate samples
-    if (prefer_smem)
+    // if (prefer_smem)
+    //{
+    //  AccumulateSmemPixels(samples, is_valid);
+    //}
+    // else
+    //{
+    //  AccumulateGmemPixels(samples, is_valid);
+    //}
+    constexpr int NumBins = PRIVATIZED_SMEM_BINS;
+    static_assert(NumBins % warp_threads == 0);
+    auto warp_id                 = threadIdx.x / warp_threads;
+    auto lane_id                 = ::cuda::ptx::get_sreg_laneid();
+    auto& histogram_warp_smem    = temp_storage.histograms_warps;
+    auto& histogram_block_smem   = temp_storage.histograms_block;
+    auto histogram_block_smem_th = histogram_block_smem + threadIdx.x;
+    _CCCL_PRAGMA_UNROLL_FULL()
+    for (int i = 0; i < NumBins; i += BLOCK_THREADS)
     {
-      AccumulateSmemPixels(samples, is_valid);
+      if (NumBins % BLOCK_THREADS == 0 || i < NumBins - threadIdx.x)
+      {
+        histogram_block_smem_th[i] = 0;
+      }
     }
-    else
+    __syncthreads();
+    auto histogram_warp_smem_lane = histogram_warp_smem[warp_id] + lane_id;
+    _CCCL_PRAGMA_UNROLL_FULL()
+    for (int i = 0; i < NumBins; i += warp_threads)
     {
-      AccumulateGmemPixels(samples, is_valid);
+      histogram_warp_smem_lane[i] = 0;
+    }
+    __syncwarp();
+    _CCCL_PRAGMA_UNROLL_FULL()
+    for (int i = 0; i < PIXELS_PER_THREAD; ++i)
+    {
+      auto sample = static_cast<int>(samples[i][0]);
+      auto prev   = histogram_warp_smem[warp_id][sample];
+      histogram_warp_smem[warp_id][sample] =
+        (IS_FULL_TILE || is_valid[i]) ? prev + ::__popc(::__match_any_sync(0xFFFFFFFF, sample)) : prev;
+      __syncwarp();
+    }
+    // warp -> block
+    auto histogram_block_smem_lane = histogram_block_smem + lane_id;
+    _CCCL_PRAGMA_UNROLL_FULL()
+    for (int i = 0; i < NumBins; i += warp_threads)
+    {
+#if !defined(ATOMIC_RED)
+      atomicAdd_block(histogram_block_smem_lane + i, histogram_warp_smem_lane[i]);
+#else
+      asm volatile("red.shared.add.s32 [%0], %1;" ::"l"(histogram_block_smem_lane + i), "r"(histogram_warp_smem_lane[i])
+                   : "memory");
+#endif
+    }
+    __syncthreads();
+    auto d_histogram_th = d_output_histograms[0] + threadIdx.x;
+    _CCCL_PRAGMA_UNROLL_FULL()
+    for (int i = 0; i < NumBins; i += BLOCK_THREADS)
+    {
+      if (NumBins % BLOCK_THREADS == 0 || i < NumBins - threadIdx.x)
+      {
+#if !defined(ATOMIC_RED)
+        atomicAdd(d_histogram_th + i, histogram_block_smem_th[i]);
+#else
+        asm volatile("red.global.add.s32 [%0], %1;" ::"l"(d_histogram_th + i), "r"(histogram_block_smem_th[i])
+                     : "memory");
+#endif
+      }
     }
   }
 
@@ -908,14 +970,14 @@ struct AgentHistogram
    */
   _CCCL_DEVICE _CCCL_FORCEINLINE void StoreOutput()
   {
-    if (prefer_smem)
-    {
-      StoreSmemOutput();
-    }
-    else
-    {
-      StoreGmemOutput();
-    }
+    // if (prefer_smem)
+    //{
+    //   StoreSmemOutput();
+    // }
+    // else
+    //{
+    //   StoreGmemOutput();
+    // }
   }
 };
 
