@@ -23,6 +23,7 @@
 #  include <cuda/pipeline>
 #endif
 #include <cuda/ptx>
+#include <cuda/std/__cccl/cuda_capabilities.h>
 #include <cuda/std/bit>
 #include <cuda/std/expected>
 
