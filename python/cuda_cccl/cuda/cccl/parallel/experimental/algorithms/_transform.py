@@ -47,7 +47,7 @@ class _UnaryTransform:
         num_items: int,
         stream=None,
     ):
-        self.d_in_cccl.state = d_in.data_ptr()
+        self.d_in_cccl.state = d_in.data.ptr
         self.d_out_cccl.state = d_out.data_ptr()
 
         if self.first_call:
@@ -68,7 +68,7 @@ class _UnaryTransform:
             self.d_out_cccl,
             num_items,
             self.op_wrapper,
-            None,
+            stream,
         )
 
 
