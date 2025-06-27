@@ -299,9 +299,6 @@ struct {5} {
       is_evenly_segmented,
       is_byte_sample);
 
-    std::cout << "init_kernel_name: " << init_kernel_name << std::endl;
-    std::cout << "sweep_kernel_name: " << sweep_kernel_name << std::endl;
-
     std::string init_kernel_lowered_name;
     std::string sweep_kernel_lowered_name;
 
@@ -374,7 +371,6 @@ CUresult cccl_device_histogram_even_impl(
   bool pushed    = false;
   try
   {
-    printf("even impl called\n");
     pushed = try_push_context();
 
     CUdevice cu_device;
