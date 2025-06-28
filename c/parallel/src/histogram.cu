@@ -135,8 +135,8 @@ std::string get_sweep_kernel_name(
       : samples_iterator_name;
 
   std::string transforms_t = "cub::detail::histogram::Transforms<";
-  // transforms_t += std::string(level_t) + ", ";
-  transforms_t += "::cuda::std::uint8_t, ";
+  transforms_t += std::string(level_t) + ", ";
+  // transforms_t += "::cuda::std::uint8_t, ";
   transforms_t += std::string(offset_t) + ", ";
   transforms_t += cccl_type_enum_to_name(d_samples.value_type.type) + ">";
   // const std::string transforms_t = std::format(
