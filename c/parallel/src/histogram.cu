@@ -101,8 +101,8 @@ get_policy(int /*cc*/, [[maybe_unused]] cccl_type_info sample_t, [[maybe_unused]
   // return {384, pixels_per_thread};
   // return {256, pixels_per_thread};
   // return {896, 12};
-  // return {960, 12};
-  return {768, 12};
+  return {960, 12};
+  // return {768, 12};
 }
 
 std::string get_init_kernel_name(int num_active_channels, std::string_view counter_t, std::string_view offset_t)
