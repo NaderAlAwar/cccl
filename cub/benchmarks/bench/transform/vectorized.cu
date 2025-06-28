@@ -9,12 +9,6 @@
 // %RANGE% TUNE_LOAD_STORE_WORD_SIZE lsws 2:16:2
 // %RANGE% TUNE_ITEMS_PER_THREAD ipt 2:8:2
 
-#include "common_vectorized.h"
-
-// This benchmark tests overlapping memory regions for reading and is compute intensive
-
-using current_offset_types = nvbench::type_list<int32_t>;
-
 struct rgb_t
 {
   float r;
@@ -27,6 +21,12 @@ struct rgb_t
     return 0.2989f * r + 0.587f * g + 0.114f * b;
   }
 };
+
+#include "common_vectorized.h"
+
+// This benchmark tests overlapping memory regions for reading and is compute intensive
+
+using current_offset_types = nvbench::type_list<int32_t>;
 
 struct transform_op_t
 {

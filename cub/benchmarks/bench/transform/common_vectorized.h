@@ -40,6 +40,10 @@ struct policy_hub_t
 };
 #endif
 
+#if !TUNE_BASE
+static_assert((TUNE_ITEMS_PER_THREAD * sizeof(rgb_t)) % TUNE_LOAD_STORE_WORD_SIZE == 0);
+#endif
+
 template <typename OffsetT,
           typename... RandomAccessIteratorsIn,
           typename RandomAccessIteratorOut,
