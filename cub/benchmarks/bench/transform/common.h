@@ -32,18 +32,20 @@ struct policy_hub_t
   struct max_policy : cub::ChainedPolicy<500, max_policy, max_policy>
   {
     static constexpr int min_bif = cub::detail::transform::arch_to_min_bytes_in_flight(__CUDA_ARCH_LIST__);
-#  if TUNE_ALGORITHM == 0
+#  if TUNE_ALGORITHM == 1
     static constexpr auto algorithm = cub::detail::transform::Algorithm::prefetch;
-#  elif TUNE_ALGORITHM == 1
+#  elif TUNE_ALGORITHM == 2
+    static constexpr auto algorithm = cub::detail::transform::Algorithm::memcpy_async;
+#  elif TUNE_ALGORITHM == 3
     static constexpr auto algorithm = cub::detail::transform::Algorithm::ublkcp;
 #  else
 #    error Policy hub does not yet implement the specified value for algorithm
 #  endif
 
-    using algo_policy =
-      ::cuda::std::_If<algorithm == cub::detail::transform::Algorithm::prefetch,
-                       cub::detail::transform::prefetch_policy_t<TUNE_THREADS>,
-                       cub::detail::transform::async_copy_policy_t<TUNE_THREADS, __CUDA_ARCH_LIST__ == 900 ? 128 : 16>>;
+    using algo_policy = ::cuda::std::_If<
+      algorithm == cub::detail::transform::Algorithm::prefetch,
+      cub::detail::transform::prefetch_policy_t<TUNE_THREADS>,
+      cub::detail::transform::async_copy_policy_t<algorithm, TUNE_THREADS, __CUDA_ARCH_LIST__ == 900 ? 128 : 16>>;
   };
 };
 #endif
