@@ -136,6 +136,12 @@ struct runtime_tuning_policy_variant
   }
 };
 
+struct cache
+{
+  cuda::std::optional<cub::detail::transform::cuda_expected<cub::detail::transform::elem_counts>> elem_counts{};
+  cuda::std::optional<cub::detail::transform::cuda_expected<cub::detail::transform::prefetch_config>> prefetch_config{};
+};
+
 using runtime_tuning_policy = std::variant<runtime_tuning_policy_variant<cdt::RuntimeTransformAgentPrefetchPolicy>,
                                            runtime_tuning_policy_variant<cdt::RuntimeTransformAgentAsyncPolicy>>;
 
@@ -156,9 +162,29 @@ struct transform_kernel_source
   cccl_device_transform_build_result_t& build;
   std::vector<cuda::std::size_t> it_value_sizes;
 
-  static constexpr bool CanCacheConfiguration()
+  template <class ActionT>
+  cub::detail::transform::cuda_expected<cub::detail::transform::elem_counts> CacheConfiguration(const ActionT& action)
   {
-    return false;
+    auto cache = reinterpret_cast<transform::cache*>(build.cache);
+    if (cache->elem_counts.has_value())
+    {
+      return *cache->elem_counts;
+    }
+    cache->elem_counts = action();
+    return *cache->elem_counts;
+  }
+
+  template <class ActionT>
+  cub::detail::transform::cuda_expected<cub::detail::transform::prefetch_config>
+  CachePrefetchConfiguration(const ActionT& action)
+  {
+    auto cache = reinterpret_cast<transform::cache*>(build.cache);
+    if (cache->prefetch_config.has_value())
+    {
+      return *cache->prefetch_config;
+    }
+    cache->prefetch_config = action();
+    return *cache->prefetch_config;
   }
 
   CUkernel TransformKernel() const
@@ -320,6 +346,7 @@ CUresult cccl_device_unary_transform_build(
     build_ptr->cubin                      = (void*) result.data.release();
     build_ptr->cubin_size                 = result.size;
     build_ptr->runtime_policy             = transform::make_runtime_tuning_policy(algorithm, min_bif, transform_policy);
+    build_ptr->cache                      = new transform::cache();
   }
   catch (const std::exception& exc)
   {
@@ -531,6 +558,7 @@ CUresult cccl_device_binary_transform_build(
     build_ptr->cubin                      = (void*) result.data.release();
     build_ptr->cubin_size                 = result.size;
     build_ptr->runtime_policy             = transform::make_runtime_tuning_policy(algorithm, min_bif, transform_policy);
+    build_ptr->cache                      = new transform::cache();
   }
   catch (const std::exception& exc)
   {
@@ -606,6 +634,10 @@ CUresult cccl_device_transform_cleanup(cccl_device_transform_build_result_t* bui
     {
       return CUDA_ERROR_INVALID_VALUE;
     }
+    std::unique_ptr<transform::cache> cache(reinterpret_cast<transform::cache*>(build_ptr->cache));
+    std::unique_ptr<transform::runtime_tuning_policy> runtime_policy(
+      reinterpret_cast<transform::runtime_tuning_policy*>(build_ptr->runtime_policy));
+
     std::unique_ptr<char[]> cubin(reinterpret_cast<char*>(build_ptr->cubin));
     check(cuLibraryUnload(build_ptr->library));
   }

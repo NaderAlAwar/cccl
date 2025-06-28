@@ -1973,8 +1973,14 @@ cdef class DeviceRadixSortBuildResult:
 # --------------------------------------------
 cdef extern from "cccl/c/transform.h":
     cdef struct cccl_device_transform_build_result_t:
+        int cc
         const char* cubin
         size_t cubin_size
+        CUlibrary library
+        CUkernel transform_kernel
+        int loaded_bytes_per_iteration
+        void* runtime_policy
+        void* cache
 
     cdef CUresult cccl_device_unary_transform_build(
         cccl_device_transform_build_result_t *build_ptr,
