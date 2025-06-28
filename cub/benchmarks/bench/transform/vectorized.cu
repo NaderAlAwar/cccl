@@ -9,7 +9,7 @@
 // %RANGE% TUNE_LOAD_STORE_WORD_SIZE lsws 2:16:2
 // %RANGE% TUNE_ITEMS_PER_THREAD ipt 2:8:2
 
-#include "common.h"
+#include "common_vectorized.h"
 
 // This benchmark tests overlapping memory regions for reading and is compute intensive
 
