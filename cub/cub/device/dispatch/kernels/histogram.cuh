@@ -15,18 +15,6 @@
 
 #include <cub/agent/agent_histogram.cuh>
 #include <cub/grid/grid_queue.cuh>
-#include <cub/thread/thread_reduce.cuh>
-
-#include <cuda/__barrier/aligned_size.h>
-#include <cuda/__memcpy_async/completion_mechanism.h>
-#include <cuda/__memcpy_async/memcpy_async_barrier.h>
-#include <cuda/__ptx/instructions/get_sreg.h>
-#include <cuda/atomic>
-#include <cuda/std/__cccl/execution_space.h>
-#if _CCCL_PTX_ARCH >= 700
-#  include <cuda/barrier>
-#endif
-#include <cuda/std/__algorithm/max.h>
 
 CUB_NAMESPACE_BEGIN
 namespace detail::histogram
@@ -463,13 +451,8 @@ template <typename ChainedPolicyT,
           typename PrivatizedDecodeOpT,
           typename OutputDecodeOpT,
           typename OffsetT>
-__launch_bounds__(int(ChainedPolicyT::ActivePolicy::AgentHistogramPolicyT::BLOCK_THREADS)) CUB_DETAIL_KERNEL_ATTRIBUTES
-// #if _CCCL_PTX_ARCH >= 700
-// typename ::cuda::std::enable_if<(PRIVATIZED_SMEM_BINS == 0)>::type
-// #else
-void
-  // #endif // _CCCL_PTX_ARCH >= 700
-  DeviceHistogramSweepKernel(
+__launch_bounds__(int(ChainedPolicyT::ActivePolicy::AgentHistogramPolicyT::BLOCK_THREADS))
+  CUB_DETAIL_KERNEL_ATTRIBUTES void DeviceHistogramSweepKernel(
     SampleIteratorT d_samples,
     ::cuda::std::array<int, NUM_ACTIVE_CHANNELS> num_output_bins_wrapper,
     ::cuda::std::array<int, NUM_ACTIVE_CHANNELS> num_privatized_bins_wrapper,
@@ -518,112 +501,5 @@ void
   // Store output to global (if necessary)
   agent.StoreOutput();
 }
-
-// #define ATOMIC_RED
-
-#if false
-// #if _CCCL_PTX_ARCH >= 700
-
-template <typename ChainedPolicyT,
-          int PRIVATIZED_SMEM_BINS,
-          int NUM_CHANNELS,
-          int NUM_ACTIVE_CHANNELS,
-          typename SampleIteratorT,
-          typename CounterT,
-          typename PrivatizedDecodeOpT,
-          typename OutputDecodeOpT,
-          typename OffsetT>
-__launch_bounds__(int(ChainedPolicyT::ActivePolicy::AgentHistogramPolicyT::BLOCK_THREADS)) CUB_DETAIL_KERNEL_ATTRIBUTES
-typename ::cuda::std::enable_if<(PRIVATIZED_SMEM_BINS > 0)>::type DeviceHistogramSweepKernel(
-  SampleIteratorT d_samples,
-  ::cuda::std::array<int, NUM_ACTIVE_CHANNELS> num_output_bins_wrapper,
-  ::cuda::std::array<int, NUM_ACTIVE_CHANNELS> num_privatized_bins_wrapper,
-  ::cuda::std::array<CounterT*, NUM_ACTIVE_CHANNELS> d_output_histograms_wrapper,
-  ::cuda::std::array<CounterT*, NUM_ACTIVE_CHANNELS> d_privatized_histograms_wrapper,
-  ::cuda::std::array<OutputDecodeOpT, NUM_ACTIVE_CHANNELS> output_decode_op_wrapper,
-  ::cuda::std::array<PrivatizedDecodeOpT, NUM_ACTIVE_CHANNELS> privatized_decode_op_wrapper,
-  OffsetT num_row_pixels,
-  OffsetT num_rows,
-  OffsetT row_stride_samples,
-  int tiles_per_row,
-  GridQueue<int> tile_queue)
-{
-  using value_t         = uint8_t;
-  using count_t         = int;
-  constexpr int NumBins = PRIVATIZED_SMEM_BINS;
-  static_assert(NumBins == 256);
-  constexpr int BlockThreads   = ChainedPolicyT::ActivePolicy::AgentHistogramPolicyT::BLOCK_THREADS;
-  constexpr int NumWarps       = BlockThreads / warp_threads;
-  using VecType                = uchar4;
-  constexpr int VecSize        = 4;
-  constexpr int ItemsPerThread = NumBins / warp_threads;
-  auto warp_id                 = threadIdx.x / warp_threads;
-  auto lane_id                 = ::cuda::ptx::get_sreg_laneid();
-  __shared__ count_t histogram_warp_smem[NumWarps][NumBins];
-  __shared__ count_t histogram_block_smem[NumBins];
-  auto histogram_block_smem_th = histogram_block_smem + threadIdx.x;
-#  pragma unroll
-  for (int i = 0; i < NumBins; i += BlockThreads)
-  {
-    if (NumBins % BlockThreads == 0 || i < NumBins - threadIdx.x)
-    {
-      histogram_block_smem_th[i] = 0;
-    }
-  }
-  __syncthreads();
-  auto histogram_warp_smem_lane = histogram_warp_smem[warp_id] + lane_id;
-#  pragma unroll
-  for (int i = 0; i < NumBins; i += warp_threads)
-  {
-    histogram_warp_smem_lane[i] = 0;
-  }
-  __syncwarp();
-  auto size          = num_row_pixels;
-  auto start         = static_cast<OffsetT>(blockIdx.x * BlockThreads + threadIdx.x);
-  auto stride        = static_cast<OffsetT>(BlockThreads * gridDim.x);
-  auto d_samples_vec = reinterpret_cast<const VecType*>(d_samples);
-  auto size_vec      = size / VecSize;
-  // main loop (should be vectorized as well)
-  for (auto i = start; i < size_vec; i += stride)
-  {
-    auto array = unsafe_bitcast<cuda::std::array<value_t, VecSize>>(d_samples_vec[i]);
-#  pragma unroll
-    for (int j = 0; j < VecSize; j++)
-    {
-      auto value                          = static_cast<int>(array[j]);
-      auto prev                           = histogram_warp_smem[warp_id][value];
-      histogram_warp_smem[warp_id][value] = prev + __popc(::__match_any_sync(0xFFFFFFFF, value));
-      __syncwarp();
-    }
-  }
-  // warp -> block
-  auto histogram_block_smem_lane = histogram_block_smem + lane_id;
-  _CCCL_PRAGMA_UNROLL_FULL()
-  for (int i = 0; i < NumBins; i += warp_threads)
-  {
-#  if !defined(ATOMIC_RED)
-    atomicAdd(histogram_block_smem_lane + i, histogram_warp_smem_lane[i]);
-#  else
-    asm volatile("red.shared.add.s32 [%0], %1;" ::"l"(histogram_block_smem_lane + i), "r"(histogram_warp_smem_lane[i])
-                 : "memory");
-#  endif
-  }
-  __syncthreads();
-  auto d_histogram = d_output_histograms_wrapper[0] + threadIdx.x;
-#  pragma unroll
-  for (int i = 0; i < NumBins; i += BlockThreads)
-  {
-    if (NumBins % BlockThreads == 0 || i < NumBins - threadIdx.x)
-    {
-#  if !defined(ATOMIC_RED)
-      atomicAdd(d_histogram + i, histogram_block_smem_th[i]);
-#  else
-      asm volatile("red.global.add.s32 [%0], %1;" ::"l"(d_histogram + i), "r"(histogram_block_smem_th[i]) : "memory");
-#  endif
-    }
-  }
-}
-
-#endif // _CCCL_PTX_ARCH >= 700
 } // namespace detail::histogram
 CUB_NAMESPACE_END
