@@ -54,10 +54,10 @@ namespace detail::transform
 {
 enum class Algorithm
 {
+  vectorized,
   // We previously had a fallback algorithm that would use cub::DeviceFor. Benchmarks showed that the prefetch algorithm
   // is always superior to that fallback, so it was removed.
   prefetch,
-  vectorized,
   memcpy_async,
   ublkcp
 };
