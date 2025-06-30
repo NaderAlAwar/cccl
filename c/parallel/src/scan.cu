@@ -37,7 +37,7 @@
 
 struct op_wrapper;
 struct device_scan_policy;
-using OffsetT = uint32_t;
+using OffsetT = unsigned long long;
 static_assert(std::is_same_v<cub::detail::choose_offset_t<OffsetT>, OffsetT>, "OffsetT must be size_t");
 
 struct input_iterator_state_t;
@@ -101,9 +101,11 @@ scan_runtime_tuning_policy get_policy(int /*cc*/, cccl_type_info /*accumulator_t
   // TODO: we should update this once we figure out a way to reuse
   // tuning logic from C++. Alternately, we should implement
   // something better than a hardcoded default:
-  return {cub::detail::MemBoundScaling<128, 24, float>::BLOCK_THREADS,
-          cub::detail::MemBoundScaling<128, 24, float>::ITEMS_PER_THREAD,
-          cub::LOAD_DEFAULT};
+  return {128, 4, cub::LOAD_DEFAULT};
+
+  // return {cub::detail::MemBoundScaling<288, 24, float>::BLOCK_THREADS,
+  //         cub::detail::MemBoundScaling<128, 24, float>::ITEMS_PER_THREAD,
+  //         cub::LOAD_DEFAULT};
 }
 
 static cccl_type_info get_accumulator_type(cccl_op_t /*op*/, cccl_iterator_t /*input_it*/, cccl_value_t init)
@@ -161,7 +163,7 @@ std::string get_scan_kernel_name(
 
   auto tile_state_t = "cub::ScanTileState<" + accum_cpp_t + ">";
   return "cub::detail::scan::DeviceScanKernel<" + chained_policy_t + ", " + input_iterator_t + ", " + output_iterator_t
-       + ", " + tile_state_t + ", " + "::cuda::std::plus<>, " + // scan_op_t replaced with std::plus<>
+       + ", " + tile_state_t + ", " + scan_op_t + // "::cuda::std::plus<>, " + // scan_op_t replaced with std::plus<>
          init_t + ", " + offset_t + ", " + accum_cpp_t + ", " + (force_inclusive ? "true" : "false") + ", " + init_t
        + ">";
 }
@@ -247,14 +249,14 @@ struct __align__({1}) storage_t {
 {4}
 {5}
 struct agent_policy_t {
-  static constexpr int ITEMS_PER_THREAD = cub::detail::MemBoundScaling<128, 24, float>::ITEMS_PER_THREAD; //{2};
-  static constexpr int BLOCK_THREADS = cub::detail::MemBoundScaling<128, 24, float>::BLOCK_THREADS; //{3};
+  static constexpr int ITEMS_PER_THREAD = {2};
+  static constexpr int BLOCK_THREADS = {3};
   static constexpr cub::BlockLoadAlgorithm LOAD_ALGORITHM = cub::BLOCK_LOAD_WARP_TRANSPOSE;
   static constexpr cub::CacheLoadModifier LOAD_MODIFIER = cub::LOAD_DEFAULT;
   static constexpr cub::BlockStoreAlgorithm STORE_ALGORITHM = cub::BLOCK_STORE_WARP_TRANSPOSE;
   static constexpr cub::BlockScanAlgorithm SCAN_ALGORITHM = cub::BLOCK_SCAN_WARP_SCANS;
   struct detail {
-    using delay_constructor_t = cub::detail::fixed_delay_constructor_t<688, 1140>; // <{7}>;
+    using delay_constructor_t = cub::detail::default_delay_constructor_t<{7}>;
   };
 };
 struct device_scan_policy {
