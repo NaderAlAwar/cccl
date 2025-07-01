@@ -37,7 +37,8 @@
 
 struct op_wrapper;
 struct device_scan_policy;
-using OffsetT = unsigned long long;
+// using OffsetT = unsigned long long;
+using OffsetT = uint32_t;
 static_assert(std::is_same_v<cub::detail::choose_offset_t<OffsetT>, OffsetT>, "OffsetT must be size_t");
 
 struct input_iterator_state_t;
@@ -231,7 +232,7 @@ CUresult cccl_device_scan_build(
     const auto policy            = scan::get_policy(cc, accum_t);
     const auto accum_cpp         = cccl_type_enum_to_name(accum_t.type);
     const auto input_it_value_t  = cccl_type_enum_to_name(input_it.value_type.type);
-    const auto offset_t          = cccl_type_enum_to_name(cccl_type_enum::CCCL_UINT64);
+    const auto offset_t          = cccl_type_enum_to_name(cccl_type_enum::CCCL_UINT32);
 
     const std::string input_iterator_src =
       make_kernel_input_iterator(offset_t, "input_iterator_state_t", input_it_value_t, input_it);
