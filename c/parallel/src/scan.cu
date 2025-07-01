@@ -163,7 +163,8 @@ std::string get_scan_kernel_name(
 
   auto tile_state_t = "cub::ScanTileState<" + accum_cpp_t + ">";
   return "cub::detail::scan::DeviceScanKernel<" + chained_policy_t + ", " + input_iterator_t + ", " + output_iterator_t
-       + ", " + tile_state_t + ", " + scan_op_t + // "::cuda::std::plus<>, " + // scan_op_t replaced with std::plus<>
+       + ", " + tile_state_t + ", " + scan_op_t + +"," + // "::cuda::std::plus<>, " + // scan_op_t replaced with
+                                                         // std::plus<>
          init_t + ", " + offset_t + ", " + accum_cpp_t + ", " + (force_inclusive ? "true" : "false") + ", " + init_t
        + ">";
 }
