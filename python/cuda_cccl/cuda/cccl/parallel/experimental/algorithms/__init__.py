@@ -4,9 +4,11 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 from ._merge_sort import merge_sort as merge_sort
+from ._merge_sort_low_overhead import merge_sort_low_overhead as merge_sort_low_overhead
 from ._radix_sort import DoubleBuffer, SortOrder
 from ._radix_sort import radix_sort as radix_sort
 from ._reduce import reduce_into as reduce_into
+from ._reduce_low_overhead import reduce_into_low_overhead as reduce_into_low_overhead
 from ._scan import exclusive_scan as exclusive_scan
 from ._scan import inclusive_scan as inclusive_scan
 from ._segmented_reduce import segmented_reduce
@@ -15,7 +17,9 @@ from ._unique_by_key import unique_by_key as unique_by_key
 
 __all__ = [
     "merge_sort",
+    "merge_sort_low_overhead",
     "reduce_into",
+    "reduce_into_low_overhead",
     "exclusive_scan",
     "inclusive_scan",
     "segmented_reduce",
