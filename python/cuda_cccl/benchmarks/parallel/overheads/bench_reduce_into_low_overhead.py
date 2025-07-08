@@ -32,7 +32,14 @@ def reduce_into(state: nvbench.State):
     temp_storage = cp.empty(temp_nbytes, dtype=cp.uint8)
 
     for _ in range(10):
-        alg(temp_storage, d_input, d_output, n_elems, h_init)
+        alg(
+            temp_storage.data.ptr,
+            temp_storage.nbytes,
+            d_input,
+            d_output,
+            n_elems,
+            h_init,
+        )
 
     cp.cuda.runtime.deviceSynchronize()
     execution_times = []
