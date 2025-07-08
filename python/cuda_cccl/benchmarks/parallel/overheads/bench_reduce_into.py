@@ -29,7 +29,7 @@ def reduce_into(state: nvbench.State):
     # query size of temporary storage and allocate
     temp_nbytes = alg(None, d_input, d_output, n_elems, h_init)
 
-    temp_storage = torch.empty(temp_nbytes, dtype=torch.uint8)
+    temp_storage = torch.empty(temp_nbytes, dtype=torch.uint8, device="cuda")
 
     for _ in range(10):
         alg(temp_storage, d_input, d_output, n_elems, h_init)
