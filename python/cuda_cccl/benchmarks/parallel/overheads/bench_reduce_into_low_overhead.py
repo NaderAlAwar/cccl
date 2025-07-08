@@ -39,7 +39,14 @@ def reduce_into(state: nvbench.State):
     for _ in range(100):
         cp.cuda.runtime.deviceSynchronize()
         start = time.perf_counter_ns()
-        alg(temp_storage, d_input, d_output, n_elems, h_init)
+        alg(
+            temp_storage.data.ptr,
+            temp_storage.nbytes,
+            d_input.data.ptr,
+            d_output.data.ptr,
+            n_elems,
+            h_init,
+        )
         cp.cuda.runtime.deviceSynchronize()
         stop = time.perf_counter_ns()
         execution_times.append(stop - start)
