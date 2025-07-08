@@ -3,6 +3,7 @@ import time
 
 import cupy as cp
 import numpy as np
+import torch
 
 import cuda.cccl.parallel.experimental.algorithms as algorithms
 import cuda.nvbench as nvbench
@@ -15,9 +16,8 @@ def reduce_into(state: nvbench.State):
     state.add_summary("numElemes", n_elems)
     state.collectCUPTIMetrics()
 
-    rng = cp.random.default_rng()
-    d_input = rng.random(n_elems, dtype=cp.float32)
-    d_output = cp.empty(1, dtype=cp.float32)
+    d_input = torch.rand(n_elems, dtype=torch.float32, device="cuda")
+    d_output = torch.empty(1, dtype=torch.float32)
 
     def add_op(a, b):
         return a + b
@@ -29,7 +29,7 @@ def reduce_into(state: nvbench.State):
     # query size of temporary storage and allocate
     temp_nbytes = alg(None, d_input, d_output, n_elems, h_init)
 
-    temp_storage = cp.empty(temp_nbytes, dtype=cp.uint8)
+    temp_storage = torch.empty(temp_nbytes, dtype=torch.uint8)
 
     for _ in range(10):
         alg(temp_storage, d_input, d_output, n_elems, h_init)
