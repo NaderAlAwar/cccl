@@ -35,8 +35,8 @@ def reduce_into(state: nvbench.State):
         alg(
             temp_storage.data.ptr,
             temp_storage.nbytes,
-            d_input,
-            d_output,
+            d_input.data.ptr,
+            d_output.data.ptr,
             n_elems,
             h_init,
         )
