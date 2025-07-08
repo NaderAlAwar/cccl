@@ -1,5 +1,4 @@
 import sys
-import time
 
 import cupy as cp
 import numpy as np
@@ -31,21 +30,13 @@ def reduce_into(state: nvbench.State):
 
     temp_storage = torch.empty(temp_nbytes, dtype=torch.uint8, device="cuda")
 
-    for _ in range(10):
-        alg(temp_storage, d_input, d_output, n_elems, h_init)
-
     cp.cuda.runtime.deviceSynchronize()
-    execution_times = []
-    for _ in range(100):
-        cp.cuda.runtime.deviceSynchronize()
-        start = time.perf_counter_ns()
+
+    def launcher(launch: nvbench.Launch):
         alg(temp_storage, d_input, d_output, n_elems, h_init)
         cp.cuda.runtime.deviceSynchronize()
-        stop = time.perf_counter_ns()
-        execution_times.append(stop - start)
 
-    avg_time_ns = sum(execution_times) / len(execution_times)
-    print(f"Num elems {n_elems}; Average execution time: {avg_time_ns:.2f} ns")
+    state.exec(launcher, sync=True)
 
 
 if __name__ == "__main__":

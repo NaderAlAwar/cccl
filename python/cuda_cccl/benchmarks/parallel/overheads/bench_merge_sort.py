@@ -34,8 +34,9 @@ def merge_sort(state: nvbench.State):
 
     def launcher(launch: nvbench.Launch):
         alg(temp_storage, d_in_keys, d_in_items, d_out_keys, d_out_items, n_elems)
+        cp.cuda.runtime.deviceSynchronize()
 
-    state.exec(launcher)
+    state.exec(launcher, sync=True)
 
 
 if __name__ == "__main__":

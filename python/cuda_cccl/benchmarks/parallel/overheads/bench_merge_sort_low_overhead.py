@@ -50,8 +50,9 @@ def merge_sort(state: nvbench.State):
             d_out_items.data.ptr,
             n_elems,
         )
+        cp.cuda.runtime.deviceSynchronize()
 
-    state.exec(launcher)
+    state.exec(launcher, sync=True)
 
 
 if __name__ == "__main__":

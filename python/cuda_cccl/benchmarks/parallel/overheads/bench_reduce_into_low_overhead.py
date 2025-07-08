@@ -1,9 +1,7 @@
 import sys
-import time
 
 import cupy as cp
 import numpy as np
-import torch
 
 import cuda.cccl.parallel.experimental.algorithms as algorithms
 import cuda.nvbench as nvbench
@@ -16,8 +14,9 @@ def reduce_into(state: nvbench.State):
     state.add_summary("numElemes", n_elems)
     state.collectCUPTIMetrics()
 
-    d_input = torch.rand(n_elems, dtype=torch.float32, device="cuda")
-    d_output = torch.empty(1, dtype=torch.float32, device="cuda")
+    rng = cp.random.default_rng()
+    d_input = rng.random(n_elems, dtype=cp.float32)
+    d_output = cp.empty(1, dtype=cp.float32)
 
     def add_op(a, b):
         return a + b
@@ -29,23 +28,11 @@ def reduce_into(state: nvbench.State):
     # query size of temporary storage and allocate
     temp_nbytes = alg(None, 0, d_input.data.ptr, d_output.data.ptr, n_elems, h_init)
 
-    temp_storage = torch.empty(temp_nbytes, dtype=torch.uint8, device="cuda")
-
-    for _ in range(10):
-        alg(
-            temp_storage.data.ptr,
-            temp_storage.nbytes,
-            d_input.data.ptr,
-            d_output.data.ptr,
-            n_elems,
-            h_init,
-        )
+    temp_storage = cp.empty(temp_nbytes, dtype=cp.uint8)
 
     cp.cuda.runtime.deviceSynchronize()
-    execution_times = []
-    for _ in range(100):
-        cp.cuda.runtime.deviceSynchronize()
-        start = time.perf_counter_ns()
+
+    def launcher(launch: nvbench.Launch):
         alg(
             temp_storage.data.ptr,
             temp_storage.nbytes,
@@ -55,11 +42,8 @@ def reduce_into(state: nvbench.State):
             h_init,
         )
         cp.cuda.runtime.deviceSynchronize()
-        stop = time.perf_counter_ns()
-        execution_times.append(stop - start)
 
-    avg_time_ns = sum(execution_times) / len(execution_times)
-    print(f"Num elems {n_elems}; Average execution time: {avg_time_ns:.2f} ns")
+    state.exec(launcher, sync=True)
 
 
 if __name__ == "__main__":
