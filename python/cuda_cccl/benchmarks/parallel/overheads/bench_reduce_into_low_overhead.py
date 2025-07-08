@@ -17,7 +17,7 @@ def reduce_into(state: nvbench.State):
     state.collectCUPTIMetrics()
 
     d_input = torch.rand(n_elems, dtype=torch.float32, device="cuda")
-    d_output = torch.empty(1, dtype=torch.float32)
+    d_output = torch.empty(1, dtype=torch.float32, device="cuda")
 
     def add_op(a, b):
         return a + b
