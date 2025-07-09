@@ -1,6 +1,5 @@
 import sys
 
-import cupy as cp
 import numpy as np
 import torch
 
@@ -30,7 +29,7 @@ def reduce_into(state: nvbench.State):
 
     temp_storage = torch.empty(temp_nbytes, dtype=torch.uint8, device="cuda")
 
-    cp.cuda.runtime.deviceSynchronize()
+    torch.cuda.synchronize()
 
     def launcher(launch: nvbench.Launch):
         alg(
@@ -41,7 +40,7 @@ def reduce_into(state: nvbench.State):
             n_elems,
             h_init,
         )
-        cp.cuda.runtime.deviceSynchronize()
+        torch.cuda.synchronize()
 
     state.exec(launcher, sync=True)
 
