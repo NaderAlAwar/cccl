@@ -32,6 +32,7 @@ def reduce_into(state: nvbench.State):
     torch.cuda.synchronize()
 
     def launcher(launch: nvbench.Launch):
+        torch.cuda.synchronize()
         alg(
             temp_storage.data_ptr(),
             temp_storage.nbytes,
