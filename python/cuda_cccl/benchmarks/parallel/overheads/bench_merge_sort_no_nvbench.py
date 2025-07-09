@@ -1,6 +1,6 @@
 import sys
+import time
 
-import cupy as cp
 import numpy as np
 import torch
 
@@ -32,11 +32,22 @@ def merge_sort(state: nvbench.State):
 
     temp_storage = torch.empty(temp_nbytes, dtype=torch.uint8, device="cuda")
 
-    def launcher(launch: nvbench.Launch):
+    for _ in range(10):
         alg(temp_storage, d_in_keys, d_in_items, d_out_keys, d_out_items, n_elems)
-        cp.cuda.runtime.deviceSynchronize()
 
-    state.exec(launcher, sync=True)
+    torch.cuda.synchronize()
+
+    execution_times = []
+    for _ in range(100):
+        torch.cuda.synchronize()
+        start = time.perf_counter_ns()
+        alg(temp_storage, d_in_keys, d_in_items, d_out_keys, d_out_items, n_elems)
+        torch.cuda.synchronize()
+        stop = time.perf_counter_ns()
+        execution_times.append(stop - start)
+
+    avg_time_ns = sum(execution_times) / len(execution_times)
+    print(f"Num elems {n_elems}; Average execution time: {avg_time_ns:.2f} ns")
 
 
 if __name__ == "__main__":
