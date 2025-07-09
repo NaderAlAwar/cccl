@@ -2,6 +2,7 @@ import sys
 
 import cupy as cp
 import numpy as np
+import torch
 
 import cuda.cccl.parallel.experimental.algorithms as algorithms
 import cuda.nvbench as nvbench
@@ -14,11 +15,10 @@ def merge_sort(state: nvbench.State):
     state.add_summary("numElems", n_elems)
     state.collectCUPTIMetrics()
 
-    rng = cp.random.default_rng()
-    d_in_keys = rng.random(n_elems, dtype=cp.float32)
-    d_in_items = cp.ones(n_elems, dtype=cp.float32)
-    d_out_keys = cp.empty(n_elems, dtype=cp.float32)
-    d_out_items = cp.empty(n_elems, dtype=cp.float32)
+    d_in_keys = torch.rand(n_elems, dtype=torch.float32, device="cuda")
+    d_in_items = torch.ones(n_elems, dtype=torch.float32, device="cuda")
+    d_out_keys = torch.empty(n_elems, dtype=torch.float32, device="cuda")
+    d_out_items = torch.empty(n_elems, dtype=torch.float32, device="cuda")
 
     def compare_op(lhs, rhs):
         return np.uint8(lhs < rhs)
@@ -31,23 +31,23 @@ def merge_sort(state: nvbench.State):
     temp_nbytes = alg(
         None,
         0,
-        d_in_keys.data.ptr,
-        d_in_items.data.ptr,
-        d_out_keys.data.ptr,
-        d_out_items.data.ptr,
+        d_in_keys.data_ptr(),
+        d_in_items.data_ptr(),
+        d_out_keys.data_ptr(),
+        d_out_items.data_ptr(),
         n_elems,
     )
 
-    temp_storage = cp.empty(temp_nbytes, dtype=cp.uint8)
+    temp_storage = torch.empty(temp_nbytes, dtype=torch.uint8, device="cuda")
 
     def launcher(launch: nvbench.Launch):
         alg(
-            temp_storage.data.ptr,
+            temp_storage.data_ptr(),
             temp_storage.nbytes,
-            d_in_keys.data.ptr,
-            d_in_items.data.ptr,
-            d_out_keys.data.ptr,
-            d_out_items.data.ptr,
+            d_in_keys.data_ptr(),
+            d_in_items.data_ptr(),
+            d_out_keys.data_ptr(),
+            d_out_items.data_ptr(),
             n_elems,
         )
         cp.cuda.runtime.deviceSynchronize()

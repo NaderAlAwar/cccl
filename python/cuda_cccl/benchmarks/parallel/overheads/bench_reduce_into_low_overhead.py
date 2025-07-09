@@ -2,6 +2,7 @@ import sys
 
 import cupy as cp
 import numpy as np
+import torch
 
 import cuda.cccl.parallel.experimental.algorithms as algorithms
 import cuda.nvbench as nvbench
@@ -14,9 +15,8 @@ def reduce_into(state: nvbench.State):
     state.add_summary("numElemes", n_elems)
     state.collectCUPTIMetrics()
 
-    rng = cp.random.default_rng()
-    d_input = rng.random(n_elems, dtype=cp.float32)
-    d_output = cp.empty(1, dtype=cp.float32)
+    d_input = torch.rand(n_elems, dtype=torch.float32, device="cuda")
+    d_output = torch.empty(1, dtype=torch.float32, device="cuda")
 
     def add_op(a, b):
         return a + b
@@ -26,18 +26,18 @@ def reduce_into(state: nvbench.State):
     alg = algorithms.reduce_into_low_overhead(d_input, d_output, add_op, h_init)
 
     # query size of temporary storage and allocate
-    temp_nbytes = alg(None, 0, d_input.data.ptr, d_output.data.ptr, n_elems, h_init)
+    temp_nbytes = alg(None, 0, d_input.data_ptr(), d_output.data_ptr(), n_elems, h_init)
 
-    temp_storage = cp.empty(temp_nbytes, dtype=cp.uint8)
+    temp_storage = torch.empty(temp_nbytes, dtype=torch.uint8, device="cuda")
 
     cp.cuda.runtime.deviceSynchronize()
 
     def launcher(launch: nvbench.Launch):
         alg(
-            temp_storage.data.ptr,
+            temp_storage.data_ptr(),
             temp_storage.nbytes,
-            d_input.data.ptr,
-            d_output.data.ptr,
+            d_input.data_ptr(),
+            d_output.data_ptr(),
             n_elems,
             h_init,
         )
