@@ -1,0 +1,172 @@
+# Copyright (c) 2024-2025, NVIDIA CORPORATION & AFFILIATES. ALL RIGHTS RESERVED.
+#
+#
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+from typing import Callable
+
+import numba
+
+from .. import _bindings
+from .. import _cccl_interop as cccl
+from .._caching import CachableFunction, cache_with_key
+from .._cccl_interop import call_build
+from .._utils import protocols
+from .._utils.protocols import validate_and_get_stream
+from ..iterators._iterators import IteratorBase, scrub_duplicate_ltoirs
+from ..typing import DeviceArrayLike
+
+
+def make_cache_key(
+    d_in_keys: DeviceArrayLike | IteratorBase,
+    d_in_items: DeviceArrayLike | IteratorBase,
+    d_out_keys: DeviceArrayLike | IteratorBase,
+    d_out_items: DeviceArrayLike | IteratorBase,
+    d_out_num_selected: DeviceArrayLike,
+    op: Callable,
+):
+    d_in_keys_key = (
+        d_in_keys.kind
+        if isinstance(d_in_keys, IteratorBase)
+        else protocols.get_dtype(d_in_keys)
+    )
+    d_in_items_key = (
+        d_in_items.kind
+        if isinstance(d_in_items, IteratorBase)
+        else protocols.get_dtype(d_in_items)
+    )
+    d_out_keys_key = (
+        d_out_keys.kind
+        if isinstance(d_out_keys, IteratorBase)
+        else protocols.get_dtype(d_out_keys)
+    )
+    d_out_items_key = (
+        d_out_items.kind
+        if isinstance(d_out_items, IteratorBase)
+        else protocols.get_dtype(d_out_items)
+    )
+    d_out_num_selected_key = protocols.get_dtype(d_out_num_selected)
+    op_key = CachableFunction(op)
+
+    return (
+        d_in_keys_key,
+        d_in_items_key,
+        d_out_keys_key,
+        d_out_items_key,
+        d_out_num_selected_key,
+        op_key,
+    )
+
+
+class _UniqueByKey:
+    __slots__ = [
+        "build_result",
+        "d_in_keys_cccl",
+        "d_in_items_cccl",
+        "d_out_keys_cccl",
+        "d_out_items_cccl",
+        "d_out_num_selected_cccl",
+        "op_wrapper",
+    ]
+
+    def __init__(
+        self,
+        d_in_keys: DeviceArrayLike | IteratorBase,
+        d_in_items: DeviceArrayLike | IteratorBase,
+        d_out_keys: DeviceArrayLike | IteratorBase,
+        d_out_items: DeviceArrayLike | IteratorBase,
+        d_out_num_selected: DeviceArrayLike,
+        op: Callable,
+    ):
+        d_in_keys, d_in_items, d_out_keys, d_out_items = scrub_duplicate_ltoirs(
+            d_in_keys, d_in_items, d_out_keys, d_out_items
+        )
+        self.d_in_keys_cccl = cccl.to_cccl_iter(d_in_keys)
+        self.d_in_items_cccl = cccl.to_cccl_iter(d_in_items)
+        self.d_out_keys_cccl = cccl.to_cccl_iter(d_out_keys)
+        self.d_out_items_cccl = cccl.to_cccl_iter(d_out_items)
+        self.d_out_num_selected_cccl = cccl.to_cccl_iter(d_out_num_selected)
+
+        value_type = cccl.get_value_type(d_in_keys)
+        self.op_wrapper = cccl.to_cccl_op(op, numba.types.uint8(value_type, value_type))
+
+        self.build_result = call_build(
+            _bindings.DeviceUniqueByKeyBuildResult,
+            self.d_in_keys_cccl,
+            self.d_in_items_cccl,
+            self.d_out_keys_cccl,
+            self.d_out_items_cccl,
+            self.d_out_num_selected_cccl,
+            self.op_wrapper,
+        )
+
+    def __call__(
+        self,
+        temp_storage_ptr,
+        temp_storage_bytes,
+        d_in_keys_ptr,
+        d_in_items_ptr,
+        d_out_keys_ptr,
+        d_out_items_ptr,
+        d_out_num_selected_ptr,
+        num_items: int,
+        stream=None,
+    ):
+        self.d_in_keys_cccl.state = d_in_keys_ptr
+        self.d_in_items_cccl.state = d_in_items_ptr
+        self.d_out_keys_cccl.state = d_out_keys_ptr
+        self.d_out_items_cccl.state = d_out_items_ptr
+        self.d_out_num_selected_cccl.state = d_out_num_selected_ptr
+
+        stream_handle = validate_and_get_stream(stream)
+
+        temp_storage_bytes = self.build_result.compute(
+            temp_storage_ptr,
+            temp_storage_bytes,
+            self.d_in_keys_cccl,
+            self.d_in_items_cccl,
+            self.d_out_keys_cccl,
+            self.d_out_items_cccl,
+            self.d_out_num_selected_cccl,
+            self.op_wrapper,
+            num_items,
+            stream_handle,
+        )
+        return temp_storage_bytes
+
+
+@cache_with_key(make_cache_key)
+def unique_by_key(
+    d_in_keys: DeviceArrayLike | IteratorBase,
+    d_in_items: DeviceArrayLike | IteratorBase,
+    d_out_keys: DeviceArrayLike | IteratorBase,
+    d_out_items: DeviceArrayLike | IteratorBase,
+    d_out_num_selected: DeviceArrayLike,
+    op: Callable,
+):
+    """Implements a device-wide unique by key operation using ``d_in_keys`` and the comparison operator ``op``. Only the first key and its value from each run is selected and the total number of items selected is also reported.
+
+    Example:
+        Below, ``unique_by_key`` is used to populate the arrays of output keys and items with the first key and its corresponding item from each sequence of equal keys. It also outputs the number of items selected.
+
+        .. literalinclude:: ../../python/cuda_cccl/tests/parallel/test_unique_by_key_api.py
+          :language: python
+          :dedent:
+          :start-after: example-begin unique-by-key
+          :end-before: example-end unique-by-key
+
+    Args:
+        d_in_keys: Device array or iterator containing the input sequence of keys
+        d_in_items: Device array or iterator that contains each key's corresponding item
+        d_out_keys: Device array or iterator to store the outputted keys
+        d_out_items: Device array or iterator to store each outputted key's item
+        d_out_num_selected: Device array to store how many items were selected
+        op: Callable representing the equality operator
+
+    Returns:
+        A callable object that can be used to perform unique by key
+    """
+
+    return _UniqueByKey(
+        d_in_keys, d_in_items, d_out_keys, d_out_items, d_out_num_selected, op
+    )
