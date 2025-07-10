@@ -136,7 +136,7 @@ class _UniqueByKey:
 
 
 @cache_with_key(make_cache_key)
-def unique_by_key(
+def unique_by_key_low_overhead(
     d_in_keys: DeviceArrayLike | IteratorBase,
     d_in_items: DeviceArrayLike | IteratorBase,
     d_out_keys: DeviceArrayLike | IteratorBase,

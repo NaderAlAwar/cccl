@@ -14,6 +14,9 @@ from ._scan import inclusive_scan as inclusive_scan
 from ._segmented_reduce import segmented_reduce
 from ._transform import binary_transform, unary_transform
 from ._unique_by_key import unique_by_key as unique_by_key
+from ._unique_by_key_low_overhead import (
+    unique_by_key_low_overhead as unique_by_key_low_overhead,
+)
 
 __all__ = [
     "merge_sort",
@@ -24,6 +27,7 @@ __all__ = [
     "inclusive_scan",
     "segmented_reduce",
     "unique_by_key",
+    "unique_by_key_low_overhead",
     "radix_sort",
     "DoubleBuffer",
     "SortOrder",
