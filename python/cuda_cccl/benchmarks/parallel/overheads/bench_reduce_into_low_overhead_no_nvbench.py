@@ -1,19 +1,13 @@
-import sys
 import time
 
 import numpy as np
 import torch
 
 import cuda.cccl.parallel.experimental.algorithms as algorithms
-import cuda.nvbench as nvbench
 
 
-def reduce_into(state: nvbench.State):
-    "Benchmark segmented_reduce example"
-    n_elems = state.getInt64("numElems")
-
-    state.add_summary("numElemes", n_elems)
-    state.collectCUPTIMetrics()
+def reduce_into():
+    n_elems = 2**26
 
     d_input = torch.rand(n_elems, dtype=torch.float32, device="cuda")
     d_output = torch.empty(1, dtype=torch.float32, device="cuda")
@@ -44,7 +38,6 @@ def reduce_into(state: nvbench.State):
 
     execution_times = []
     for _ in range(100):
-        torch.cuda.synchronize()
         start = time.perf_counter_ns()
         alg(
             temp_storage.data_ptr(),
@@ -54,7 +47,6 @@ def reduce_into(state: nvbench.State):
             n_elems,
             h_init,
         )
-        torch.cuda.synchronize()
         stop = time.perf_counter_ns()
         execution_times.append(stop - start)
 
@@ -63,7 +55,4 @@ def reduce_into(state: nvbench.State):
 
 
 if __name__ == "__main__":
-    b = nvbench.register(reduce_into)
-    b.addInt64Axis("numElems", [2**20, 2**26])
-
-    nvbench.run_all_benchmarks(sys.argv)
+    reduce_into()
