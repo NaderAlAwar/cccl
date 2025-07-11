@@ -1,0 +1,16 @@
+{
+  "benchmarks": [
+    {
+      "name": "reduce/1048576",
+      "gpu_time": 11400.0,
+      "python_overhead": 4900.0,
+      "total_time": 16300.0
+    },
+    {
+      "name": "reduce/67108864",
+      "gpu_time": 372000.0,
+      "python_overhead": 4900.0,
+      "total_time": 376900.0
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "benchmarks": [
+    {
+      "name": "unique_by_key/1048576",
+      "gpu_time": 23000.0,
+      "python_overhead": 4200.0,
+      "total_time": 27200.0
+    },
+    {
+      "name": "unique_by_key/67108864",
+      "gpu_time": 1293000.0,
+      "python_overhead": 4200.0,
+      "total_time": 1297200.0
+    }
+  ]
+}
