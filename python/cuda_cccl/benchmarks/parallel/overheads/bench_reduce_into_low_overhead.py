@@ -11,9 +11,6 @@ def reduce_into(state: nvbench.State):
     "Benchmark segmented_reduce example"
     n_elems = state.getInt64("numElems")
 
-    state.add_summary("numElemes", n_elems)
-    state.collectCUPTIMetrics()
-
     d_input = torch.rand(n_elems, dtype=torch.float32, device="cuda")
     d_output = torch.empty(1, dtype=torch.float32, device="cuda")
 
@@ -32,7 +29,6 @@ def reduce_into(state: nvbench.State):
     torch.cuda.synchronize()
 
     def launcher(launch: nvbench.Launch):
-        torch.cuda.synchronize()
         alg(
             temp_storage.data_ptr(),
             temp_storage.nbytes,
@@ -41,9 +37,8 @@ def reduce_into(state: nvbench.State):
             n_elems,
             h_init,
         )
-        torch.cuda.synchronize()
 
-    state.exec(launcher, sync=True)
+    state.exec(launcher)
 
 
 if __name__ == "__main__":
