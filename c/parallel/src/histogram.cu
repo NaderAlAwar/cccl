@@ -11,12 +11,13 @@
 #include <cub/detail/launcher/cuda_driver.cuh>
 #include <cub/device/device_histogram.cuh>
 
-#include <cuda/std/__algorithm_>
+#include <cuda/std/__algorithm/max.h>
 
+#include <array>
 #include <format>
+#include <tuple>
 
 #include "cccl/c/types.h"
-#include "cub/util_type.cuh"
 #include "kernels/iterators.h"
 #include "util/context.h"
 #include "util/indirect_arg.h"
@@ -28,10 +29,95 @@
 // instantiate the kernels below with int32 or int64, but we set this to int64
 // here because it's needed for host computation as well.
 using OffsetT = int64_t;
-// Largest type we support for now. Tricky to make this an indirect_arg_t since
-// we are passing in cuda::std::arrays holding the values of the levels which
-// are used to do host computation.
-using LevelT = double;
+
+template <int NumChannels, int NumActiveChannels, typename LevelT, typename SampleT>
+CUresult cccl_device_histogram_even_impl(
+  cccl_device_histogram_build_result_t build,
+  void* d_temp_storage,
+  size_t* temp_storage_bytes,
+  cccl_iterator_t d_samples,
+  cccl_iterator_t d_output_histograms,
+  cccl_value_t num_output_levels,
+  cccl_value_t lower_level,
+  cccl_value_t upper_level,
+  int64_t num_row_pixels,
+  int64_t num_rows,
+  int64_t row_stride_samples,
+  CUstream stream);
+
+namespace histogram_dispatch
+{
+template <int NumChannels, int NumActiveChannels>
+class HistogramDispatchTable
+{
+private:
+  static constexpr size_t num_types = 12; // 0-11 to match enum values
+  using FuncType                    = CUresult (*)(
+    cccl_device_histogram_build_result_t,
+    void*,
+    size_t*,
+    cccl_iterator_t,
+    cccl_iterator_t,
+    cccl_value_t,
+    cccl_value_t,
+    cccl_value_t,
+    int64_t,
+    int64_t,
+    int64_t,
+    CUstream);
+
+  // 2D array: [LevelT][SampleT]
+  std::array<std::array<FuncType, num_types>, num_types> function_table{};
+
+  // Types arranged to match cccl_type_enum indices (0-11)
+  // Index 10 (CCCL_STORAGE) is unsupported, so we use int8_t as a placeholder
+  using AllSupportedTypes =
+    std::tuple<int8_t, int16_t, int32_t, int64_t, uint8_t, uint16_t, uint32_t, uint64_t, float, double, int8_t, bool>;
+
+  constexpr bool is_supported_type(cccl_type_enum type) const
+  {
+    return type != CCCL_STORAGE && type <= CCCL_BOOLEAN;
+  }
+
+  template <size_t LevelIdx, size_t SampleIdx>
+  constexpr void fill_entry()
+  {
+    if constexpr (LevelIdx == 10 || SampleIdx == 10)
+    {
+      return;
+    }
+
+    using LevelT  = std::tuple_element_t<LevelIdx, AllSupportedTypes>;
+    using SampleT = std::tuple_element_t<SampleIdx, AllSupportedTypes>;
+
+    function_table[LevelIdx][SampleIdx] =
+      cccl_device_histogram_even_impl<NumChannels, NumActiveChannels, LevelT, SampleT>;
+  }
+
+  template <size_t... Indices>
+  constexpr void fill_table(std::index_sequence<Indices...>)
+  {
+    (fill_entry<Indices / num_types, Indices % num_types>(), ...);
+  }
+
+public:
+  constexpr HistogramDispatchTable()
+  {
+    fill_table(std::make_index_sequence<num_types * num_types>{});
+  }
+
+  constexpr FuncType get_function(cccl_type_enum level_type, cccl_type_enum sample_type) const
+  {
+    // Check for unsupported types
+    if (!is_supported_type(level_type) || !is_supported_type(sample_type))
+    {
+      return nullptr;
+    }
+
+    return function_table[level_type][sample_type];
+  }
+};
+} // namespace histogram_dispatch
 
 struct samples_iterator_t;
 
@@ -315,8 +401,7 @@ struct {5} {{
   return error;
 }
 
-template <typename is_byte_sample>
-CUresult cccl_device_histogram_even_impl(
+CUresult cccl_device_histogram_even(
   cccl_device_histogram_build_result_t build,
   void* d_temp_storage,
   size_t* temp_storage_bytes,
@@ -338,62 +423,54 @@ CUresult cccl_device_histogram_even_impl(
     return CUDA_ERROR_UNKNOWN;
   }
 
+  if (d_samples.value_type.type == CCCL_STORAGE || lower_level.type.type == CCCL_STORAGE)
+  {
+    fflush(stderr);
+    printf("\nERROR in cccl_device_histogram_even(): histogram does not support storage types\n ");
+    fflush(stdout);
+    return CUDA_ERROR_UNKNOWN;
+  }
+
+  if (lower_level.type.type != upper_level.type.type)
+  {
+    fflush(stderr);
+    printf("\nERROR in cccl_device_histogram_even(): lower_level and upper_level must have the same type\n ");
+    fflush(stdout);
+    return CUDA_ERROR_UNKNOWN;
+  }
+
   CUresult error = CUDA_SUCCESS;
   bool pushed    = false;
   try
   {
     pushed = try_push_context();
 
-    CUdevice cu_device;
-    check(cuCtxGetDevice(&cu_device));
+    constexpr int num_channels        = 1;
+    constexpr int num_active_channels = 1;
 
-    constexpr int NUM_CHANNELS        = 1;
-    constexpr int NUM_ACTIVE_CHANNELS = 1;
+    static constexpr histogram_dispatch::HistogramDispatchTable<num_channels, num_active_channels> dispatch_table{};
 
-    ::cuda::std::array<indirect_arg_t*, NUM_ACTIVE_CHANNELS> d_output_histogram_arr{
-      static_cast<indirect_arg_t*>(d_output_histograms.state)};
-    ::cuda::std::array<int, NUM_ACTIVE_CHANNELS> num_output_levels_arr{*static_cast<int*>(num_output_levels.state)};
-    ::cuda::std::array<LevelT, NUM_ACTIVE_CHANNELS> lower_level_arr{*static_cast<LevelT*>(lower_level.state)};
-    ::cuda::std::array<LevelT, NUM_ACTIVE_CHANNELS> upper_level_arr{*static_cast<LevelT*>(upper_level.state)};
-
-    auto exec_status = cub::DispatchHistogram<
-      NUM_CHANNELS,
-      NUM_ACTIVE_CHANNELS,
-      indirect_arg_t, // SampleIteratorT
-      indirect_arg_t, // CounterT
-      LevelT, // not indirect_arg_t because used on the host
-      OffsetT, // OffsetT
-      histogram::dynamic_histogram_policy_t<&histogram::get_policy>,
-      histogram::histogram_kernel_source,
-      cub::detail::CudaDriverLauncherFactory,
-      indirect_arg_t,
-      cub::detail::histogram::Transforms<LevelT, // LevelT
-                                         OffsetT, // OffsetT
-                                         LevelT // SampleT
-                                         >>::
-      DispatchEven(
-        d_temp_storage,
-        *temp_storage_bytes,
-        d_samples,
-        d_output_histogram_arr,
-        num_output_levels_arr,
-        lower_level_arr,
-        upper_level_arr,
-        num_row_pixels,
-        num_rows,
-        row_stride_samples,
-        stream,
-        is_byte_sample{},
-        {build},
-        cub::detail::CudaDriverLauncherFactory{cu_device, build.cc},
-        {d_samples.value_type, build.num_active_channels});
-
-    error = static_cast<CUresult>(exec_status);
+    // This will return cccl_device_histogram_even_impl instantiated for the given level and sample types
+    auto dispatch = dispatch_table.get_function(lower_level.type.type, d_samples.value_type.type);
+    assert(dispatch != nullptr);
+    error = dispatch(
+      build,
+      d_temp_storage,
+      temp_storage_bytes,
+      d_samples,
+      d_output_histograms,
+      num_output_levels,
+      lower_level,
+      upper_level,
+      num_row_pixels,
+      num_rows,
+      row_stride_samples,
+      stream);
   }
   catch (const std::exception& exc)
   {
     fflush(stderr);
-    printf("\nEXCEPTION in cccl_device_radix_sort(): %s\n", exc.what());
+    printf("\nEXCEPTION in cccl_device_histogram_even_impl(): %s\n", exc.what());
     fflush(stdout);
     error = CUDA_ERROR_UNKNOWN;
   }
@@ -407,7 +484,8 @@ CUresult cccl_device_histogram_even_impl(
   return error;
 }
 
-CUresult cccl_device_histogram_even(
+template <int NumChannels, int NumActiveChannels, typename LevelT, typename SampleT>
+CUresult cccl_device_histogram_even_impl(
   cccl_device_histogram_build_result_t build,
   void* d_temp_storage,
   size_t* temp_storage_bytes,
@@ -421,22 +499,47 @@ CUresult cccl_device_histogram_even(
   int64_t row_stride_samples,
   CUstream stream)
 {
-  auto histogram_impl = d_samples.value_type.size == 1 ? cccl_device_histogram_even_impl<::cuda::std::true_type>
-                                                       : cccl_device_histogram_even_impl<::cuda::std::false_type>;
+  CUdevice cu_device;
+  check(cuCtxGetDevice(&cu_device));
 
-  return histogram_impl(
-    build,
-    d_temp_storage,
-    temp_storage_bytes,
-    d_samples,
-    d_output_histograms,
-    num_output_levels,
-    lower_level,
-    upper_level,
-    num_row_pixels,
-    num_rows,
-    row_stride_samples,
-    stream);
+  ::cuda::std::array<indirect_arg_t*, NumActiveChannels> d_output_histogram_arr{
+    static_cast<indirect_arg_t*>(d_output_histograms.state)};
+  ::cuda::std::array<int, NumActiveChannels> num_output_levels_arr{*static_cast<int*>(num_output_levels.state)};
+  ::cuda::std::array<LevelT, NumActiveChannels> lower_level_arr{*static_cast<LevelT*>(lower_level.state)};
+  ::cuda::std::array<LevelT, NumActiveChannels> upper_level_arr{*static_cast<LevelT*>(upper_level.state)};
+
+  auto exec_status = cub::DispatchHistogram<
+    NumChannels,
+    NumActiveChannels,
+    indirect_arg_t, // SampleIteratorT
+    indirect_arg_t, // CounterT
+    LevelT,
+    OffsetT,
+    histogram::dynamic_histogram_policy_t<&histogram::get_policy>,
+    histogram::histogram_kernel_source,
+    cub::detail::CudaDriverLauncherFactory,
+    SampleT,
+    cub::detail::histogram::Transforms<LevelT, OffsetT, SampleT>>::
+    DispatchEven(
+      d_temp_storage,
+      *temp_storage_bytes,
+      d_samples,
+      d_output_histogram_arr,
+      num_output_levels_arr,
+      lower_level_arr,
+      upper_level_arr,
+      num_row_pixels,
+      num_rows,
+      row_stride_samples,
+      stream,
+      std::conditional_t < sizeof(SampleT) == 1,
+      ::cuda::std::true_type,
+      ::cuda::std::false_type > {},
+      {build},
+      cub::detail::CudaDriverLauncherFactory{cu_device, build.cc},
+      {d_samples.value_type, build.num_active_channels});
+
+  return static_cast<CUresult>(exec_status);
 }
 
 CUresult cccl_device_histogram_cleanup(cccl_device_histogram_build_result_t* build_ptr)
