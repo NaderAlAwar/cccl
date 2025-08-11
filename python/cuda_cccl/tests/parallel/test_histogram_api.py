@@ -17,8 +17,8 @@ def test_histogram_even():
     d_samples = cp.asarray(h_samples)
     num_levels = 7
     d_histogram = cp.empty(num_levels - 1, dtype="int32")
-    lower_level = np.float64(0)
-    upper_level = np.float64(12)
+    lower_level = np.float32(0)
+    upper_level = np.float32(12)
 
     # Run histogram with automatic temp storage allocation
     parallel.histogram_even(

@@ -85,15 +85,17 @@ def compute_reference_histogram(h_samples, num_levels, lower_level, upper_level)
 @pytest.mark.parametrize("dtype,num_samples", dtype_size_pairs)
 def test_device_histogram_basic_use(dtype, num_samples):
     if dtype in [np.uint8, np.int8]:
-        max_level = 126.0
+        max_level = 126
         max_level_count = 127
     else:
-        max_level = 1024.0
+        max_level = 1024
         max_level_count = 1025
 
     num_levels = max_level_count
-    lower_level = np.float64(0.0)
-    upper_level = np.float64(max_level)
+
+    level_dtype = dtype if np.issubdtype(dtype, np.floating) else np.int32
+    lower_level = level_dtype(0.0)
+    upper_level = level_dtype(max_level)
 
     h_samples = random_int_array(num_samples, dtype)
     d_samples = cp.asarray(h_samples)
@@ -131,8 +133,8 @@ def test_device_histogram_sample_iterator():
     d_histogram = cp.zeros(num_levels - 1, dtype=np.int32)
 
     # Set up levels so that values 0 to adjusted_total_samples-1 are evenly distributed
-    lower_level = np.float64(0.0)
-    upper_level = np.float64(adjusted_total_samples)
+    lower_level = np.int32(0)
+    upper_level = np.int32(adjusted_total_samples)
 
     parallel.histogram_even(
         counting_it,
@@ -155,8 +157,8 @@ def test_device_histogram_single_sample():
     d_samples = cp.asarray(h_samples)
 
     num_levels = 5
-    lower_level = np.float64(0.0)
-    upper_level = np.float64(10.0)
+    lower_level = np.float32(0.0)
+    upper_level = np.float32(10.0)
 
     d_histogram = cp.zeros(num_levels - 1, dtype=np.int32)
 
@@ -176,8 +178,8 @@ def test_device_histogram_out_of_range():
     d_samples = cp.asarray(h_samples)
 
     num_levels = 3  # 2 bins: [0,5), [5,10)
-    lower_level = np.float64(0.0)
-    upper_level = np.float64(10.0)
+    lower_level = np.float32(0.0)
+    upper_level = np.float32(10.0)
 
     d_histogram = cp.zeros(num_levels - 1, dtype=np.int32)
 
@@ -205,8 +207,8 @@ def test_device_histogram_with_stream(cuda_stream):
     d_samples = cp.asarray(h_samples)
 
     num_levels = 5  # 4 bins: [0,2), [2,4), [4,6), [6,8)
-    lower_level = np.float64(0.0)
-    upper_level = np.float64(8.0)
+    lower_level = np.float32(0.0)
+    upper_level = np.float32(8.0)
 
     d_histogram = cp.zeros(num_levels - 1, dtype=np.int32)
 
@@ -240,8 +242,8 @@ def test_device_histogram_with_constant_iterator():
 
     num_samples = 10
     num_levels = 5  # 4 bins: [0,2), [2,4), [4,6), [6,8)
-    lower_level = np.float64(0.0)
-    upper_level = np.float64(8.0)
+    lower_level = np.float32(0.0)
+    upper_level = np.float32(8.0)
 
     d_histogram = cp.zeros(num_levels - 1, dtype=np.int32)
 

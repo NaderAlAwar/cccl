@@ -24,8 +24,8 @@ def basic_histogram_example():
     # Configure histogram with 6 bins from 0 to 12
     num_levels = 7  # 6 bins = 7 levels
     h_num_output_levels = np.array([num_levels], dtype="int32")
-    h_lower_level = np.array([0.0], dtype="float64")
-    h_upper_level = np.array([12.0], dtype="float64")
+    h_lower_level = np.float32(0.0)
+    h_upper_level = np.float32(12.0)
 
     d_histogram = cp.zeros(num_levels - 1, dtype="int32")
 
@@ -70,8 +70,8 @@ def image_histogram_example():
     # Create 16 bins for grayscale values
     num_levels = 17  # 16 bins = 17 levels
     h_num_output_levels = np.array([num_levels], dtype="int32")
-    h_lower_level = np.array([0.0], dtype="float64")
-    h_upper_level = np.array([256.0], dtype="float64")
+    h_lower_level = np.float32(0.0)
+    h_upper_level = np.float32(256.0)
 
     d_histogram = cp.zeros(num_levels - 1, dtype="int32")
 
@@ -114,8 +114,8 @@ def integer_data_histogram_example():
     # Create 10 bins from 0 to 10
     num_levels = 11  # 10 bins = 11 levels
     h_num_output_levels = np.array([num_levels], dtype="int32")
-    h_lower_level = np.array([0.0], dtype="float64")
-    h_upper_level = np.array([10.0], dtype="float64")
+    h_lower_level = np.float32(0.0)
+    h_upper_level = np.float32(10.0)
 
     d_histogram = cp.zeros(num_levels - 1, dtype="int32")
 
