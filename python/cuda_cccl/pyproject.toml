@@ -75,6 +75,7 @@ module = [
   "cuda.cccl.headers.*",
   "cuda.bindings",
   "cuda.core.*",
+  "torch",
 ]
 ignore_missing_imports = true
 follow_imports = "skip"

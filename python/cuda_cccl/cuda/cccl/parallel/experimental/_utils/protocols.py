@@ -10,23 +10,43 @@ Utilities for extracting information from protocols such as `__cuda_array_interf
 from typing import List, Optional, Tuple
 
 import numpy as np
+import torch
 
 from ..typing import DeviceArrayLike
 
+# PyTorch to NumPy dtype mapping for torch.compile compatibility
+_TORCH_TO_NUMPY_DTYPE_MAP = {
+    torch.float32: np.float32,
+    torch.float64: np.float64,
+    torch.int32: np.int32,
+    torch.int64: np.int64,
+    torch.bool: np.bool_,
+    torch.uint8: np.uint8,
+    torch.int8: np.int8,
+    torch.int16: np.int16,
+    torch.float16: np.float16,
+}
 
-def get_data_pointer(arr: DeviceArrayLike) -> int:
+
+def get_data_pointer(arr) -> int:
     try:
-        # TODO: this is a fast path for CuPy until
-        # we have a more general solution.
-        return arr.data.ptr  # type: ignore
+        # Fast path for PyTorch tensors (torch.compile compatible)
+        return arr.data_ptr()  # type: ignore
     except AttributeError:
-        return arr.__cuda_array_interface__["data"][0]
+        try:
+            # Fast path for CuPy arrays
+            return arr.data.ptr  # type: ignore
+        except AttributeError:
+            return arr.__cuda_array_interface__["data"][0]
 
 
-def get_dtype(arr: DeviceArrayLike) -> np.dtype:
+def get_dtype(arr) -> np.dtype:
     try:
-        # TODO: this is a fast path for CuPy until
-        # we have a more general solution.
+        # Fast path for PyTorch tensors (torch.compile compatible)
+        if arr.dtype in _TORCH_TO_NUMPY_DTYPE_MAP:
+            return np.dtype(_TORCH_TO_NUMPY_DTYPE_MAP[arr.dtype])
+
+        # Fast path for CuPy and other arrays
         return np.dtype(arr.dtype)  # type: ignore
     except Exception:
         cai = arr.__cuda_array_interface__
