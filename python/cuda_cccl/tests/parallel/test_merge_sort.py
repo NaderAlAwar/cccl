@@ -21,6 +21,7 @@ DTYPE_LIST = [
     np.int16,
     np.int32,
     np.int64,
+    np.float16,
     np.float32,
     np.float64,
 ]
@@ -33,7 +34,10 @@ def random_array(size, dtype, max_value=None) -> np.typing.NDArray:
             max_value = np.iinfo(dtype).max
         return rng.integers(max_value, size=size, dtype=dtype)
     elif np.isdtype(dtype, "real floating"):
-        return rng.random(size=size, dtype=dtype)
+        if dtype == np.float16:  # Cannot generate float16 directly
+            return rng.random(size=size, dtype=np.float32).astype(dtype)
+        else:
+            return rng.random(size=size, dtype=dtype)
     else:
         raise ValueError(f"Unsupported dtype {dtype}")
 
@@ -69,7 +73,12 @@ def test_merge_sort_keys(dtype, num_items):
 
     d_in_keys = numba.cuda.to_device(h_in_keys)
 
-    merge_sort_device(d_in_keys, None, d_in_keys, None, compare_op, num_items)
+    if dtype == np.float16:
+        operator = parallel.OpKind.LESS
+    else:
+        operator = compare_op
+
+    merge_sort_device(d_in_keys, None, d_in_keys, None, operator, num_items)
 
     h_out_keys = d_in_keys.copy_to_host()
     h_in_keys.sort()
@@ -85,9 +94,12 @@ def test_merge_sort_pairs(dtype, num_items):
     d_in_keys = numba.cuda.to_device(h_in_keys)
     d_in_items = numba.cuda.to_device(h_in_items)
 
-    merge_sort_device(
-        d_in_keys, d_in_items, d_in_keys, d_in_items, compare_op, num_items
-    )
+    if dtype == np.float16:
+        operator = parallel.OpKind.LESS
+    else:
+        operator = compare_op
+
+    merge_sort_device(d_in_keys, d_in_items, d_in_keys, d_in_items, operator, num_items)
 
     h_out_keys = d_in_keys.copy_to_host()
     h_out_items = d_in_items.copy_to_host()
@@ -108,7 +120,12 @@ def test_merge_sort_keys_copy(dtype, num_items):
     d_in_keys = numba.cuda.to_device(h_in_keys)
     d_out_keys = numba.cuda.to_device(h_out_keys)
 
-    merge_sort_device(d_in_keys, None, d_out_keys, None, compare_op, num_items)
+    if dtype == np.float16:
+        operator = parallel.OpKind.LESS
+    else:
+        operator = compare_op
+
+    merge_sort_device(d_in_keys, None, d_out_keys, None, operator, num_items)
 
     h_out_keys = d_out_keys.copy_to_host()
     h_in_keys.sort()
@@ -128,8 +145,13 @@ def test_merge_sort_pairs_copy(dtype, num_items):
     d_out_keys = numba.cuda.to_device(h_out_keys)
     d_out_items = numba.cuda.to_device(h_out_items)
 
+    if dtype == np.float16:
+        operator = parallel.OpKind.LESS
+    else:
+        operator = compare_op
+
     merge_sort_device(
-        d_in_keys, d_in_items, d_out_keys, d_out_items, compare_op, num_items
+        d_in_keys, d_in_items, d_out_keys, d_out_items, operator, num_items
     )
 
     h_out_keys = d_out_keys.copy_to_host()
@@ -224,7 +246,12 @@ def test_merge_sort_keys_copy_iterator_input(dtype, num_items):
 
     i_input = parallel.CacheModifiedInputIterator(d_in_keys, modifier="stream")
 
-    merge_sort_device(i_input, None, d_out_keys, None, compare_op, num_items)
+    if dtype == np.float16:
+        operator = parallel.OpKind.LESS
+    else:
+        operator = compare_op
+
+    merge_sort_device(i_input, None, d_out_keys, None, operator, num_items)
 
     h_in_keys.sort()
     h_out_keys = d_out_keys.copy_to_host()
@@ -247,8 +274,13 @@ def test_merge_sort_pairs_copy_iterator_input(dtype, num_items):
     i_input_keys = parallel.CacheModifiedInputIterator(d_in_keys, modifier="stream")
     i_input_items = parallel.CacheModifiedInputIterator(d_in_items, modifier="stream")
 
+    if dtype == np.float16:
+        operator = parallel.OpKind.LESS
+    else:
+        operator = compare_op
+
     merge_sort_device(
-        i_input_keys, i_input_items, d_out_keys, d_out_items, compare_op, num_items
+        i_input_keys, i_input_items, d_out_keys, d_out_items, operator, num_items
     )
 
     h_out_keys = d_out_keys.copy_to_host()
@@ -279,3 +311,66 @@ def test_merge_sort_with_stream(cuda_stream):
     h_in_keys.sort()
 
     np.testing.assert_array_equal(got, h_in_keys)
+
+
+def test_merge_sort_well_known_less():
+    """Test merge sort with well-known LESS operation."""
+    dtype = np.int32
+
+    # Create input keys
+    d_in_keys = cp.array([5, 2, 8, 1, 9, 3], dtype=dtype)
+    d_out_keys = cp.empty_like(d_in_keys)
+
+    # Run merge sort with well-known LESS operation
+    parallel.merge_sort(
+        d_in_keys, None, d_out_keys, None, parallel.OpKind.LESS, len(d_in_keys)
+    )
+
+    # Check the result is correct
+    expected = np.array([1, 2, 3, 5, 8, 9])
+    np.testing.assert_equal(d_out_keys.get(), expected)
+
+
+def test_merge_sort_well_known_greater():
+    """Test merge sort with well-known GREATER operation (descending)."""
+    dtype = np.int32
+
+    # Create input keys
+    d_in_keys = cp.array([5, 2, 8, 1, 9, 3], dtype=dtype)
+    d_out_keys = cp.empty_like(d_in_keys)
+
+    # Run merge sort with well-known GREATER operation
+    parallel.merge_sort(
+        d_in_keys, None, d_out_keys, None, parallel.OpKind.GREATER, len(d_in_keys)
+    )
+
+    # Check the result is correct (descending order)
+    expected = np.array([9, 8, 5, 3, 2, 1])
+    np.testing.assert_equal(d_out_keys.get(), expected)
+
+
+def test_merge_sort_with_values_well_known():
+    """Test merge sort with values using well-known operations."""
+    dtype = np.int32
+
+    # Create input keys and values
+    d_in_keys = cp.array([3, 1, 4, 2], dtype=dtype)
+    d_in_values = cp.array([30, 10, 40, 20], dtype=dtype)
+    d_out_keys = cp.empty_like(d_in_keys)
+    d_out_values = cp.empty_like(d_in_values)
+
+    # Run merge sort with well-known LESS operation
+    parallel.merge_sort(
+        d_in_keys,
+        d_in_values,
+        d_out_keys,
+        d_out_values,
+        parallel.OpKind.LESS,
+        len(d_in_keys),
+    )
+
+    # Check both keys and values are sorted correctly
+    expected_keys = np.array([1, 2, 3, 4])
+    expected_values = np.array([10, 20, 30, 40])
+    np.testing.assert_equal(d_out_keys.get(), expected_keys)
+    np.testing.assert_equal(d_out_values.get(), expected_values)
