@@ -103,6 +103,12 @@ typedef struct cccl_op_t
   size_t size;
   size_t alignment;
   void* state;
+  // Optional additional code blobs (e.g., supplementary LTO-IR objects)
+  // Defaults: extra_code == NULL, extra_code_sizes == NULL, num_extra_code == 0
+  // Existing code that doesn't populate these remains valid.
+  const char** extra_code;
+  size_t* extra_code_sizes;
+  size_t num_extra_code;
 } cccl_op_t;
 
 typedef struct cccl_build_config

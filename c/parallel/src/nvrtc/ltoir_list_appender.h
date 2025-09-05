@@ -34,14 +34,29 @@ struct nvrtc_linkable_list_appender
   // New method that handles both types
   void append_operation(cccl_op_t op)
   {
+    // Append the primary code blob, honoring its type
     if (op.code_type == CCCL_OP_LTOIR)
     {
-      // LTO-IR goes directly to the link list
       append(nvrtc_linkable{nvrtc_ltoir{op.code, op.code_size}});
     }
     else
     {
       append(nvrtc_linkable{nvrtc_code{op.code, op.code_size}});
+    }
+
+    // Append any extra code blobs as LTO-IR units
+    if (op.num_extra_code && op.extra_code && op.extra_code_sizes)
+    {
+      for (size_t i = 0; i < op.num_extra_code; ++i)
+      {
+        const char* blob = op.extra_code[i];
+        size_t blob_size = op.extra_code_sizes[i];
+        if (blob && blob_size)
+        {
+          printf("Appending extra code blob %p with size %zu\n", blob, blob_size);
+          append(nvrtc_linkable{nvrtc_ltoir{blob, blob_size}});
+        }
+      }
     }
   }
 

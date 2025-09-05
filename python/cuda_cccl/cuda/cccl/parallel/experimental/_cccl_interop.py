@@ -276,14 +276,27 @@ def to_cccl_op(op: Callable | OpKind, sig: Signature | None) -> Op:
     # op is a callable:
     wrapped_op, wrapper_sig = _create_void_ptr_wrapper(op, sig)
 
-    ltoir, _ = cuda.compile(wrapped_op, sig=wrapper_sig, output="ltoir")
-    return Op(
-        operator_type=OpKind.STATELESS,
-        name=wrapped_op.__name__,
-        ltoir=ltoir,
-        state_alignment=1,
-        state=None,
-    )
+    if os.getenv("NUMBA_CUDA_FLOAT16_FIX"):
+        ltoir, extra_ltoirs = cuda.compile_all(
+            wrapped_op, sig=wrapper_sig, output="ltoir"
+        )
+        return Op(
+            operator_type=OpKind.STATELESS,
+            name=wrapped_op.__name__,
+            ltoir=ltoir,
+            state_alignment=1,
+            state=None,
+            extra_ltoirs=extra_ltoirs,
+        )
+    else:
+        ltoir, _ = cuda.compile(wrapped_op, sig=wrapper_sig, output="ltoir")
+        return Op(
+            operator_type=OpKind.STATELESS,
+            name=wrapped_op.__name__,
+            ltoir=ltoir,
+            state_alignment=1,
+            state=None,
+        )
 
 
 def get_value_type(d_in: IteratorBase | DeviceArrayLike):

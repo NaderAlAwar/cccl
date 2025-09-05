@@ -20,6 +20,7 @@ from cpython.pycapsule cimport (
 
 import ctypes
 from enum import IntEnum
+from cpython.mem cimport PyMem_Malloc, PyMem_Free
 cdef extern from "<cuda.h>":
     cdef struct OpaqueCUstream_st
     cdef struct OpaqueCUkernel_st
@@ -95,6 +96,9 @@ cdef extern from "cccl/c/types.h":
         size_t size
         size_t alignment
         void *state
+        const char** extra_code
+        size_t* extra_code_sizes
+        size_t num_extra_code
 
     cdef struct cccl_value_t:
         cccl_type_info type
@@ -177,9 +181,13 @@ cdef class Op:
     cdef bytes code_bytes
     cdef bytes state_bytes
     cdef cccl_op_t op_data
+    cdef list extra_code_bytes_list
 
 
-    cdef void _set_members(self, cccl_op_kind_t op_type, str name, bytes lto_ir, bytes state, int state_alignment):
+    cdef void _set_members(self, cccl_op_kind_t op_type, str name, bytes lto_ir, bytes state, int state_alignment, list[bytes] extra_lto_ir, list[int] extra_lto_ir_sizes):
+        cdef Py_ssize_t n = 0
+        cdef Py_ssize_t i = 0
+        cdef bytes b
         memset(&self.op_data, 0, sizeof(cccl_op_t))
         # Reference Python objects in the class to ensure lifetime
         self.op_encoded_name = name.encode("utf-8")
@@ -194,9 +202,12 @@ cdef class Op:
         self.op_data.size = len(state)
         self.op_data.alignment = state_alignment
         self.op_data.state = <void *><const char *>state
+        # Populate extra code arrays (copy to decouple from caller mutations)
+        self.extra_code_bytes_list = list(extra_lto_ir) if extra_lto_ir is not None else []
+        self._prepare_extra_code()
 
 
-    def __cinit__(self, /, *, name = None, operator_type = None, ltoir = None, state = None, state_alignment = 1):
+    def __cinit__(self, /, *, name = None, operator_type = None, ltoir = None, state = None, state_alignment = 1, extra_ltoirs = None):
         if name is None and ltoir is None:
             name = ""
             ltoir = b""
@@ -208,6 +219,12 @@ cdef class Op:
         arg_type_check(arg_name="ltoir", expected_type=bytes, arg=ltoir)
         arg_type_check(arg_name="state", expected_type=bytes, arg=state)
         arg_type_check(arg_name="state_alignment", expected_type=int, arg=state_alignment)
+        if extra_ltoirs is not None and not isinstance(extra_ltoirs, list):
+            raise TypeError("extra_ltoirs must be a list of bytes or None")
+        if extra_ltoirs is not None:
+            for _b in extra_ltoirs:
+                if not isinstance(_b, bytes):
+                    raise TypeError("extra_ltoirs must be a list of bytes")
         if not isinstance(operator_type, OpKind):
             raise TypeError(
                 f"The operator_type argument should be an enumerator of operator kinds"
@@ -218,8 +235,51 @@ cdef class Op:
             <str> name,
             <bytes> ltoir,
             <bytes> state,
-            <int> state_alignment
+            <int> state_alignment,
+            <list> (extra_ltoirs if extra_ltoirs is not None else []),
+            <list> []
         )
+
+
+    def _prepare_extra_code(self):
+        cdef Py_ssize_t n = 0
+        cdef Py_ssize_t i = 0
+        cdef bytes b
+        cdef const char** extra_code_ptrs = NULL
+        cdef size_t* extra_code_sizes_ptr = NULL
+        if self.extra_code_bytes_list:
+            n = len(self.extra_code_bytes_list)
+            if n > 0:
+                extra_code_ptrs = <const char**> PyMem_Malloc(n * sizeof(const char*))
+                extra_code_sizes_ptr = <size_t*> PyMem_Malloc(n * sizeof(size_t))
+                if extra_code_ptrs == NULL or extra_code_sizes_ptr == NULL:
+                    raise MemoryError()
+                for i in range(n):
+                    if not isinstance(self.extra_code_bytes_list[i], bytes):
+                        raise TypeError("extra_ltoirs must be a list of bytes")
+                    b = <bytes> self.extra_code_bytes_list[i]
+                    extra_code_ptrs[i] = <const char*> b
+                    extra_code_sizes_ptr[i] = <size_t> len(b)
+                self.op_data.extra_code = extra_code_ptrs
+                self.op_data.extra_code_sizes = extra_code_sizes_ptr
+                self.op_data.num_extra_code = <size_t> n
+            else:
+                self.op_data.extra_code = NULL
+                self.op_data.extra_code_sizes = NULL
+                self.op_data.num_extra_code = 0
+        else:
+            self.op_data.extra_code = NULL
+            self.op_data.extra_code_sizes = NULL
+            self.op_data.num_extra_code = 0
+
+    def __dealloc__(self):
+        if self.op_data.extra_code != NULL:
+            PyMem_Free(<void*> self.op_data.extra_code)
+            self.op_data.extra_code = NULL
+        if self.op_data.extra_code_sizes != NULL:
+            PyMem_Free(<void*> self.op_data.extra_code_sizes)
+            self.op_data.extra_code_sizes = NULL
+        self.op_data.num_extra_code = 0
 
 
     cdef void set_state(self, bytes state):
@@ -254,6 +314,11 @@ cdef class Op:
     @property
     def state_typenum(self):
         return self.op_data.type
+
+    @property
+    def extra_ltoirs(self):
+        # Expose as immutable to prevent external mutation
+        return tuple(self.extra_code_bytes_list)
 
     def as_bytes(self):
         "Debugging utility to view memory content of library struct"
