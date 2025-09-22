@@ -303,9 +303,11 @@ def to_cccl_op(op: Callable | OpKind, sig: Signature | None) -> Op:
     wrapped_op, wrapper_sig = _create_void_ptr_wrapper(op, sig)
 
     if os.getenv("NUMBA_CUDA_FLOAT16_FIX"):
-        ltoir, extra_ltoirs = cuda.compile_all(
-            wrapped_op, sig=wrapper_sig, output="ltoir"
+        ltoirs, _ = cuda.compile_all(
+            wrapped_op, sig=wrapper_sig, output="ltoir", device=True, abi="c"
         )
+        ltoir = ltoirs[0]
+        extra_ltoirs = [ir.code for ir in ltoirs[1:]]
         return Op(
             operator_type=OpKind.STATELESS,
             name=wrapped_op.__name__,
