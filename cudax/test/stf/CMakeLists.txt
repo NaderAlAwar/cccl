@@ -1,9 +1,12 @@
 set(stf_test_sources
   allocators/buddy_allocator.cu
+  context/context_resource_test.cu
+  context/simple_context_resource_test.cu
   cpp/concurrency_test.cu
   cpp/redundant_data.cu
   cpp/redundant_data_different_modes.cu
   cpp/scoped_graph_task.cu
+  cpp/task_get_stream.cu
   cpp/user_streams.cu
   dot/basic.cu
   dot/graph_print_to_dot.cu
@@ -104,6 +107,7 @@ set(stf_test_codegen_sources
   graph/freeze_nested_graphs.cu
   graph/freeze_while_graphs.cu
   # graph/graph_composition.cu
+  graph/graph_multiple_launch_resources.cu
   graph/graph_tmp_data.cu
   graph/many.cu
   graph/multiple_graph_ctx.cu

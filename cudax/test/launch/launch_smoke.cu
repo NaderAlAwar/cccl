@@ -61,6 +61,11 @@ struct functor_taking_config
   }
 };
 
+__global__ void kernel_no_arguments()
+{
+  kernel_run_proof = true;
+}
+
 __global__ void kernel_int_argument(int dummy)
 {
   kernel_run_proof = true;
@@ -167,6 +172,9 @@ void launch_smoke_test(StreamOrPathBuilder& dst)
 
     // Not taking dims
     {
+      cudax::launch(dst, config, kernel_no_arguments);
+      check_kernel_run(dst);
+
       const int dummy = 1;
       cudax::launch(dst, config, kernel_int_argument, dummy);
       check_kernel_run(dst);
@@ -307,9 +315,9 @@ C2H_TEST("Launch smoke path builder", "[launch]")
 
   // In CUDA 12.0 we don't test kernel_ref launches, so the node count is lower
 #if _CCCL_CTK_BELOW(12, 1)
-  CUDAX_REQUIRE(g.node_count() == 46);
+  CUDAX_REQUIRE(g.node_count() == 48);
 #else // ^^^ _CCCL_CTK_BELOW(12, 1) ^^^ / vvv _CCCL_CTK_AT_LEAST(12, 1) vvv
-  CUDAX_REQUIRE(g.node_count() == 62);
+  CUDAX_REQUIRE(g.node_count() == 64);
 #endif // _CCCL_CTK_BELOW(12, 1)
 
   auto exec = g.instantiate();
@@ -436,6 +444,40 @@ struct lambda_wrapper
   }
 };
 
+struct MoveOnlyArg
+{
+  static MoveOnlyArg make()
+  {
+    return MoveOnlyArg{};
+  }
+
+  MoveOnlyArg(const MoveOnlyArg& other)      = delete;
+  MoveOnlyArg(MoveOnlyArg&&)                 = default;
+  MoveOnlyArg& operator=(const MoveOnlyArg&) = delete;
+  MoveOnlyArg& operator=(MoveOnlyArg&&)      = delete;
+
+private:
+  MoveOnlyArg() = default;
+};
+
+struct MoveOnlyCallable
+{
+  static MoveOnlyCallable make()
+  {
+    return MoveOnlyCallable{};
+  }
+
+  MoveOnlyCallable(const MoveOnlyCallable&)            = delete;
+  MoveOnlyCallable(MoveOnlyCallable&&)                 = default;
+  MoveOnlyCallable& operator=(const MoveOnlyCallable&) = delete;
+  MoveOnlyCallable& operator=(MoveOnlyCallable&&)      = delete;
+
+  void operator()(MoveOnlyArg) {}
+
+private:
+  MoveOnlyCallable() = default;
+};
+
 C2H_TEST("Host launch", "")
 {
   cuda::atomic<int> atomic = 0;
@@ -517,5 +559,11 @@ C2H_TEST("Host launch", "")
     host_launch(stream, cuda::std::ref(another_lambda_setter));
     unblock_and_wait_stream(stream, atomic);
     CUDAX_REQUIRE(i == 84);
+  }
+
+  SECTION("Check that host_launch works with move only callables and arguments")
+  {
+    cudax::host_launch(stream, MoveOnlyCallable::make(), MoveOnlyArg::make());
+    stream.sync();
   }
 }
