@@ -154,6 +154,8 @@ void AlgorithmExecute(std::optional<BuildCache>& cache, const std::optional<KeyT
     REQUIRE(sass.find("STL") == std::string::npos);
   }
 
+  std::cout << "NO LDL or STL" << std::endl;
+
   CUstream null_stream = 0;
 
   size_t temp_storage_bytes = 0;

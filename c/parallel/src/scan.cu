@@ -130,19 +130,38 @@ std::string get_scan_kernel_name(
   std::string scan_op_t;
   check(nvrtcGetTypeName<op_wrapper>(&scan_op_t));
 
+  const std::string actual_input_t = std::format("const {0}", input_iterator_t);
+  const std::string actual_accum_cpp_t =
+    std::format("::cuda::std::__accumulator_t<{0}, {1}, {2}>", scan_op_t, init_t, accum_cpp_t);
+  const std::string actual_offset_t = std::format("cub::detail::choose_offset_t<{0}>", offset_t);
+  const std::string actual_init_t   = std::format("cub::detail::InputValue<{0}>", init_t);
+
   auto tile_state_t = std::format("cub::ScanTileState<{0}>", accum_cpp_t);
+  // return std::format(
+  //   "cub::detail::scan::DeviceScanKernel<{0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}>",
+  //   chained_policy_t, // 0
+  //   actual_input_t, // 1
+  //   output_iterator_t, // 2
+  //   tile_state_t, // 3
+  //   scan_op_t, // 4
+  //   init_t, // 5
+  //   actual_offset_t, // 6
+  //   actual_accum_cpp_t, // 7
+  //   force_inclusive ? "true" : "false", // 8
+  //   init_t); // 9
+
   return std::format(
-    "cub::detail::scan::DeviceScanKernel<{0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}>",
+    "cub::detail::scan::DeviceScanKernel<{0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}>",
     chained_policy_t, // 0
-    input_iterator_t, // 1
+    actual_input_t, // 1
     output_iterator_t, // 2
     tile_state_t, // 3
-    scan_op_t, // 4
-    init_t, // 5
-    offset_t, // 6
-    accum_cpp_t, // 7
-    force_inclusive ? "true" : "false", // 8
-    init_t); // 9
+    // scan_op_t, // 4
+    "::cuda::std::plus<>", // 4
+    actual_init_t, // 5
+    actual_offset_t, // 6
+    actual_accum_cpp_t, // 7
+    force_inclusive ? "true" : "false"); // 8
 }
 
 template <auto* GetPolicy>
@@ -216,10 +235,13 @@ CUresult cccl_device_scan_build_ex(
 
     const std::string op_src = make_kernel_user_binary_operator(accum_cpp, accum_cpp, accum_cpp, op);
 
+    std::cout << "op_src: " << op_src << std::endl;
+
     constexpr std::string_view src_template = R"XXX(
 #include <cub/block/block_scan.cuh>
 #include <cub/device/dispatch/kernels/scan.cuh>
 #include <cub/agent/single_pass_scan_operators.cuh>
+#include <cub/detail/choose_offset.cuh>
 struct __align__({1}) storage_t {{
   char data[{0}];
 }};
@@ -251,7 +273,9 @@ struct __align__({1}) storage_t {{
       output_it_value_t,
       accum_cpp,
       offset_t,
-      "op_wrapper");
+      "::cuda::std::plus<>");
+
+    std::cout << policy_hub_expr << std::endl;
 
     nlohmann::json runtime_policy = get_policy(
       std::format("cub::detail::scan::MakeScanPolicyWrapper({}::MaxPolicy::ActivePolicy{{}})", policy_hub_expr),
@@ -284,6 +308,8 @@ struct device_scan_policy {{
       src,
       scan_policy_str);
 
+    std::cout << scan_policy_str << std::endl;
+
 #if false // CCCL_DEBUGGING_SWITCH
     fflush(stderr);
     printf("\nCODE4NVRTC BEGIN\n%sCODE4NVRTC END\n", final_src.c_str());
@@ -292,6 +318,8 @@ struct device_scan_policy {{
 
     std::string init_kernel_name = scan::get_init_kernel_name(input_it, output_it, op, init);
     std::string scan_kernel_name = scan::get_scan_kernel_name(input_it, output_it, op, init, force_inclusive);
+
+    std::cout << "scan kernel name: " << scan_kernel_name << std::endl;
     std::string init_kernel_lowered_name;
     std::string scan_kernel_lowered_name;
 

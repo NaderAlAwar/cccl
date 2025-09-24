@@ -92,17 +92,18 @@ static void basic(nvbench::state& state, nvbench::type_list<T, OffsetT>)
   using init_t         = T;
   using wrapped_init_t = cub::detail::InputValue<init_t>;
   using accum_t        = ::cuda::std::__accumulator_t<op_t, init_t, T>;
-  using input_it_t     = const T*;
-  using output_it_t    = T*;
-  using offset_t       = cub::detail::choose_offset_t<OffsetT>;
+  // using accum_t = T;
+  using input_it_t  = const T*;
+  using output_it_t = T*;
+  using offset_t    = cub::detail::choose_offset_t<OffsetT>;
 
 #if !TUNE_BASE
   using policy_t   = policy_hub_t<accum_t>;
   using dispatch_t = cub::
-    DispatchScan<input_it_t, output_it_t, op_t, wrapped_init_t, offset_t, accum_t, cub::ForceInclusive::No, policy_t>;
+    DispatchScan<input_it_t, output_it_t, op_t, wrapped_init_t, offset_t, accum_t, cub::ForceInclusive::Yes, policy_t>;
 #else
   using dispatch_t =
-    cub::DispatchScan<input_it_t, output_it_t, op_t, wrapped_init_t, offset_t, accum_t, cub::ForceInclusive::No>;
+    cub::DispatchScan<input_it_t, output_it_t, op_t, wrapped_init_t, offset_t, accum_t, cub::ForceInclusive::Yes>;
 #endif
 
   const auto elements = static_cast<std::size_t>(state.get_int64("Elements{io}"));
@@ -137,7 +138,10 @@ static void basic(nvbench::state& state, nvbench::type_list<T, OffsetT>)
   });
 }
 
-NVBENCH_BENCH_TYPES(basic, NVBENCH_TYPE_AXES(all_types, offset_types))
+using my_types        = nvbench::type_list<uint8_t>;
+using my_offset_types = nvbench::type_list<uint64_t>;
+
+NVBENCH_BENCH_TYPES(basic, NVBENCH_TYPE_AXES(my_types, my_offset_types))
   .set_name("base")
   .set_type_axes_names({"T{ct}", "OffsetT{ct}"})
   .add_int64_power_of_two_axis("Elements{io}", nvbench::range(16, 28, 4));

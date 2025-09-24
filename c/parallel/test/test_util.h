@@ -221,6 +221,13 @@ inline std::string get_reduce_op(cccl_type_enum t)
              "  char* out = reinterpret_cast<char*>(out_void); "
              "  *out = *a + *b; "
              "}";
+    case cccl_type_enum::CCCL_UINT8:
+      return "extern \"C\" __device__ void op(void* a_void, void* b_void, void* out_void) { "
+             "  unsigned char* a = reinterpret_cast<unsigned char*>(a_void); "
+             "  unsigned char* b = reinterpret_cast<unsigned char*>(b_void); "
+             "  unsigned char* out = reinterpret_cast<unsigned char*>(out_void); "
+             "  *out = *a + *b; "
+             "}";
     case cccl_type_enum::CCCL_INT32:
       return "extern \"C\" __device__ void op(void* a_void, void* b_void, void* out_void) { "
              "  int* a = reinterpret_cast<int*>(a_void); "

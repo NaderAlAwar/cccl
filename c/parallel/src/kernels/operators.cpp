@@ -54,9 +54,10 @@ constexpr std::string_view stateless_binary_op_template = R"XXX(
 extern "C" __device__ void OP_NAME(const void* lhs, const void* rhs, void* out);
 struct op_wrapper {{
   __device__ {0} operator()(const LHS_T& lhs, const RHS_T& rhs) const {{
-    {0} ret;
-    OP_NAME(&lhs, &rhs, &ret);
-    return ret;
+    return lhs + rhs; // {0}
+    // {0} ret;
+    // OP_NAME(&lhs, &rhs, &ret);
+    // return ret;
   }}
 }};
 )XXX";

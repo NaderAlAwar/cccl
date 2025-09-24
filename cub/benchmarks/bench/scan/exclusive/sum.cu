@@ -37,5 +37,15 @@
 // %RANGE% TUNE_TRANSPOSE trp 0:1:1
 // %RANGE% TUNE_LOAD ld 0:1:1
 
-using op_t = ::cuda::std::plus<>;
+struct add_t
+{
+  template <typename Lhs, typename Rhs>
+  __host__ __device__ auto operator()(const Lhs& a, const Rhs& b) const
+  {
+    return a + b;
+  }
+};
+
+using op_t = add_t;
+// using op_t = ::cuda::std::plus<>;
 #include "base.cuh"

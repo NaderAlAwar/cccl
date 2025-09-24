@@ -284,6 +284,10 @@ struct DispatchScan
 
       // Number of input tiles
       int tile_size = policy.Scan().BlockThreads() * policy.Scan().ItemsPerThread();
+      printf("block threads: %d, items per thread: %d, tile size: %d\n",
+             policy.Scan().BlockThreads(),
+             policy.Scan().ItemsPerThread(),
+             tile_size);
       int num_tiles = static_cast<int>(::cuda::ceil_div(num_items, tile_size));
 
       auto tile_state = kernel_source.TileState();
