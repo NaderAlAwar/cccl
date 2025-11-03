@@ -1,0 +1,18 @@
+# Makefile for S5 verification tool
+# Usage: make -f Makefile.verify
+
+NVCC = nvcc
+NVCC_FLAGS = -std=c++17 -O3 -I. -Ilibnpy/include -I..
+CUDA_ARCH = -arch=sm_80
+
+TARGET = s5_verify
+
+all: $(TARGET)
+
+$(TARGET): s5_verify.cu
+	$(NVCC) $(NVCC_FLAGS) $(CUDA_ARCH) -o $(TARGET) s5_verify.cu
+
+clean:
+	rm -f $(TARGET)
+
+.PHONY: all clean
