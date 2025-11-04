@@ -42,6 +42,7 @@ struct S5Operator
 //
 // Iterator Composition Strategy:
 // --------------------------------
+// INPUT:
 //   counting_iterator
 //     -> transform to A_row_pointers (IndexToPointerFunctor)
 //   counting_iterator
@@ -49,7 +50,17 @@ struct S5Operator
 //   zip_iterator(A_pointers, Bu_pointers)
 //     -> tuple of pointers
 //   transform_iterator (LoadRowFromPointersFunctor)
-//     -> VectorPair objects
+//     -> VectorPair objects (read)
+//
+// OUTPUT (mirrors input pattern):
+//   counting_iterator
+//     -> transform to A_out_row_pointers (IndexToPointerFunctor - REUSED!)
+//   counting_iterator
+//     -> transform to Bu_out_row_pointers (IndexToPointerFunctor - REUSED!)
+//   zip_iterator(A_out_pointers, Bu_out_pointers)
+//     -> tuple of pointers
+//   transform_iterator (PointersToWriteProxyFunctor)
+//     -> VectorPairWriteProxy objects (write)
 //
 // Key Thrust/CUDA utilities used:
 // --------------------------------
@@ -60,6 +71,7 @@ struct S5Operator
 // This approach is composable and demonstrates how to use standard Thrust
 // iterators instead of writing full custom iterators from scratch.
 // We only implement minimal functor logic and let Thrust handle iterator machinery.
+// Note how IndexToPointerFunctor is reused for both input AND output!
 // ============================================================================
 
 // Helper struct to represent a vector at a specific position in the 2D tensor
@@ -120,18 +132,19 @@ struct LoadRowFromPointersFunctor
 };
 
 // Functor to convert row index to pointer (for use with transform_iterator)
-template <typename T>
+// Supports both const and non-const pointers
+template <typename PtrType>
 struct IndexToPointerFunctor
 {
-  const T* base_ptr;
+  PtrType base_ptr;
   int stride;
 
-  __host__ __device__ IndexToPointerFunctor(const T* ptr, int s)
+  __host__ __device__ IndexToPointerFunctor(PtrType ptr, int s)
       : base_ptr(ptr)
       , stride(s)
   {}
 
-  __host__ __device__ const T* operator()(int i) const
+  __host__ __device__ PtrType operator()(int i) const
   {
     return base_ptr + i * stride;
   }
@@ -156,23 +169,15 @@ struct VectorPairWriteProxy
   }
 };
 
-// Functor to convert row index to write proxy (for use with transform_iterator)
+// Functor to convert pointer tuple to write proxy (for use with transform_iterator)
+// This reuses the IndexToPointerFunctor pattern for better composability
 template <typename T, int HIDDEN_DIM>
-struct IndexToWriteProxyFunctor
+struct PointersToWriteProxyFunctor
 {
-  T* A_base;
-  T* Bu_base;
-  int stride;
-
-  __host__ __device__ IndexToWriteProxyFunctor(T* a, T* bu, int s)
-      : A_base(a)
-      , Bu_base(bu)
-      , stride(s)
-  {}
-
-  __host__ __device__ VectorPairWriteProxy<T, HIDDEN_DIM> operator()(int idx) const
+  template <typename Tuple>
+  __host__ __device__ VectorPairWriteProxy<T, HIDDEN_DIM> operator()(const Tuple& ptrs) const
   {
-    return {A_base + idx * stride, Bu_base + idx * stride};
+    return {thrust::get<0>(ptrs), thrust::get<1>(ptrs)};
   }
 };
 
@@ -226,19 +231,29 @@ static void s5_scan_benchmark(nvbench::state& state, nvbench::type_list<T>)
 
     // Pre-allocate temporary storage
     auto row_ptr_A = thrust::make_transform_iterator(
-      thrust::make_counting_iterator(0), IndexToPointerFunctor<T>(thrust::raw_pointer_cast(d_A_in.data()), state_dim));
+      thrust::make_counting_iterator(0),
+      IndexToPointerFunctor<const T*>(thrust::raw_pointer_cast(d_A_in.data()), state_dim));
 
     auto row_ptr_Bu = thrust::make_transform_iterator(
-      thrust::make_counting_iterator(0), IndexToPointerFunctor<T>(thrust::raw_pointer_cast(d_Bu_in.data()), state_dim));
+      thrust::make_counting_iterator(0),
+      IndexToPointerFunctor<const T*>(thrust::raw_pointer_cast(d_Bu_in.data()), state_dim));
 
     auto zipped_ptrs = thrust::make_zip_iterator(thrust::make_tuple(row_ptr_A, row_ptr_Bu));
 
     auto input_iter = thrust::make_transform_iterator(zipped_ptrs, LoadRowFromPointersFunctor<T, state_dim>());
 
-    auto output_iter = thrust::make_transform_iterator(
+    // Output iterator composition (mirrors input pattern for consistency)
+    auto row_ptr_A_out = thrust::make_transform_iterator(
       thrust::make_counting_iterator(0),
-      IndexToWriteProxyFunctor<T, state_dim>(
-        thrust::raw_pointer_cast(d_A_out.data()), thrust::raw_pointer_cast(d_Bu_out.data()), state_dim));
+      IndexToPointerFunctor<T*>(thrust::raw_pointer_cast(d_A_out.data()), state_dim));
+
+    auto row_ptr_Bu_out = thrust::make_transform_iterator(
+      thrust::make_counting_iterator(0),
+      IndexToPointerFunctor<T*>(thrust::raw_pointer_cast(d_Bu_out.data()), state_dim));
+
+    auto zipped_ptrs_out = thrust::make_zip_iterator(thrust::make_tuple(row_ptr_A_out, row_ptr_Bu_out));
+
+    auto output_iter = thrust::make_transform_iterator(zipped_ptrs_out, PointersToWriteProxyFunctor<T, state_dim>());
 
     void* d_temp_storage      = nullptr;
     size_t temp_storage_bytes = 0;
@@ -260,10 +275,18 @@ static void s5_scan_benchmark(nvbench::state& state, nvbench::type_list<T>)
       // Move this stuff here for fair comparison with pytorch
       thrust::device_vector<T> d_A_out_inner(total_size, thrust::no_init);
       thrust::device_vector<T> d_Bu_out_inner(total_size, thrust::no_init);
-      auto output_iter_inner = thrust::make_transform_iterator(
+
+      auto row_ptr_A_out_inner = thrust::make_transform_iterator(
         thrust::make_counting_iterator(0),
-        IndexToWriteProxyFunctor<T, state_dim>(
-          thrust::raw_pointer_cast(d_A_out_inner.data()), thrust::raw_pointer_cast(d_Bu_out_inner.data()), state_dim));
+        IndexToPointerFunctor<T*>(thrust::raw_pointer_cast(d_A_out_inner.data()), state_dim));
+      auto row_ptr_Bu_out_inner = thrust::make_transform_iterator(
+        thrust::make_counting_iterator(0),
+        IndexToPointerFunctor<T*>(thrust::raw_pointer_cast(d_Bu_out_inner.data()), state_dim));
+      auto zipped_ptrs_out_inner =
+        thrust::make_zip_iterator(thrust::make_tuple(row_ptr_A_out_inner, row_ptr_Bu_out_inner));
+      auto output_iter_inner =
+        thrust::make_transform_iterator(zipped_ptrs_out_inner, PointersToWriteProxyFunctor<T, state_dim>());
+
       cub::DeviceScan::InclusiveScan(
         d_temp_storage,
         temp_storage_bytes,
