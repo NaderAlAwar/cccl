@@ -137,42 +137,15 @@ struct IndexToPointerFunctor
   }
 };
 
-// Output iterator that writes VectorPair to separate row locations
+// Proxy reference type that only handles assignment for writing VectorPair results
 template <typename T, int HIDDEN_DIM>
-struct VectorPairOutputIterator
+struct VectorPairWriteProxy
 {
-  T* A_base;
-  T* Bu_base;
-  int stride;
-  int current_idx;
+  T* a_row;
+  T* bu_row;
 
-  using iterator_category = cuda::std::random_access_iterator_tag;
-  using value_type        = VectorPair<T, HIDDEN_DIM>;
-  using difference_type   = ptrdiff_t;
-  using pointer           = value_type*;
-  using reference         = VectorPairOutputIterator&;
-
-  __host__ __device__ VectorPairOutputIterator(T* a, T* bu, int s, int idx = 0)
-      : A_base(a)
-      , Bu_base(bu)
-      , stride(s)
-      , current_idx(idx)
-  {}
-
-  __host__ __device__ reference operator[](difference_type n)
+  __host__ __device__ VectorPairWriteProxy& operator=(const VectorPair<T, HIDDEN_DIM>& val)
   {
-    return *(VectorPairOutputIterator(A_base, Bu_base, stride, current_idx + n));
-  }
-
-  __host__ __device__ reference operator*()
-  {
-    return *this;
-  }
-
-  __host__ __device__ VectorPairOutputIterator& operator=(const VectorPair<T, HIDDEN_DIM>& val)
-  {
-    T* a_row  = A_base + current_idx * stride;
-    T* bu_row = Bu_base + current_idx * stride;
 #pragma unroll
     for (int i = 0; i < HIDDEN_DIM; i++)
     {
@@ -181,15 +154,25 @@ struct VectorPairOutputIterator
     }
     return *this;
   }
+};
 
-  __host__ __device__ VectorPairOutputIterator operator+(difference_type n) const
-  {
-    return VectorPairOutputIterator(A_base, Bu_base, stride, current_idx + n);
-  }
+// Functor to convert row index to write proxy (for use with transform_iterator)
+template <typename T, int HIDDEN_DIM>
+struct IndexToWriteProxyFunctor
+{
+  T* A_base;
+  T* Bu_base;
+  int stride;
 
-  __host__ __device__ difference_type operator-(const VectorPairOutputIterator& other) const
+  __host__ __device__ IndexToWriteProxyFunctor(T* a, T* bu, int s)
+      : A_base(a)
+      , Bu_base(bu)
+      , stride(s)
+  {}
+
+  __host__ __device__ VectorPairWriteProxy<T, HIDDEN_DIM> operator()(int idx) const
   {
-    return current_idx - other.current_idx;
+    return {A_base + idx * stride, Bu_base + idx * stride};
   }
 };
 
@@ -252,8 +235,10 @@ static void s5_scan_benchmark(nvbench::state& state, nvbench::type_list<T>)
 
     auto input_iter = thrust::make_transform_iterator(zipped_ptrs, LoadRowFromPointersFunctor<T, state_dim>());
 
-    auto output_iter = VectorPairOutputIterator<T, state_dim>(
-      thrust::raw_pointer_cast(d_A_out.data()), thrust::raw_pointer_cast(d_Bu_out.data()), state_dim);
+    auto output_iter = thrust::make_transform_iterator(
+      thrust::make_counting_iterator(0),
+      IndexToWriteProxyFunctor<T, state_dim>(
+        thrust::raw_pointer_cast(d_A_out.data()), thrust::raw_pointer_cast(d_Bu_out.data()), state_dim));
 
     void* d_temp_storage      = nullptr;
     size_t temp_storage_bytes = 0;
@@ -275,8 +260,10 @@ static void s5_scan_benchmark(nvbench::state& state, nvbench::type_list<T>)
       // Move this stuff here for fair comparison with pytorch
       thrust::device_vector<T> d_A_out_inner(total_size, thrust::no_init);
       thrust::device_vector<T> d_Bu_out_inner(total_size, thrust::no_init);
-      auto output_iter_inner = VectorPairOutputIterator<T, state_dim>(
-        thrust::raw_pointer_cast(d_A_out_inner.data()), thrust::raw_pointer_cast(d_Bu_out_inner.data()), state_dim);
+      auto output_iter_inner = thrust::make_transform_iterator(
+        thrust::make_counting_iterator(0),
+        IndexToWriteProxyFunctor<T, state_dim>(
+          thrust::raw_pointer_cast(d_A_out_inner.data()), thrust::raw_pointer_cast(d_Bu_out_inner.data()), state_dim));
       cub::DeviceScan::InclusiveScan(
         d_temp_storage,
         temp_storage_bytes,
