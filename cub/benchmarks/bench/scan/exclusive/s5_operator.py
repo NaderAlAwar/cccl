@@ -25,10 +25,9 @@ def s5_operator(x, y):
 def s5_associative_scan(state: bench.State):
     """Benchmark different scans with different data types"""
     dtype_str = state.get_string("dtype")
-    is_2d = state.get_int64("is_2d")
 
     timesteps = state.get_int64("Timesteps")
-    state_dim = 40  # hidden dimension
+    state_dim = 4  # hidden dimension
 
     # Convert dtype string to torch dtype
     dtype_map = {
@@ -39,26 +38,19 @@ def s5_associative_scan(state: bench.State):
     dtype = dtype_map[dtype_str]
 
     state.add_summary("dtype", dtype_str)
-    state.add_summary("is_2d", is_2d)
 
     # Create input tensor on CUDA
     dev_id = state.get_device()
     device = torch.device(f"cuda:{dev_id}")
     tc_s = as_torch_cuda_Stream(state.get_stream(), dev_id)
 
-    if is_2d:
-        with torch.cuda.device(device), torch.cuda.stream(tc_s):
-            A_in = torch.randn(
-                timesteps, state_dim, dtype=dtype, device=device
-            ).contiguous()
-            Bu_in = torch.randn(
-                timesteps, state_dim, dtype=dtype, device=device
-            ).contiguous()
-
-    else:
-        with torch.cuda.device(device), torch.cuda.stream(tc_s):
-            A_in = torch.randn(timesteps, dtype=dtype, device=device).contiguous()
-            Bu_in = torch.randn(timesteps, dtype=dtype, device=device).contiguous()
+    with torch.cuda.device(device), torch.cuda.stream(tc_s):
+        A_in = torch.randn(
+            timesteps, state_dim, dtype=dtype, device=device
+        ).contiguous()
+        Bu_in = torch.randn(
+            timesteps, state_dim, dtype=dtype, device=device
+        ).contiguous()
 
     def scan_fn(tensor):
         return associative_scan(
@@ -86,12 +78,8 @@ if __name__ == "__main__":
     # Register the benchmark
     b = bench.register(s5_associative_scan)
 
-    b.add_int64_axis("is_2d", [1])
+    # b.add_string_axis("dtype", ["float16", "float32", "float64"])
+    b.add_string_axis("dtype", ["float32", "float64"])
+    b.add_int64_power_of_two_axis("Timesteps", range(12, 29, 4))
 
-    # Add axes for different data types
-    b.add_string_axis("dtype", ["float16", "float32", "float64"])
-
-    b.add_int64_power_of_two_axis("Timesteps", range(16, 28, 4))
-
-    # Run all benchmarks
     bench.run_all_benchmarks(sys.argv)
