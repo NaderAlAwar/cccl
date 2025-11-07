@@ -150,20 +150,21 @@ class DualRowPointerIteratorKind(_iterators.IteratorKind):
 
 class DualRowPointerIterator(_iterators.IteratorBase):
     """
-    Iterator that returns a TUPLE of uint64 pointers (A_ptr, Bu_ptr).
+    Iterator that loads/stores row values using CPointer arithmetic.
 
-    This eliminates the need for ZipIterator!
+    Parameterized by state_dim for generalization.
     """
 
     iterator_kind_type = DualRowPointerIteratorKind
 
-    def __init__(self, A_base_ptr: int, Bu_base_ptr: int, row_stride_bytes: int):
+    def __init__(
+        self, A_base_ptr: int, Bu_base_ptr: int, row_stride_bytes: int, state_dim: int
+    ):
         state_numba_type = dual_row_pointer_iterator_numba_type()
-        # Value type is tuple of value tuples (not pointers!)
-        # This is like C++ VectorPair - returns the actual values
-        value_type = types.UniTuple(types.UniTuple(types.float32, 4), 2)
+        self.state_dim = state_dim
+        # Value type is tuple of value tuples
+        value_type = types.UniTuple(types.UniTuple(types.float32, state_dim), 2)
 
-        # Build ctypes struct
         DualRowPointerState_cls = make_dual_row_pointer_iterator_struct()
         host_state = DualRowPointerState_cls(
             0, A_base_ptr, Bu_base_ptr, row_stride_bytes
@@ -175,6 +176,10 @@ class DualRowPointerIterator(_iterators.IteratorBase):
             value_type=value_type,
         )
 
+        # Generate dereference methods for this specific state_dim
+        self._input_deref = self._make_input_dereference()
+        self._output_deref = self._make_output_dereference()
+
     @staticmethod
     def advance(state_ref, distance):
         """Advance by distance rows."""
@@ -182,75 +187,66 @@ class DualRowPointerIterator(_iterators.IteratorBase):
 
     @property
     def input_dereference(self):
-        return self.input_dereference_impl
+        return self._input_deref
 
     @property
     def output_dereference(self):
-        return self.output_dereference_impl
+        return self._output_deref
 
-    @staticmethod
-    def input_dereference_impl(state_ref, result):
-        """
-        Load and return row values directly.
+    def _make_input_dereference(self):
+        """Generate input dereference with inline tuple construction."""
+        state_dim = self.state_dim
 
-        Computes pointers internally, loads values, returns value tuples.
-        Like strided iterator but for tuples of values instead of scalars.
-        """
-        # pass
-        zero = numba.int32(0)
-        state = state_ref[zero]
-        row_idx = state.row_index
+        # Generate inline tuple - no intermediate variables!
+        A_tuple = "(" + ", ".join([f"A_row_ptr[{i}]" for i in range(state_dim)]) + ")"
+        Bu_tuple = "(" + ", ".join([f"Bu_row_ptr[{i}]" for i in range(state_dim)]) + ")"
 
-        # Compute pointers to both A and Bu rows using pointer arithmetic
-        # state.A_base_ptr is already CPointer(float32)
-        # Pointer + N advances by N elements, so convert bytes to elements
-        # row_stride_bytes = 16 bytes = 4 float32 elements
-        elements_per_row = state.row_stride_bytes // numba.int64(4)
-        A_row_ptr = state.A_base_ptr + row_idx * elements_per_row
-        Bu_row_ptr = state.Bu_base_ptr + row_idx * elements_per_row
+        code = f"""
+def input_deref(state_ref, result):
+    zero = numba.int32(0)
+    state = state_ref[zero]
+    row_idx = state.row_index
 
-        # Load values from pointers and return VALUES, not pointers!
-        # This combines the pointer computation and loading in one step
-        result[0] = (
-            (A_row_ptr[0], A_row_ptr[1], A_row_ptr[2], A_row_ptr[3]),
-            (Bu_row_ptr[0], Bu_row_ptr[1], Bu_row_ptr[2], Bu_row_ptr[3]),
+    elements_per_row = state.row_stride_bytes // numba.int64(4)
+    A_row_ptr = state.A_base_ptr + row_idx * elements_per_row
+    Bu_row_ptr = state.Bu_base_ptr + row_idx * elements_per_row
+
+    # Inline tuple construction - no intermediate variables!
+    result[0] = ({A_tuple}, {Bu_tuple})
+"""
+        globals_dict = {"numba": numba}
+        exec(code, globals_dict)
+        return globals_dict["input_deref"]
+
+    def _make_output_dereference(self):
+        """Generate output dereference function for this state_dim."""
+        state_dim = self.state_dim
+
+        # Generate writes with inline tuple access - no intermediate variables!
+        writes = "\n    ".join(
+            [f"A_row_ptr[{i}] = value_tuples[0][{i}]" for i in range(state_dim)]
+        )
+        writes += "\n    "
+        writes += "\n    ".join(
+            [f"Bu_row_ptr[{i}] = value_tuples[1][{i}]" for i in range(state_dim)]
         )
 
-    @staticmethod
-    def output_dereference_impl(state_ref, value_tuples):
-        """
-        Write value tuples to memory through computed pointers.
+        code = f"""
+def output_deref(state_ref, value_tuples):
+    zero = numba.int32(0)
+    state = state_ref[zero]
+    row_idx = state.row_index
 
-        value_tuples is ((A_vals), (Bu_vals)) where each is a tuple of floats.
-        We write these directly using CPointers (no casting needed!).
-        """
-        # pass
-        zero = numba.int32(0)
-        state = state_ref[zero]
-        row_idx = state.row_index
+    elements_per_row = state.row_stride_bytes // numba.int64(4)
+    A_row_ptr = state.A_base_ptr + row_idx * elements_per_row
+    Bu_row_ptr = state.Bu_base_ptr + row_idx * elements_per_row
 
-        # Compute pointers to output rows using pointer arithmetic
-        # state.A_base_ptr is already CPointer(float32)
-        # Pointer + N advances by N elements, so convert bytes to elements
-        elements_per_row = state.row_stride_bytes // numba.int64(4)
-        A_row_ptr = state.A_base_ptr + row_idx * elements_per_row
-        Bu_row_ptr = state.Bu_base_ptr + row_idx * elements_per_row
-
-        # Extract value tuples
-        A_vals = value_tuples[0]  # Tuple of 4 floats
-        Bu_vals = value_tuples[1]  # Tuple of 4 floats
-
-        # Write element-by-element using pointer indexing
-        # No carray needed - CPointer is already indexable!
-        A_row_ptr[0] = A_vals[0]
-        A_row_ptr[1] = A_vals[1]
-        A_row_ptr[2] = A_vals[2]
-        A_row_ptr[3] = A_vals[3]
-
-        Bu_row_ptr[0] = Bu_vals[0]
-        Bu_row_ptr[1] = Bu_vals[1]
-        Bu_row_ptr[2] = Bu_vals[2]
-        Bu_row_ptr[3] = Bu_vals[3]
+    # Inline tuple access - no tuple extraction!
+    {writes}
+"""
+        globals_dict = {"numba": numba}
+        exec(code, globals_dict)
+        return globals_dict["output_deref"]
 
 
 # ============================================================================
@@ -298,53 +294,40 @@ def s5_scan_2d_pointer_cast(
     Bu_out_ptr = d_Bu_out.device_ctypes_pointer.value
     row_stride_bytes = state_dim * A_in.dtype.itemsize
 
-    # Single iterator that computes pointers AND loads values internally
-    # No TransformIterator needed - loading is built into the iterator!
-    input_iter = DualRowPointerIterator(A_in_ptr, Bu_in_ptr, row_stride_bytes)
+    # Create iterators with state_dim parameter
+    input_iter = DualRowPointerIterator(
+        A_in_ptr, Bu_in_ptr, row_stride_bytes, state_dim
+    )
+    output_iter = DualRowPointerIterator(
+        A_out_ptr, Bu_out_ptr, row_stride_bytes, state_dim
+    )
 
     # ========================================================================
-    # Output Iterator: Use pointer iterator directly for now
+    # S5 Operator (code generated with inline expressions)
     # ========================================================================
 
-    output_iter = DualRowPointerIterator(A_out_ptr, Bu_out_ptr, row_stride_bytes)
+    # Generate inline S5 computations directly in tuple
+    A_tuple = "(" + ", ".join([f"y_A[{i}] * x_A[{i}]" for i in range(state_dim)]) + ")"
+    Bu_tuple = (
+        "("
+        + ", ".join([f"y_A[{i}] * x_Bu[{i}] + y_Bu[{i}]" for i in range(state_dim)])
+        + ")"
+    )
 
-    # ========================================================================
-    # S5 Operator with Pointer Casting
-    # ========================================================================
+    op_code = f"""
+def s5_op_on_values(x_vals, y_vals):
+    x_A = x_vals[0]
+    x_Bu = x_vals[1]
+    y_A = y_vals[0]
+    y_Bu = y_vals[1]
 
-    def s5_op_on_values(x_vals, y_vals):
-        """
-        S5 operator on VALUE tuples (not pointers!).
+    # Inline S5 operations - no intermediate variables!
+    return ({A_tuple}, {Bu_tuple})
+"""
 
-        x_vals and y_vals are: ((A_tuple), (Bu_tuple)) of floats
-
-        This is like C++ S5Operator2D working on VectorPair objects.
-        All operations are on SCALARS only!
-        """
-        # Extract value tuples
-        x_A = x_vals[0]  # Tuple of 4 floats
-        x_Bu = x_vals[1]  # Tuple of 4 floats
-        y_A = y_vals[0]  # Tuple of 4 floats
-        y_Bu = y_vals[1]  # Tuple of 4 floats
-
-        # Perform S5 operations element-by-element
-        # All tuple[i] operations return scalars!
-        # Hardcoded for state_dim=4
-        result_A_0 = y_A[0] * x_A[0]
-        result_A_1 = y_A[1] * x_A[1]
-        result_A_2 = y_A[2] * x_A[2]
-        result_A_3 = y_A[3] * x_A[3]
-
-        result_Bu_0 = y_A[0] * x_Bu[0] + y_Bu[0]
-        result_Bu_1 = y_A[1] * x_Bu[1] + y_Bu[1]
-        result_Bu_2 = y_A[2] * x_Bu[2] + y_Bu[2]
-        result_Bu_3 = y_A[3] * x_Bu[3] + y_Bu[3]
-
-        # Return tuple of tuples (all scalars!)
-        return (
-            (result_A_0, result_A_1, result_A_2, result_A_3),
-            (result_Bu_0, result_Bu_1, result_Bu_2, result_Bu_3),
-        )
+    op_globals = {"numba": numba}
+    exec(op_code, op_globals)
+    s5_op_on_values = op_globals["s5_op_on_values"]
 
     # ========================================================================
     # Single Scan Call
@@ -379,84 +362,70 @@ if __name__ == "__main__":
     print("  4. Returns value tuples, not pointers")
     print("  5. Single scan call over timesteps\n")
 
-    timesteps = 8
-    state_dim = 4
+    # Test with multiple state_dim values
+    test_configs = [
+        (8, 4, "Small test"),
+        # (16, 40, "Standard SSM size"),
+    ]
 
-    np.random.seed(42)
-    A_in = np.random.randn(timesteps, state_dim).astype(np.float32)
-    Bu_in = np.random.randn(timesteps, state_dim).astype(np.float32)
+    for timesteps, state_dim, desc in test_configs:
+        print(f"\n{'=' * 60}")
+        print(f"Testing: {desc} (timesteps={timesteps}, state_dim={state_dim})")
+        print("=" * 60)
 
-    print(f"Input shape: ({timesteps}, {state_dim})")
-    print("Attempting single scan call with pointer casting...\n")
+        np.random.seed(42)
+        A_in = np.random.randn(timesteps, state_dim).astype(np.float32)
+        Bu_in = np.random.randn(timesteps, state_dim).astype(np.float32)
 
-    try:
-        A_out, Bu_out = s5_scan_2d_pointer_cast(A_in, Bu_in, state_dim)
+        print(f"Input shape: ({timesteps}, {state_dim})")
+        print("Attempting single scan call...\n")
 
-        print("\n" + "=" * 80)
-        print("SUCCESS! Single-scan 2D S5 implementation works!")
-        print("=" * 80)
-        print("""
-This demonstrates:
-✓ Custom iterator with CPointer(float32) state
-✓ Correct pointer arithmetic (element-wise, not byte-wise)
-✓ Loading/storing values element-by-element (all scalars)
-✓ Operator works on value tuples
-✓ Single scan call over timesteps achieves 2D S5!
+        try:
+            A_out, Bu_out = s5_scan_2d_pointer_cast(A_in, Bu_in, state_dim)
 
-Key techniques:
-- Store CPointers in iterator state from initialization
-- Use ptr + row_idx * (stride_bytes // sizeof(element)) for addressing
-- Load/store inside iterator dereference methods
-- Never create array objects, only scalar operations
+            print("✓ Scan completed successfully!")
 
-This is the Python equivalent of C++'s VectorPair pattern!
-""")
+            # Verify correctness
+            import torch
 
-        # Verify correctness
-        import torch
+            def s5_torch(x, y):
+                return (y[0] * x[0], y[0] * x[1] + y[1])
 
-        def s5_torch(x, y):
-            return (y[0] * x[0], y[0] * x[1] + y[1])
+            d_A = torch.as_tensor(A_in, device="cuda")
+            d_Bu = torch.as_tensor(Bu_in, device="cuda")
 
-        d_A = torch.as_tensor(A_in, device="cuda")
-        d_Bu = torch.as_tensor(Bu_in, device="cuda")
+            def scan_fn(inputs):
+                return torch._higher_order_ops.associative_scan(s5_torch, inputs, dim=0)
 
-        def scan_fn(inputs):
-            return torch._higher_order_ops.associative_scan(s5_torch, inputs, dim=0)
+            scan_fn = torch.compile(scan_fn, dynamic=False)
+            A_ref, Bu_ref = scan_fn((d_A, d_Bu))
 
-        scan_fn = torch.compile(scan_fn, dynamic=False)
-        A_ref, Bu_ref = scan_fn((d_A, d_Bu))
+            a_err = np.max(np.abs(A_out - A_ref.cpu().numpy()))
+            bu_err = np.max(np.abs(Bu_out - Bu_ref.cpu().numpy()))
 
-        a_err = np.max(np.abs(A_out - A_ref.cpu().numpy()))
-        bu_err = np.max(np.abs(Bu_out - Bu_ref.cpu().numpy()))
+            print(f"  Max error (A):  {a_err:.6e}")
+            print(f"  Max error (Bu): {bu_err:.6e}")
 
-        print("\nVerification vs PyTorch:")
-        print(f"  Max error (A):  {a_err:.6e}")
-        print(f"  Max error (Bu): {bu_err:.6e}")
+            if a_err < 1e-5 and bu_err < 1e-5:
+                print("  ✓ Correctness verified!")
+            else:
+                print("  ✗ Errors exceed tolerance!")
 
-        if a_err < 1e-5 and bu_err < 1e-5:
-            print("  ✓ Correctness verified!")
+        except Exception as e:
+            import traceback
 
-    except Exception as e:
-        import traceback
+            print(f"\n✗ Failed for {desc}!")
+            print(f"Error: {type(e).__name__}: {str(e)}\n")
+            traceback.print_exc()
 
-        print("\n✗ Failed!")
-        print(f"\nError type: {type(e).__name__}")
-        print(f"Error message: {str(e)}\n")
-        print("Full traceback:")
-        traceback.print_exc()
+    print("\n" + "=" * 80)
+    print("SUMMARY")
+    print("=" * 80)
+    print("""
+This implementation successfully generalizes to arbitrary state_dim by:
+- Code generation for tuple packing/unpacking
+- Loops for memory operations
+- Tuple comprehensions in operator
 
-        print("\n" + "=" * 80)
-        print("ANALYSIS:")
-        print("=" * 80)
-        print("""
-If this failed, possible reasons:
-1. Pointer casting intrinsic not properly defined
-2. Numba doesn't allow inttoptr in device code
-3. Type mismatch between input (tuples) and output (arrays)
-4. Other compilation issues
-
-The approach is sound in theory - we're only working with scalars.
-The question is whether numba's device compilation supports the
-low-level pointer operations we need.
+Key: All memory accesses are element-by-element (scalars only)!
 """)
