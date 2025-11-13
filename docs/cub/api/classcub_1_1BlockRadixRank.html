@@ -32,7 +32,7 @@
 <link href="../../_static/styles/pydata-sphinx-theme.css?digest=8878045cc6db502f8baf" rel="stylesheet" />
 
     <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=8f2a1f02" />
-    <link rel="stylesheet" type="text/css" href="../../_static/styles/nvidia-sphinx-theme.css?v=aea289ee" />
+    <link rel="stylesheet" type="text/css" href="../../_static/styles/nvidia-sphinx-theme.css?v=933278ad" />
     <link rel="stylesheet" type="text/css" href="../../_static/graphviz.css?v=4ae1632d" />
     <link rel="stylesheet" type="text/css" href="../../_static/copybutton.css?v=76b2166b" />
     <link rel="stylesheet" type="text/css" href="../../_static/sphinx-design.min.css?v=95c83b7e" />
@@ -330,13 +330,19 @@
 <li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/extended_api/type_traits.html">Type traits</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/extended_api/numeric.html">Numeric</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/extended_api/memory.html">Memory</a></li>
-<li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/extended_api/streams.html">Streams</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/extended_api/memory_resource.html">Memory Resources</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/extended_api/math.html">Math</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/extended_api/mdspan.html">Mdspan</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/extended_api/warp.html">Warp</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/extended_api/utility.html">Utility</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/extended_api/work_stealing.html">Work stealing</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../libcudacxx/runtime.html">Runtime</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/runtime/stream.html">Streams</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/runtime/event.html">Events</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/runtime/algorithm.html">Algorithm</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/runtime/device.html">Devices</a></li>
 </ul>
 </details></li>
 <li class="toctree-l3 has-children"><a class="reference internal" href="../../libcudacxx/ptx_api.html">PTX API</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
@@ -346,19 +352,30 @@
 </ul>
 </details></li>
 <li class="toctree-l3 has-children"><a class="reference internal" href="../../libcudacxx/api/index.html">API reference</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/api/classcompute__capability.html">compute_capability</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/api/classconstant__iterator.html">constant_iterator</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/api/classcounting__iterator.html">counting_iterator</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/api/classdevice__ref.html">device_ref</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/api/classdiscard__iterator.html">discard_iterator</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/api/classevent.html">event</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/api/classevent__ref.html">event_ref</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/api/classpermutation__iterator.html">permutation_iterator</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/api/classshuffle__iterator.html">shuffle_iterator</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/api/classstream__ref.html">stream_ref</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/api/classstrided__iterator.html">strided_iterator</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/api/classtabulate__output__iterator.html">tabulate_output_iterator</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/api/classtimed__event.html">timed_event</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/api/classtransform__input__output__iterator.html">transform_input_output_iterator</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/api/classtransform__iterator.html">transform_iterator</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/api/classtransform__output__iterator.html">transform_output_iterator</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/api/classzip__function.html">zip_function</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/api/classzip__iterator.html">zip_iterator</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/api/classzip__transform__iterator.html">zip_transform_iterator</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/api/structarch__traits__t.html">arch_traits_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/api/structdevice__attributes_1_1compute__capability__t.html">device_attributes::compute_capability_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/api/structcopy__configuration.html">copy_configuration</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/api/structget__stream__t.html">get_stream_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/api/structstream.html">stream</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/api/group__iterators_1ga83ac1a6f53e106d83b8f7db6757f7334.html">zip_iterator::difference_type</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/api/group__iterators_1gadcd3d726e080dfd5ec73d1816aa41744.html">zip_iterator::iterator_concept</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/api/group__iterators_1ga3a57fccd85438fe6ac517f59802807b5.html">zip_iterator::pointer</a></li>
@@ -1401,7 +1418,6 @@
 <li class="toctree-l4"><a class="reference internal" href="../../cudax/api/namespacecuda_1_1experimental_1_1stf_1aabada0bc94a44064d40bed511a02b6df.html">cuda::experimental::stf::scope_guard_condition</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../cudax/api/namespacecuda_1_1experimental_1ae17283ae4112741c42dfd6d76f122350.html">cuda::experimental::block</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../cudax/api/namespacecuda_1_1experimental_1ab1bc6a1f595a5f5bb9559aeedbc894fd.html">cuda::experimental::cluster</a></li>
-<li class="toctree-l4"><a class="reference internal" href="../../cudax/api/namespacecuda_1_1experimental_1a23fa8e60cb63ed8f206e9a003088dec1.html">cuda::experimental::device_transform</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../cudax/api/namespacecuda_1_1experimental_1a0c9948bfe5d3a18def3c7be615062928.html">cuda::experimental::graph_dependency</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../cudax/api/namespacecuda_1_1experimental_1a83e404642d89549ec95c95a057bf341e.html">cuda::experimental::graph_inserter</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../cudax/api/namespacecuda_1_1experimental_1a073c3ac46bbdc534a677526d79483947.html">cuda::experimental::grid</a></li>
@@ -1640,7 +1656,7 @@ This example can be easily adapted to the storage required by BlockRadixRank.</p
 <dd><em class="sig-param"><a class="reference internal" href="#_CPPv4I0_i0EN3cub14BlockRadixRank8RankKeysEvRA15KEYS_PER_THREAD_12UnsignedBitsRA15KEYS_PER_THREAD_i15DigitExtractorTRA23BINS_TRACKED_PER_THREAD_i" title="cub::BlockRadixRank::RankKeys::UnsignedBits"><span class="n"><span class="pre">UnsignedBits</span></span></a><span class="w"> </span><span class="p"><span class="pre">(</span></span><span class="p"><span class="pre">&amp;</span></span><span class="n sig-param"><span class="pre">keys</span></span><span class="p"><span class="pre">)</span></span><span class="p"><span class="pre">[</span></span><a class="reference internal" href="#_CPPv4I0_i0EN3cub14BlockRadixRank8RankKeysEvRA15KEYS_PER_THREAD_12UnsignedBitsRA15KEYS_PER_THREAD_i15DigitExtractorTRA23BINS_TRACKED_PER_THREAD_i" title="cub::BlockRadixRank::RankKeys::KEYS_PER_THREAD"><span class="n"><span class="pre">KEYS_PER_THREAD</span></span></a><span class="p"><span class="pre">]</span></span></em>,</dd>
 <dd><em class="sig-param"><span class="kt"><span class="pre">int</span></span><span class="w"> </span><span class="p"><span class="pre">(</span></span><span class="p"><span class="pre">&amp;</span></span><span class="n sig-param"><span class="pre">ranks</span></span><span class="p"><span class="pre">)</span></span><span class="p"><span class="pre">[</span></span><a class="reference internal" href="#_CPPv4I0_i0EN3cub14BlockRadixRank8RankKeysEvRA15KEYS_PER_THREAD_12UnsignedBitsRA15KEYS_PER_THREAD_i15DigitExtractorTRA23BINS_TRACKED_PER_THREAD_i" title="cub::BlockRadixRank::RankKeys::KEYS_PER_THREAD"><span class="n"><span class="pre">KEYS_PER_THREAD</span></span></a><span class="p"><span class="pre">]</span></span></em>,</dd>
 <dd><em class="sig-param"><a class="reference internal" href="#_CPPv4I0_i0EN3cub14BlockRadixRank8RankKeysEvRA15KEYS_PER_THREAD_12UnsignedBitsRA15KEYS_PER_THREAD_i15DigitExtractorTRA23BINS_TRACKED_PER_THREAD_i" title="cub::BlockRadixRank::RankKeys::DigitExtractorT"><span class="n"><span class="pre">DigitExtractorT</span></span></a><span class="w"> </span><span class="n sig-param"><span class="pre">digit_extractor</span></span></em>,</dd>
-<dd><em class="sig-param"><span class="kt"><span class="pre">int</span></span><span class="w"> </span><span class="p"><span class="pre">(</span></span><span class="p"><span class="pre">&amp;</span></span><span class="n sig-param"><span class="pre">exclusive_digit_prefix</span></span><span class="p"><span class="pre">)</span></span><span class="p"><span class="pre">[</span></span><a class="reference internal" href="#_CPPv4N3cub14BlockRadixRankUt2_3523BINS_TRACKED_PER_THREADE" title="cub::BlockRadixRank::[anonymous]::BINS_TRACKED_PER_THREAD"><span class="n"><span class="pre">BINS_TRACKED_PER_THREAD</span></span></a><span class="p"><span class="pre">]</span></span></em>,</dd>
+<dd><em class="sig-param"><span class="kt"><span class="pre">int</span></span><span class="w"> </span><span class="p"><span class="pre">(</span></span><span class="p"><span class="pre">&amp;</span></span><span class="n sig-param"><span class="pre">exclusive_digit_prefix</span></span><span class="p"><span class="pre">)</span></span><span class="p"><span class="pre">[</span></span><a class="reference internal" href="#_CPPv4N3cub14BlockRadixRank23BINS_TRACKED_PER_THREADE" title="cub::BlockRadixRank::BINS_TRACKED_PER_THREAD"><span class="n"><span class="pre">BINS_TRACKED_PER_THREAD</span></span></a><span class="p"><span class="pre">]</span></span></em>,</dd>
 </dl>
 
 <span class="sig-paren">)</span><a class="headerlink" href="#_CPPv4I0_i0EN3cub14BlockRadixRank8RankKeysEvRA15KEYS_PER_THREAD_12UnsignedBitsRA15KEYS_PER_THREAD_i15DigitExtractorTRA23BINS_TRACKED_PER_THREAD_i" title="Link to this definition">#</a><br /></dt>
@@ -1660,17 +1676,11 @@ This example can be easily adapted to the storage required by BlockRadixRank.</p
 
 </div>
 <div class="breathe-sectiondef docutils container">
-<p class="breathe-sectiondef-title rubric" id="breathe-section-title-public-types">Public Types</p>
-<dl class="cpp enum">
-<dt class="sig sig-object cpp" id="_CPPv4N3cub14BlockRadixRankUt2_35E">
-<span class="target" id="classcub_1_1BlockRadixRank_1a255f8193d3f6322ed9a354795d533d6e"></span><span class="k"><span class="pre">enum</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">[anonymous]</span></span></span><a class="headerlink" href="#_CPPv4N3cub14BlockRadixRankUt2_35E" title="Link to this definition">#</a><br /></dt>
-<dd><p><em>Values:</em></p>
-<dl class="cpp enumerator">
-<dt class="sig sig-object cpp" id="_CPPv4N3cub14BlockRadixRankUt2_3523BINS_TRACKED_PER_THREADE">
-<span class="target" id="classcub_1_1BlockRadixRank_1a255f8193d3f6322ed9a354795d533d6eaa28e54a2840c408149cd0839aea58409"></span><span class="k"><span class="pre">enumerator</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">BINS_TRACKED_PER_THREAD</span></span></span><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">cuda</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">std</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">max</span></span><span class="p"><span class="pre">(</span></span><span class="m"><span class="pre">1</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="p"><span class="pre">(</span></span><span class="n"><span class="pre">RADIX_DIGITS</span></span><span class="w"> </span><span class="o"><span class="pre">+</span></span><span class="w"> </span><span class="n"><span class="pre">BLOCK_THREADS</span></span><span class="w"> </span><span class="o"><span class="pre">-</span></span><span class="w"> </span><span class="m"><span class="pre">1</span></span><span class="p"><span class="pre">)</span></span><span class="w"> </span><span class="o"><span class="pre">/</span></span><span class="w"> </span><span class="n"><span class="pre">BLOCK_THREADS</span></span><span class="p"><span class="pre">)</span></span><a class="headerlink" href="#_CPPv4N3cub14BlockRadixRankUt2_3523BINS_TRACKED_PER_THREADE" title="Link to this definition">#</a><br /></dt>
+<p class="breathe-sectiondef-title rubric" id="breathe-section-title-public-static-attributes">Public Static Attributes</p>
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N3cub14BlockRadixRank23BINS_TRACKED_PER_THREADE">
+<span class="target" id="classcub_1_1BlockRadixRank_1a3e1703eb87d9545f95caa7ac68efc76d"></span><span class="k"><span class="pre">static</span></span><span class="w"> </span><span class="k"><span class="pre">constexpr</span></span><span class="w"> </span><span class="kt"><span class="pre">int</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">BINS_TRACKED_PER_THREAD</span></span></span><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">cuda</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">std</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">max</span></span><span class="p"><span class="pre">(</span></span><span class="m"><span class="pre">1</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="p"><span class="pre">(</span></span><span class="n"><span class="pre">RADIX_DIGITS</span></span><span class="w"> </span><span class="o"><span class="pre">+</span></span><span class="w"> </span><span class="n"><span class="pre">BLOCK_THREADS</span></span><span class="w"> </span><span class="o"><span class="pre">-</span></span><span class="w"> </span><span class="m"><span class="pre">1</span></span><span class="p"><span class="pre">)</span></span><span class="w"> </span><span class="o"><span class="pre">/</span></span><span class="w"> </span><span class="n"><span class="pre">BLOCK_THREADS</span></span><span class="p"><span class="pre">)</span></span><a class="headerlink" href="#_CPPv4N3cub14BlockRadixRank23BINS_TRACKED_PER_THREADE" title="Link to this definition">#</a><br /></dt>
 <dd><p>Number of bin-starting offsets tracked per thread. </p>
-</dd></dl>
-
 </dd></dl>
 
 </div>
@@ -1738,10 +1748,7 @@ This example can be easily adapted to the storage required by BlockRadixRank.</p
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N3cub14BlockRadixRank14BlockRadixRankER11TempStorage"><code class="docutils literal notranslate"><span class="pre">BlockRadixRank()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4I0_i0EN3cub14BlockRadixRank8RankKeysEvRA15KEYS_PER_THREAD_12UnsignedBitsRA15KEYS_PER_THREAD_i15DigitExtractorT"><code class="docutils literal notranslate"><span class="pre">RankKeys()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4I0_i0EN3cub14BlockRadixRank8RankKeysEvRA15KEYS_PER_THREAD_12UnsignedBitsRA15KEYS_PER_THREAD_i15DigitExtractorTRA23BINS_TRACKED_PER_THREAD_i"><code class="docutils literal notranslate"><span class="pre">RankKeys()</span></code></a></li>
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N3cub14BlockRadixRankUt2_35E"><code class="docutils literal notranslate"><span class="pre">@35</span></code></a><ul class="nav section-nav flex-column">
-<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N3cub14BlockRadixRankUt2_3523BINS_TRACKED_PER_THREADE"><code class="docutils literal notranslate"><span class="pre">BINS_TRACKED_PER_THREAD</span></code></a></li>
-</ul>
-</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N3cub14BlockRadixRank23BINS_TRACKED_PER_THREADE"><code class="docutils literal notranslate"><span class="pre">BINS_TRACKED_PER_THREAD</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N3cub14BlockRadixRank11TempStorageE"><code class="docutils literal notranslate"><span class="pre">cub::BlockRadixRank::TempStorage</span></code></a></li>
 </ul>
 </li>

@@ -32,7 +32,7 @@
 <link href="../../_static/styles/pydata-sphinx-theme.css?digest=8878045cc6db502f8baf" rel="stylesheet" />
 
     <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=8f2a1f02" />
-    <link rel="stylesheet" type="text/css" href="../../_static/styles/nvidia-sphinx-theme.css?v=aea289ee" />
+    <link rel="stylesheet" type="text/css" href="../../_static/styles/nvidia-sphinx-theme.css?v=933278ad" />
     <link rel="stylesheet" type="text/css" href="../../_static/graphviz.css?v=4ae1632d" />
     <link rel="stylesheet" type="text/css" href="../../_static/copybutton.css?v=76b2166b" />
     <link rel="stylesheet" type="text/css" href="../../_static/sphinx-design.min.css?v=95c83b7e" />
@@ -330,13 +330,19 @@
 <li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/extended_api/type_traits.html">Type traits</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/extended_api/numeric.html">Numeric</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/extended_api/memory.html">Memory</a></li>
-<li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/extended_api/streams.html">Streams</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/extended_api/memory_resource.html">Memory Resources</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/extended_api/math.html">Math</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/extended_api/mdspan.html">Mdspan</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/extended_api/warp.html">Warp</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/extended_api/utility.html">Utility</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/extended_api/work_stealing.html">Work stealing</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../libcudacxx/runtime.html">Runtime</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/runtime/stream.html">Streams</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/runtime/event.html">Events</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/runtime/algorithm.html">Algorithm</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/runtime/device.html">Devices</a></li>
 </ul>
 </details></li>
 <li class="toctree-l3 has-children"><a class="reference internal" href="../../libcudacxx/ptx_api.html">PTX API</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
@@ -346,19 +352,30 @@
 </ul>
 </details></li>
 <li class="toctree-l3 has-children"><a class="reference internal" href="../../libcudacxx/api/index.html">API reference</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/api/classcompute__capability.html">compute_capability</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/api/classconstant__iterator.html">constant_iterator</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/api/classcounting__iterator.html">counting_iterator</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/api/classdevice__ref.html">device_ref</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/api/classdiscard__iterator.html">discard_iterator</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/api/classevent.html">event</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/api/classevent__ref.html">event_ref</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/api/classpermutation__iterator.html">permutation_iterator</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/api/classshuffle__iterator.html">shuffle_iterator</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/api/classstream__ref.html">stream_ref</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/api/classstrided__iterator.html">strided_iterator</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/api/classtabulate__output__iterator.html">tabulate_output_iterator</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/api/classtimed__event.html">timed_event</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/api/classtransform__input__output__iterator.html">transform_input_output_iterator</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/api/classtransform__iterator.html">transform_iterator</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/api/classtransform__output__iterator.html">transform_output_iterator</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/api/classzip__function.html">zip_function</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/api/classzip__iterator.html">zip_iterator</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/api/classzip__transform__iterator.html">zip_transform_iterator</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/api/structarch__traits__t.html">arch_traits_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/api/structdevice__attributes_1_1compute__capability__t.html">device_attributes::compute_capability_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/api/structcopy__configuration.html">copy_configuration</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/api/structget__stream__t.html">get_stream_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/api/structstream.html">stream</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/api/group__iterators_1ga83ac1a6f53e106d83b8f7db6757f7334.html">zip_iterator::difference_type</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/api/group__iterators_1gadcd3d726e080dfd5ec73d1816aa41744.html">zip_iterator::iterator_concept</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/api/group__iterators_1ga3a57fccd85438fe6ac517f59802807b5.html">zip_iterator::pointer</a></li>
@@ -1401,7 +1418,6 @@
 <li class="toctree-l4"><a class="reference internal" href="../../cudax/api/namespacecuda_1_1experimental_1_1stf_1aabada0bc94a44064d40bed511a02b6df.html">cuda::experimental::stf::scope_guard_condition</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../cudax/api/namespacecuda_1_1experimental_1ae17283ae4112741c42dfd6d76f122350.html">cuda::experimental::block</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../cudax/api/namespacecuda_1_1experimental_1ab1bc6a1f595a5f5bb9559aeedbc894fd.html">cuda::experimental::cluster</a></li>
-<li class="toctree-l4"><a class="reference internal" href="../../cudax/api/namespacecuda_1_1experimental_1a23fa8e60cb63ed8f206e9a003088dec1.html">cuda::experimental::device_transform</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../cudax/api/namespacecuda_1_1experimental_1a0c9948bfe5d3a18def3c7be615062928.html">cuda::experimental::graph_dependency</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../cudax/api/namespacecuda_1_1experimental_1a83e404642d89549ec95c95a057bf341e.html">cuda::experimental::graph_inserter</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../cudax/api/namespacecuda_1_1experimental_1a073c3ac46bbdc534a677526d79483947.html">cuda::experimental::grid</a></li>
@@ -1517,17 +1533,6 @@
 <p>Tile status interface specialized for scan status and value types that cannot be combined into one machine word. </p>
 <div class="breathe-sectiondef docutils container">
 <p class="breathe-sectiondef-title rubric" id="breathe-section-title-public-types">Public Types</p>
-<dl class="cpp enum">
-<dt class="sig sig-object cpp" id="_CPPv4N3cub13ScanTileStateI1TXL0EEEUt2_31E">
-<span class="target" id="structcub_1_1ScanTileState_3_01T_00_01false_01_4_1aecd7ef422a7f9603511042f3c8a7f858"></span><span class="k"><span class="pre">enum</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">[anonymous]</span></span></span><a class="headerlink" href="#_CPPv4N3cub13ScanTileStateI1TXL0EEEUt2_31E" title="Link to this definition">#</a><br /></dt>
-<dd><p><em>Values:</em></p>
-<dl class="cpp enumerator">
-<dt class="sig sig-object cpp" id="_CPPv4N3cub13ScanTileStateI1TXL0EEEUt2_3119TILE_STATUS_PADDINGE">
-<span class="target" id="structcub_1_1ScanTileState_3_01T_00_01false_01_4_1aecd7ef422a7f9603511042f3c8a7f858a9a4cfccfecd131bb6f76d67e6e2158e9"></span><span class="k"><span class="pre">enumerator</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">TILE_STATUS_PADDING</span></span></span><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="n"><span class="pre">detail</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">warp_threads</span></span><a class="headerlink" href="#_CPPv4N3cub13ScanTileStateI1TXL0EEEUt2_3119TILE_STATUS_PADDINGE" title="Link to this definition">#</a><br /></dt>
-<dd></dd></dl>
-
-</dd></dl>
-
 <dl class="cpp type">
 <dt class="sig sig-object cpp" id="_CPPv4N3cub13ScanTileStateI1TXL0EEE12StatusValueTE">
 <span class="target" id="structcub_1_1ScanTileState_3_01T_00_01false_01_4_1aed3d3673f06e941b96c0d0dfec2d5007"></span><span class="k"><span class="pre">using</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">StatusValueT</span></span></span><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><a class="reference internal" href="#_CPPv4I0EN3cub13ScanTileStateI1TXL0EEEE" title="cub::ScanTileState&lt;T, false&gt;::T"><span class="n"><span class="pre">T</span></span></a><a class="headerlink" href="#_CPPv4N3cub13ScanTileStateI1TXL0EEE12StatusValueTE" title="Link to this definition">#</a><br /></dt>
@@ -1670,6 +1675,11 @@
 <div class="breathe-sectiondef docutils container">
 <p class="breathe-sectiondef-title rubric" id="breathe-section-title-public-static-attributes">Public Static Attributes</p>
 <dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N3cub13ScanTileStateI1TXL0EEE19TILE_STATUS_PADDINGE">
+<span class="target" id="structcub_1_1ScanTileState_3_01T_00_01false_01_4_1a7704834d5131591d6718787767fe38f4"></span><span class="k"><span class="pre">static</span></span><span class="w"> </span><span class="k"><span class="pre">constexpr</span></span><span class="w"> </span><span class="kt"><span class="pre">int</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">TILE_STATUS_PADDING</span></span></span><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="n"><span class="pre">detail</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">warp_threads</span></span><a class="headerlink" href="#_CPPv4N3cub13ScanTileStateI1TXL0EEE19TILE_STATUS_PADDINGE" title="Link to this definition">#</a><br /></dt>
+<dd></dd></dl>
+
+<dl class="cpp var">
 <dt class="sig sig-object cpp" id="_CPPv4N3cub13ScanTileStateI1TXL0EEE26description_bytes_per_tileE">
 <span class="target" id="structcub_1_1ScanTileState_3_01T_00_01false_01_4_1aa808c4921dc1bc041c2fe3e000cdf0f9"></span><span class="k"><span class="pre">static</span></span><span class="w"> </span><span class="k"><span class="pre">constexpr</span></span><span class="w"> </span><span class="n"><span class="pre">size_t</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">description_bytes_per_tile</span></span></span><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="k"><span class="pre">sizeof</span></span><span class="p"><span class="pre">(</span></span><a class="reference internal" href="#_CPPv4N3cub13ScanTileStateI1TXL0EEE10StatusWordE" title="cub::ScanTileState&lt;T, false&gt;::StatusWord"><span class="n"><span class="pre">StatusWord</span></span></a><span class="p"><span class="pre">)</span></span><a class="headerlink" href="#_CPPv4N3cub13ScanTileStateI1TXL0EEE26description_bytes_per_tileE" title="Link to this definition">#</a><br /></dt>
 <dd></dd></dl>
@@ -1734,10 +1744,6 @@
   <nav class="bd-toc-nav page-toc" aria-labelledby="pst-page-navigation-heading-2">
     <ul class="visible nav section-nav flex-column">
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4I0EN3cub13ScanTileStateI1TXL0EEEE"><code class="docutils literal notranslate"><span class="pre">cub::ScanTileState&lt;</span> <span class="pre">T,</span> <span class="pre">false</span> <span class="pre">&gt;</span></code></a><ul class="visible nav section-nav flex-column">
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N3cub13ScanTileStateI1TXL0EEEUt2_31E"><code class="docutils literal notranslate"><span class="pre">@31</span></code></a><ul class="nav section-nav flex-column">
-<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N3cub13ScanTileStateI1TXL0EEEUt2_3119TILE_STATUS_PADDINGE"><code class="docutils literal notranslate"><span class="pre">TILE_STATUS_PADDING</span></code></a></li>
-</ul>
-</li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N3cub13ScanTileStateI1TXL0EEE12StatusValueTE"><code class="docutils literal notranslate"><span class="pre">StatusValueT</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N3cub13ScanTileStateI1TXL0EEE10StatusWordE"><code class="docutils literal notranslate"><span class="pre">StatusWord</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N3cub13ScanTileStateI1TXL0EEE13ScanTileStateEv"><code class="docutils literal notranslate"><span class="pre">ScanTileState()</span></code></a></li>
@@ -1751,6 +1757,7 @@
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N3cub13ScanTileStateI1TXL0EEE14d_tile_partialE"><code class="docutils literal notranslate"><span class="pre">d_tile_partial</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N3cub13ScanTileStateI1TXL0EEE16d_tile_inclusiveE"><code class="docutils literal notranslate"><span class="pre">d_tile_inclusive</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N3cub13ScanTileStateI1TXL0EEE14AllocationSizeEiR6size_t"><code class="docutils literal notranslate"><span class="pre">AllocationSize()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N3cub13ScanTileStateI1TXL0EEE19TILE_STATUS_PADDINGE"><code class="docutils literal notranslate"><span class="pre">TILE_STATUS_PADDING</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N3cub13ScanTileStateI1TXL0EEE26description_bytes_per_tileE"><code class="docutils literal notranslate"><span class="pre">description_bytes_per_tile</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N3cub13ScanTileStateI1TXL0EEE22payload_bytes_per_tileE"><code class="docutils literal notranslate"><span class="pre">payload_bytes_per_tile</span></code></a></li>
 </ul>
