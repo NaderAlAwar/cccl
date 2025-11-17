@@ -12,6 +12,8 @@
 
 #include <nvbench_helper.cuh>
 
+namespace s5_operator
+{
 // S5 operator working on thrust::tuple
 template <typename T>
 struct S5Operator
@@ -192,28 +194,23 @@ auto setup_scan(
   return input_iter;
 }
 
-template <typename T, int StateDim, typename InputIterator>
-void run_scan(
-  void* d_temp_storage, size_t temp_storage_bytes, InputIterator input_iter, int timesteps, nvbench::launch& launch)
+template <typename T, int StateDim, typename InputIterator, typename StreamT>
+void run_scan(void* d_temp_storage,
+              size_t temp_storage_bytes,
+              InputIterator input_iter,
+              thrust::device_vector<T>& d_A_out,
+              thrust::device_vector<T>& d_Bu_out,
+              int timesteps,
+              StreamT stream)
 {
-  thrust::device_vector<T> d_A_out_inner(timesteps * StateDim, thrust::no_init);
-  thrust::device_vector<T> d_Bu_out_inner(timesteps * StateDim, thrust::no_init);
-
   auto row_ptr_A_out = thrust::make_transform_iterator(
-    thrust::make_counting_iterator(0),
-    IndexToPointerFunctor<T*>(thrust::raw_pointer_cast(d_A_out_inner.data()), StateDim));
+    thrust::make_counting_iterator(0), IndexToPointerFunctor<T*>(thrust::raw_pointer_cast(d_A_out.data()), StateDim));
   auto row_ptr_Bu_out = thrust::make_transform_iterator(
-    thrust::make_counting_iterator(0),
-    IndexToPointerFunctor<T*>(thrust::raw_pointer_cast(d_Bu_out_inner.data()), StateDim));
+    thrust::make_counting_iterator(0), IndexToPointerFunctor<T*>(thrust::raw_pointer_cast(d_Bu_out.data()), StateDim));
   auto zipped_ptrs_out = thrust::make_zip_iterator(thrust::make_tuple(row_ptr_A_out, row_ptr_Bu_out));
   auto output_iter     = thrust::make_transform_iterator(zipped_ptrs_out, PointersToWriteProxyFunctor<T, StateDim>());
 
   cub::DeviceScan::InclusiveScan(
-    d_temp_storage,
-    temp_storage_bytes,
-    input_iter,
-    output_iter,
-    S5Operator2D<T, StateDim>(),
-    timesteps,
-    launch.get_stream());
+    d_temp_storage, temp_storage_bytes, input_iter, output_iter, S5Operator2D<T, StateDim>(), timesteps, stream);
 }
+} // namespace s5_operator

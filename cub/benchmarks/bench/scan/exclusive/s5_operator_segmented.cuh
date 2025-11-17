@@ -12,6 +12,8 @@
 
 #include <nvbench_helper.cuh>
 
+namespace s5_operator_segmented
+{
 template <typename T>
 using s5_state = cuda::std::tuple<T, T, int>;
 
@@ -53,11 +55,11 @@ struct ColMajorTransform
   int nrows;
   int ncols;
 
-  __host__ __device__ int operator()(int idx) const
+  __host__ __device__ int operator()(int k) const
   {
-    int row = idx % nrows;
-    int col = idx / nrows;
-    return col * ncols + row;
+    int row = k % nrows;
+    int col = k / nrows;
+    return row * ncols + col;
   }
 };
 
@@ -66,9 +68,9 @@ struct FlagTransform
 {
   int nrows;
 
-  __host__ __device__ int operator()(int idx) const
+  __host__ __device__ int operator()(int k) const
   {
-    return idx % nrows == 0 ? 1 : 0;
+    return k % nrows == 0 ? 1 : 0;
   }
 };
 
@@ -102,13 +104,15 @@ auto setup_scan(
   return input_iter;
 }
 
-template <typename T, int StateDim, typename InputIterator>
-void run_scan(
-  void* d_temp_storage, size_t temp_storage_bytes, InputIterator input_iter, int timesteps, nvbench::launch& launch)
+template <typename T, int StateDim, typename InputIterator, typename StreamT>
+void run_scan(void* d_temp_storage,
+              size_t temp_storage_bytes,
+              InputIterator input_iter,
+              thrust::device_vector<T>& d_A_out,
+              thrust::device_vector<T>& d_Bu_out,
+              int timesteps,
+              StreamT stream)
 {
-  thrust::device_vector<T> d_A_out(timesteps * StateDim, thrust::no_init);
-  thrust::device_vector<T> d_Bu_out(timesteps * StateDim, thrust::no_init);
-
   const int nrows = timesteps;
   const int ncols = StateDim;
 
@@ -121,5 +125,6 @@ void run_scan(
   auto output_iter = thrust::make_zip_iterator(A_output_iter, Bu_output_iter, thrust::make_discard_iterator());
 
   cub::DeviceScan::InclusiveScan(
-    d_temp_storage, temp_storage_bytes, input_iter, output_iter, S5Operator2D<T>(), timesteps, launch.get_stream());
+    d_temp_storage, temp_storage_bytes, input_iter, output_iter, S5Operator2D<T>(), timesteps * StateDim, stream);
 }
+} // namespace s5_operator_segmented

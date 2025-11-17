@@ -24,21 +24,22 @@ void s5_scan_benchmark(nvbench::state& state, nvbench::type_list<T>)
   const int total_elements = timesteps * state_dim;
 
   // Allocate and initialize data using nvbench_helper
-  thrust::device_vector<T> d_A_in  = generate_data<T>(total_elements);
-  thrust::device_vector<T> d_Bu_in = generate_data<T>(total_elements);
-  thrust::device_vector<T> d_A_out(total_elements, thrust::no_init);
-  thrust::device_vector<T> d_Bu_out(total_elements, thrust::no_init);
+  thrust::device_vector<T> d_A_in  = s5_operator_segmented::generate_data<T>(total_elements);
+  thrust::device_vector<T> d_Bu_in = s5_operator_segmented::generate_data<T>(total_elements);
 
   state.add_element_count(timesteps * state_dim);
 
   size_t temp_storage_bytes = 0;
-  auto input_iter           = setup_scan<T, state_dim>(d_A_in, d_Bu_in, timesteps, temp_storage_bytes);
+  auto input_iter = s5_operator_segmented::setup_scan<T, state_dim>(d_A_in, d_Bu_in, timesteps, temp_storage_bytes);
 
   thrust::device_vector<nvbench::uint8_t> d_temp(temp_storage_bytes, thrust::no_init);
   void* d_temp_storage = thrust::raw_pointer_cast(d_temp.data());
 
   state.exec(nvbench::exec_tag::sync, [&](nvbench::launch& launch) {
-    run_scan<T, state_dim>(d_temp_storage, temp_storage_bytes, input_iter, timesteps, launch);
+    thrust::device_vector<T> d_A_out(total_elements, thrust::no_init);
+    thrust::device_vector<T> d_Bu_out(total_elements, thrust::no_init);
+    s5_operator_segmented::run_scan<T, state_dim>(
+      d_temp_storage, temp_storage_bytes, input_iter, d_A_out, d_Bu_out, timesteps, launch.get_stream());
   });
 }
 

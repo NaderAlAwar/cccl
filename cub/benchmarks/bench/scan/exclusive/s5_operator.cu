@@ -29,13 +29,13 @@ static void s5_scan_benchmark(nvbench::state& state, nvbench::type_list<T>)
     int total_size = timesteps * state_dim;
 
     // Allocate and initialize data using nvbench_helper
-    thrust::device_vector<T> d_A_in  = generate_data<T>(total_size);
-    thrust::device_vector<T> d_Bu_in = generate_data<T>(total_size);
+    thrust::device_vector<T> d_A_in  = s5_operator::generate_data<T>(total_size);
+    thrust::device_vector<T> d_Bu_in = s5_operator::generate_data<T>(total_size);
     thrust::device_vector<T> d_A_out(total_size, thrust::no_init);
     thrust::device_vector<T> d_Bu_out(total_size, thrust::no_init);
 
     size_t temp_storage_bytes = 0;
-    auto input_iter           = setup_scan<T, state_dim>(d_A_in, d_Bu_in, timesteps, temp_storage_bytes);
+    auto input_iter           = s5_operator::setup_scan<T, state_dim>(d_A_in, d_Bu_in, timesteps, temp_storage_bytes);
 
     thrust::device_vector<nvbench::uint8_t> d_temp(temp_storage_bytes, thrust::no_init);
     void* d_temp_storage = thrust::raw_pointer_cast(d_temp.data());
@@ -44,14 +44,18 @@ static void s5_scan_benchmark(nvbench::state& state, nvbench::type_list<T>)
 
     // Benchmark the scan operation
     state.exec(nvbench::exec_tag::sync, [&](nvbench::launch& launch) {
-      run_scan<T, state_dim>(d_temp_storage, temp_storage_bytes, input_iter, timesteps, launch);
+      thrust::device_vector<T> d_A_out_inner(timesteps * state_dim, thrust::no_init);
+      thrust::device_vector<T> d_Bu_out_inner(timesteps * state_dim, thrust::no_init);
+
+      s5_operator::run_scan<T, state_dim>(
+        d_temp_storage, temp_storage_bytes, input_iter, d_A_out_inner, d_Bu_out_inner, timesteps, launch.get_stream());
     });
   }
   else
   {
     // 1D case: scalar elements
-    thrust::device_vector<T> d_A_in  = generate_data<T>(timesteps);
-    thrust::device_vector<T> d_Bu_in = generate_data<T>(timesteps);
+    thrust::device_vector<T> d_A_in  = s5_operator::generate_data<T>(timesteps);
+    thrust::device_vector<T> d_Bu_in = s5_operator::generate_data<T>(timesteps);
     thrust::device_vector<T> d_A_out(timesteps, thrust::no_init);
     thrust::device_vector<T> d_Bu_out(timesteps, thrust::no_init);
 
@@ -63,7 +67,7 @@ static void s5_scan_benchmark(nvbench::state& state, nvbench::type_list<T>)
     size_t temp_storage_bytes = 0;
 
     cub::DeviceScan::InclusiveScan(
-      d_temp_storage, temp_storage_bytes, input_iter, output_iter, S5Operator<T>(), timesteps);
+      d_temp_storage, temp_storage_bytes, input_iter, output_iter, s5_operator::S5Operator<T>(), timesteps);
 
     thrust::device_vector<nvbench::uint8_t> d_temp(temp_storage_bytes, thrust::no_init);
     d_temp_storage = thrust::raw_pointer_cast(d_temp.data());
@@ -86,7 +90,7 @@ static void s5_scan_benchmark(nvbench::state& state, nvbench::type_list<T>)
         temp_storage_bytes,
         input_iter,
         output_iter_inner,
-        S5Operator<T>(),
+        s5_operator::S5Operator<T>(),
         timesteps,
         launch.get_stream());
     });
