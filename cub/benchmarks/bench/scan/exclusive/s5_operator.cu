@@ -47,8 +47,10 @@ static void s5_scan_benchmark(nvbench::state& state, nvbench::type_list<T>)
       thrust::device_vector<T> d_A_out_inner(timesteps * state_dim, thrust::no_init);
       thrust::device_vector<T> d_Bu_out_inner(timesteps * state_dim, thrust::no_init);
 
+      cudaStream_t stream = launch.get_stream();
+
       s5_operator::run_scan<T, state_dim>(
-        d_temp_storage, temp_storage_bytes, input_iter, d_A_out_inner, d_Bu_out_inner, timesteps, launch.get_stream());
+        d_temp_storage, temp_storage_bytes, input_iter, d_A_out_inner, d_Bu_out_inner, timesteps, stream);
     });
   }
   else
