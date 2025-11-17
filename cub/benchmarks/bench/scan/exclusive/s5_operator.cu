@@ -105,4 +105,4 @@ NVBENCH_BENCH_TYPES(s5_scan_benchmark, NVBENCH_TYPE_AXES(data_types))
   .set_name("s5_associative_scan")
   .set_type_axes_names({"T{ct}"})
   .add_int64_axis("is_2d", {1})
-  .add_int64_power_of_two_axis("Timesteps", nvbench::range(16, 24, 4));
+  .add_int64_power_of_two_axis("Timesteps", nvbench::range(12, 24, 2));
