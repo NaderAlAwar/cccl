@@ -47,6 +47,18 @@ def load_results_and_check():
         np.load(f"{BUILD_DIR}/Bu_out_cpp_s5_segmented.npy")
     ).cuda()
 
+    A_out_cpp_s5_segmented_actual = torch.from_numpy(
+        np.load(f"{BUILD_DIR}/A_out_cpp_s5_segmented_actual.npy")
+    ).cuda()
+    Bu_out_cpp_s5_segmented_actual = torch.from_numpy(
+        np.load(f"{BUILD_DIR}/Bu_out_cpp_s5_segmented_actual.npy")
+    ).cuda()
+
+    print(A_out_cpp_s5)
+    print(Bu_out_cpp_s5)
+    print(A_out_cpp_s5_segmented_actual)
+    print(Bu_out_cpp_s5_segmented_actual)
+
     # print("Outputs from PyTorch associative_scan:")
     # print(A_out)
     # print(Bu_out)
@@ -70,6 +82,12 @@ def load_results_and_check():
     )
     assert torch.allclose(Bu_out, Bu_out_cpp_s5_segmented, atol=1e-5), (
         "Bu_out does not match Bu_out_cpp_s5_segmented"
+    )
+    assert torch.allclose(A_out, A_out_cpp_s5_segmented_actual, atol=1e-5), (
+        "A_out does not match A_out_cpp_s5_segmented_actual"
+    )
+    assert torch.allclose(Bu_out, Bu_out_cpp_s5_segmented_actual, atol=1e-5), (
+        "Bu_out does not match Bu_out_cpp_s5_segmented_actual"
     )
 
     print("All results match successfully!")
