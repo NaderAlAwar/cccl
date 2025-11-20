@@ -1,0 +1,165 @@
+#pragma once
+
+#include <cub/device/device_select.cuh>
+
+#include <thrust/binary_search.h> // thrust::lower_bound
+#include <thrust/device_vector.h>
+#include <thrust/host_vector.h>
+
+#include <nvbench_helper.cuh>
+
+template <typename T>
+struct stateful_select_op
+{
+  T threshold;
+  const T* values;
+  const int* offsets;
+  int num_segments;
+  int* num_removed_per_segment;
+
+  __device__ bool operator()(int global_index) const
+  {
+    T value   = values[global_index];
+    bool keep = value > threshold;
+
+    if (!keep)
+    {
+      // figure out which segment this value belongs to
+      // increment num_removed_per_segment for that segment
+
+      // `it` is a memory location in the offsets array, so we still need to
+      // find the segment index. We do this with pointer arithmetic.
+      const int* it = thrust::lower_bound(thrust::seq, offsets, offsets + num_segments + 1, global_index + 1);
+
+      int segment_index = static_cast<int>(it - offsets - 1);
+
+      atomicAdd(&(num_removed_per_segment[segment_index]), 1);
+    }
+
+    return keep;
+  }
+};
+
+struct adjust_offsets_op
+{
+  const int* num_removed_per_segment;
+  int num_segments;
+  const int* input_offsets; // size num_segments + 1
+
+  __device__ int operator()(int segment_index) const
+  {
+    if (segment_index == num_segments)
+    {
+      return 0;
+    }
+
+    int segment_start = input_offsets[segment_index];
+    int segment_end   = input_offsets[segment_index + 1];
+
+    int new_length = (segment_end - segment_start) - num_removed_per_segment[segment_index];
+
+    return new_length;
+  }
+};
+
+// Step 2: Extend to a segmented array
+template <typename T>
+static void segmented_filter(thrust::device_vector<T>& d_values, thrust::device_vector<int>& d_offsets, T threshold)
+{
+  const auto num_segments = d_offsets.size() - 1;
+
+  thrust::device_vector<int> d_num_selected_out(1, thrust::no_init);
+  thrust::device_vector<int> d_num_removed_per_segment(num_segments, 0);
+
+  // Write directly to d_values
+  auto output_iter = cuda::make_transform_output_iterator(
+    thrust::raw_pointer_cast(d_values.data()),
+    [values = thrust::raw_pointer_cast(d_values.data())] __device__(int idx) {
+      return values[idx];
+    });
+
+  stateful_select_op<T> select_op{
+    threshold,
+    thrust::raw_pointer_cast(d_values.data()),
+    thrust::raw_pointer_cast(d_offsets.data()),
+    static_cast<int>(num_segments),
+    thrust::raw_pointer_cast(d_num_removed_per_segment.data())};
+
+  size_t temp_storage_bytes = 0;
+  auto error                = cub::DeviceSelect::If(
+    nullptr,
+    temp_storage_bytes,
+    cuda::counting_iterator{0},
+    output_iter,
+    thrust::raw_pointer_cast(d_num_selected_out.data()),
+    d_values.size(),
+    select_op);
+
+  if (error != cudaSuccess)
+  {
+    std::cerr << "Error during temp storage size calculation: " << cudaGetErrorString(error) << std::endl;
+    return;
+  }
+
+  thrust::device_vector<uint8_t> d_temp_storage(temp_storage_bytes, thrust::no_init);
+
+  error = cub::DeviceSelect::If(
+    thrust::raw_pointer_cast(d_temp_storage.data()),
+    temp_storage_bytes,
+    cuda::counting_iterator{0},
+    output_iter,
+    thrust::raw_pointer_cast(d_num_selected_out.data()),
+    d_values.size(),
+    select_op);
+
+  if (error != cudaSuccess)
+  {
+    std::cerr << "Error during DeviceSelect::If: " << cudaGetErrorString(error) << std::endl;
+    return;
+  }
+
+  // Resize to actual number of selected elements
+  d_values.resize(thrust::host_vector<int>(d_num_selected_out)[0]);
+
+  adjust_offsets_op adjust_op{thrust::raw_pointer_cast(d_num_removed_per_segment.data()),
+                              static_cast<int>(num_segments),
+                              thrust::raw_pointer_cast(d_offsets.data())};
+
+  auto input_iter = cuda::make_transform_iterator(cuda::counting_iterator{0}, adjust_op);
+  thrust::device_vector<int> d_new_offsets(num_segments + 1, thrust::no_init);
+
+  error = cub::DeviceScan::ExclusiveScan(
+    nullptr,
+    temp_storage_bytes,
+    input_iter,
+    thrust::raw_pointer_cast(d_new_offsets.data()),
+    cuda::std::plus<>{},
+    0,
+    num_segments + 1);
+
+  if (error != cudaSuccess)
+  {
+    std::cerr
+      << "Error during temp storage size calculation for ExclusiveScan: " << cudaGetErrorString(error) << std::endl;
+    return;
+  }
+
+  d_temp_storage.resize(temp_storage_bytes);
+
+  error = cub::DeviceScan::ExclusiveScan(
+    thrust::raw_pointer_cast(d_temp_storage.data()),
+    temp_storage_bytes,
+    input_iter,
+    thrust::raw_pointer_cast(d_new_offsets.data()),
+    cuda::std::plus<>{},
+    0,
+    num_segments + 1);
+
+  if (error != cudaSuccess)
+  {
+    std::cerr << "Error during ExclusiveScan: " << cudaGetErrorString(error) << std::endl;
+    return;
+  }
+
+  d_offsets.swap(d_new_offsets);
+}
