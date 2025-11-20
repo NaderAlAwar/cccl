@@ -1,0 +1,4577 @@
+{
+  "meta": {
+    "argv": [
+      "./bin/cub.bench.scan.exclusive.s5_operator_segmented_actual.base",
+      "--stopping-criterion",
+      "entropy",
+      "--json",
+      "s5_operator_segmented_actual.json",
+      "--devices",
+      "0"
+    ],
+    "version": {
+      "json": {
+        "major": 1,
+        "minor": 0,
+        "patch": 0,
+        "string": "1.0.0"
+      },
+      "nvbench": {
+        "major": 0,
+        "minor": 1,
+        "patch": 0,
+        "string": "0.1.0",
+        "git_branch": "HEAD",
+        "git_sha": "0c24f0250bf4414ab5ad19709090c6396e76516b",
+        "git_version": "pre_msvc_drop-79-g0c24f02",
+        "git_is_dirty": false
+      }
+    }
+  },
+  "devices": [
+    {
+      "id": 0,
+      "name": "NVIDIA H200",
+      "sm_version": 900,
+      "ptx_version": 900,
+      "sm_default_clock_rate": 1980000000,
+      "number_of_sms": 132,
+      "max_blocks_per_sm": 32,
+      "max_threads_per_sm": 2048,
+      "max_threads_per_block": 1024,
+      "registers_per_sm": 65536,
+      "registers_per_block": 65536,
+      "global_memory_size": 150110142464,
+      "global_memory_bus_peak_clock_rate": 3201000000,
+      "global_memory_bus_width": 6016,
+      "global_memory_bus_bandwidth": 4814304000000,
+      "l2_cache_size": 62914560,
+      "shared_memory_per_sm": 233472,
+      "shared_memory_per_block": 49152,
+      "ecc_state": true
+    },
+    {
+      "id": 1,
+      "name": "NVIDIA H200",
+      "sm_version": 900,
+      "ptx_version": 900,
+      "sm_default_clock_rate": 1980000000,
+      "number_of_sms": 132,
+      "max_blocks_per_sm": 32,
+      "max_threads_per_sm": 2048,
+      "max_threads_per_block": 1024,
+      "registers_per_sm": 65536,
+      "registers_per_block": 65536,
+      "global_memory_size": 150110142464,
+      "global_memory_bus_peak_clock_rate": 3201000000,
+      "global_memory_bus_width": 6016,
+      "global_memory_bus_bandwidth": 4814304000000,
+      "l2_cache_size": 62914560,
+      "shared_memory_per_sm": 233472,
+      "shared_memory_per_block": 49152,
+      "ecc_state": true
+    },
+    {
+      "id": 2,
+      "name": "NVIDIA H200",
+      "sm_version": 900,
+      "ptx_version": 900,
+      "sm_default_clock_rate": 1980000000,
+      "number_of_sms": 132,
+      "max_blocks_per_sm": 32,
+      "max_threads_per_sm": 2048,
+      "max_threads_per_block": 1024,
+      "registers_per_sm": 65536,
+      "registers_per_block": 65536,
+      "global_memory_size": 150110142464,
+      "global_memory_bus_peak_clock_rate": 3201000000,
+      "global_memory_bus_width": 6016,
+      "global_memory_bus_bandwidth": 4814304000000,
+      "l2_cache_size": 62914560,
+      "shared_memory_per_sm": 233472,
+      "shared_memory_per_block": 49152,
+      "ecc_state": true
+    },
+    {
+      "id": 3,
+      "name": "NVIDIA H200",
+      "sm_version": 900,
+      "ptx_version": 900,
+      "sm_default_clock_rate": 1980000000,
+      "number_of_sms": 132,
+      "max_blocks_per_sm": 32,
+      "max_threads_per_sm": 2048,
+      "max_threads_per_block": 1024,
+      "registers_per_sm": 65536,
+      "registers_per_block": 65536,
+      "global_memory_size": 150110142464,
+      "global_memory_bus_peak_clock_rate": 3201000000,
+      "global_memory_bus_width": 6016,
+      "global_memory_bus_bandwidth": 4814304000000,
+      "l2_cache_size": 62914560,
+      "shared_memory_per_sm": 233472,
+      "shared_memory_per_block": 49152,
+      "ecc_state": true
+    },
+    {
+      "id": 4,
+      "name": "NVIDIA H200",
+      "sm_version": 900,
+      "ptx_version": 900,
+      "sm_default_clock_rate": 1980000000,
+      "number_of_sms": 132,
+      "max_blocks_per_sm": 32,
+      "max_threads_per_sm": 2048,
+      "max_threads_per_block": 1024,
+      "registers_per_sm": 65536,
+      "registers_per_block": 65536,
+      "global_memory_size": 150110142464,
+      "global_memory_bus_peak_clock_rate": 3201000000,
+      "global_memory_bus_width": 6016,
+      "global_memory_bus_bandwidth": 4814304000000,
+      "l2_cache_size": 62914560,
+      "shared_memory_per_sm": 233472,
+      "shared_memory_per_block": 49152,
+      "ecc_state": true
+    },
+    {
+      "id": 5,
+      "name": "NVIDIA H200",
+      "sm_version": 900,
+      "ptx_version": 900,
+      "sm_default_clock_rate": 1980000000,
+      "number_of_sms": 132,
+      "max_blocks_per_sm": 32,
+      "max_threads_per_sm": 2048,
+      "max_threads_per_block": 1024,
+      "registers_per_sm": 65536,
+      "registers_per_block": 65536,
+      "global_memory_size": 150110142464,
+      "global_memory_bus_peak_clock_rate": 3201000000,
+      "global_memory_bus_width": 6016,
+      "global_memory_bus_bandwidth": 4814304000000,
+      "l2_cache_size": 62914560,
+      "shared_memory_per_sm": 233472,
+      "shared_memory_per_block": 49152,
+      "ecc_state": true
+    },
+    {
+      "id": 6,
+      "name": "NVIDIA H200",
+      "sm_version": 900,
+      "ptx_version": 900,
+      "sm_default_clock_rate": 1980000000,
+      "number_of_sms": 132,
+      "max_blocks_per_sm": 32,
+      "max_threads_per_sm": 2048,
+      "max_threads_per_block": 1024,
+      "registers_per_sm": 65536,
+      "registers_per_block": 65536,
+      "global_memory_size": 150110142464,
+      "global_memory_bus_peak_clock_rate": 3201000000,
+      "global_memory_bus_width": 6016,
+      "global_memory_bus_bandwidth": 4814304000000,
+      "l2_cache_size": 62914560,
+      "shared_memory_per_sm": 233472,
+      "shared_memory_per_block": 49152,
+      "ecc_state": true
+    },
+    {
+      "id": 7,
+      "name": "NVIDIA H200",
+      "sm_version": 900,
+      "ptx_version": 900,
+      "sm_default_clock_rate": 1980000000,
+      "number_of_sms": 132,
+      "max_blocks_per_sm": 32,
+      "max_threads_per_sm": 2048,
+      "max_threads_per_block": 1024,
+      "registers_per_sm": 65536,
+      "registers_per_block": 65536,
+      "global_memory_size": 150110142464,
+      "global_memory_bus_peak_clock_rate": 3201000000,
+      "global_memory_bus_width": 6016,
+      "global_memory_bus_bandwidth": 4814304000000,
+      "l2_cache_size": 62914560,
+      "shared_memory_per_sm": 233472,
+      "shared_memory_per_block": 49152,
+      "ecc_state": true
+    }
+  ],
+  "benchmarks": [
+    {
+      "name": "s5_associative_scan",
+      "index": 0,
+      "min_samples": 10,
+      "skip_time": -1.0,
+      "timeout": 15.0,
+      "devices": [
+        0
+      ],
+      "axes": [
+        {
+          "name": "T{ct}",
+          "type": "type",
+          "flags": "",
+          "values": [
+            {
+              "input_string": "F16",
+              "description": "half",
+              "is_active": true
+            },
+            {
+              "input_string": "F32",
+              "description": "float",
+              "is_active": true
+            },
+            {
+              "input_string": "F64",
+              "description": "double",
+              "is_active": true
+            }
+          ]
+        },
+        {
+          "name": "is_2d",
+          "type": "int64",
+          "flags": "",
+          "values": [
+            {
+              "input_string": "1",
+              "description": "",
+              "value": 1
+            }
+          ]
+        },
+        {
+          "name": "Timesteps",
+          "type": "int64",
+          "flags": "pow2",
+          "values": [
+            {
+              "input_string": "12",
+              "description": "2^12 = 4096",
+              "value": 4096
+            },
+            {
+              "input_string": "14",
+              "description": "2^14 = 16384",
+              "value": 16384
+            },
+            {
+              "input_string": "16",
+              "description": "2^16 = 65536",
+              "value": 65536
+            },
+            {
+              "input_string": "18",
+              "description": "2^18 = 262144",
+              "value": 262144
+            },
+            {
+              "input_string": "20",
+              "description": "2^20 = 1048576",
+              "value": 1048576
+            },
+            {
+              "input_string": "22",
+              "description": "2^22 = 4194304",
+              "value": 4194304
+            },
+            {
+              "input_string": "24",
+              "description": "2^24 = 16777216",
+              "value": 16777216
+            }
+          ]
+        }
+      ],
+      "states": [
+        {
+          "name": "Device=0 T{ct}=F16 is_2d=1 Timesteps=2^12",
+          "min_samples": 10,
+          "skip_time": -1.0,
+          "timeout": 15.0,
+          "device": 0,
+          "type_config_index": 0,
+          "axis_values": [
+            {
+              "name": "T{ct}",
+              "type": "string",
+              "value": "F16"
+            },
+            {
+              "name": "is_2d",
+              "type": "int64",
+              "value": "1"
+            },
+            {
+              "name": "Timesteps",
+              "type": "int64",
+              "value": "4096"
+            }
+          ],
+          "summaries": [
+            {
+              "tag": "nv/cold/sample_size",
+              "name": "Samples",
+              "description": "Number of isolated kernel executions",
+              "hint": "sample_size",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "int64",
+                  "value": "382"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/min",
+              "name": "Min CPU Time",
+              "description": "Fastest isolated kernel execution time (measured on host CPU)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "3.5193e-05"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/max",
+              "name": "Max CPU Time",
+              "description": "Slowest isolated kernel execution time (measured on host CPU)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "3.8214000000000004e-05"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/mean",
+              "name": "CPU Time",
+              "description": "Mean isolated kernel execution time (measured on host CPU)",
+              "hint": "duration",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "3.596186387434555e-05"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/stdev/absolute",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated CPU times",
+              "hint": "percentage",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "4.1789891568521904e-07"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/stdev/relative",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated CPU times",
+              "hint": "percentage",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.01162061335712189"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/min",
+              "name": "Min GPU Time",
+              "description": "Fastest isolated kernel execution time (measured with CUDA events)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "2.8287999331951143e-05"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/max",
+              "name": "Max GPU Time",
+              "description": "Slowest isolated kernel execution time (measured with CUDA events)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "3.241600096225738e-05"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/mean",
+              "name": "GPU Time",
+              "description": "Mean isolated kernel execution time (measured with CUDA events)",
+              "hint": "duration",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "3.0107560196979182e-05"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/stdev/absolute",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated GPU times",
+              "hint": "percentage",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "4.375647410787106e-07"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/stdev/relative",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated GPU times",
+              "hint": "percentage",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.014533384246878075"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/bw/item_rate",
+              "name": "Elem/s",
+              "description": "Number of input elements processed per second",
+              "hint": "item_rate",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "5441822549.8205185"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/walltime",
+              "name": "Walltime",
+              "description": "Walltime used for isolated measurements",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.024060308000000002"
+                }
+              ]
+            }
+          ],
+          "is_skipped": false
+        },
+        {
+          "name": "Device=0 T{ct}=F16 is_2d=1 Timesteps=2^14",
+          "min_samples": 10,
+          "skip_time": -1.0,
+          "timeout": 15.0,
+          "device": 0,
+          "type_config_index": 0,
+          "axis_values": [
+            {
+              "name": "T{ct}",
+              "type": "string",
+              "value": "F16"
+            },
+            {
+              "name": "is_2d",
+              "type": "int64",
+              "value": "1"
+            },
+            {
+              "name": "Timesteps",
+              "type": "int64",
+              "value": "16384"
+            }
+          ],
+          "summaries": [
+            {
+              "tag": "nv/cold/sample_size",
+              "name": "Samples",
+              "description": "Number of isolated kernel executions",
+              "hint": "sample_size",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "int64",
+                  "value": "718"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/min",
+              "name": "Min CPU Time",
+              "description": "Fastest isolated kernel execution time (measured on host CPU)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.000335699"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/max",
+              "name": "Max CPU Time",
+              "description": "Slowest isolated kernel execution time (measured on host CPU)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.000350728"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/mean",
+              "name": "CPU Time",
+              "description": "Mean isolated kernel execution time (measured on host CPU)",
+              "hint": "duration",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.0003390800013927573"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/stdev/absolute",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated CPU times",
+              "hint": "percentage",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "1.675856532389591e-06"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/stdev/relative",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated CPU times",
+              "hint": "percentage",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.0049423632343579054"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/min",
+              "name": "Min GPU Time",
+              "description": "Fastest isolated kernel execution time (measured with CUDA events)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.00032982400059700014"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/max",
+              "name": "Max GPU Time",
+              "description": "Slowest isolated kernel execution time (measured with CUDA events)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.0003447679877281189"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/mean",
+              "name": "GPU Time",
+              "description": "Mean isolated kernel execution time (measured with CUDA events)",
+              "hint": "duration",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.0003331346626401279"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/stdev/absolute",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated GPU times",
+              "hint": "percentage",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "1.685678174018843e-06"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/stdev/relative",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated GPU times",
+              "hint": "percentage",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.005060050373202425"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/bw/item_rate",
+              "name": "Elem/s",
+              "description": "Number of input elements processed per second",
+              "hint": "item_rate",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "1967252506.2573848"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/walltime",
+              "name": "Walltime",
+              "description": "Walltime used for isolated measurements",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.26387039300000004"
+                }
+              ]
+            }
+          ],
+          "is_skipped": false
+        },
+        {
+          "name": "Device=0 T{ct}=F16 is_2d=1 Timesteps=2^16",
+          "min_samples": 10,
+          "skip_time": -1.0,
+          "timeout": 15.0,
+          "device": 0,
+          "type_config_index": 0,
+          "axis_values": [
+            {
+              "name": "T{ct}",
+              "type": "string",
+              "value": "F16"
+            },
+            {
+              "name": "is_2d",
+              "type": "int64",
+              "value": "1"
+            },
+            {
+              "name": "Timesteps",
+              "type": "int64",
+              "value": "65536"
+            }
+          ],
+          "summaries": [
+            {
+              "tag": "nv/cold/sample_size",
+              "name": "Samples",
+              "description": "Number of isolated kernel executions",
+              "hint": "sample_size",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "int64",
+                  "value": "670"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/min",
+              "name": "Min CPU Time",
+              "description": "Fastest isolated kernel execution time (measured on host CPU)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.00049023"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/max",
+              "name": "Max CPU Time",
+              "description": "Slowest isolated kernel execution time (measured on host CPU)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.000571627"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/mean",
+              "name": "CPU Time",
+              "description": "Mean isolated kernel execution time (measured on host CPU)",
+              "hint": "duration",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.0004942191895522378"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/stdev/absolute",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated CPU times",
+              "hint": "percentage",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "3.4799486790124298e-06"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/stdev/relative",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated CPU times",
+              "hint": "percentage",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.007041306271748089"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/min",
+              "name": "Min GPU Time",
+              "description": "Fastest isolated kernel execution time (measured with CUDA events)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.00048438400030136107"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/max",
+              "name": "Max GPU Time",
+              "description": "Slowest isolated kernel execution time (measured with CUDA events)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.000565663993358612"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/mean",
+              "name": "GPU Time",
+              "description": "Mean isolated kernel execution time (measured with CUDA events)",
+              "hint": "duration",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.0004882224235072062"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/stdev/absolute",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated GPU times",
+              "hint": "percentage",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "3.4796866215439446e-06"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/stdev/relative",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated GPU times",
+              "hint": "percentage",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.0071272568690048796"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/bw/item_rate",
+              "name": "Elem/s",
+              "description": "Number of input elements processed per second",
+              "hint": "item_rate",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "5369356002.062669"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/walltime",
+              "name": "Walltime",
+              "description": "Walltime used for isolated measurements",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.34985356300000003"
+                }
+              ]
+            }
+          ],
+          "is_skipped": false
+        },
+        {
+          "name": "Device=0 T{ct}=F16 is_2d=1 Timesteps=2^18",
+          "min_samples": 10,
+          "skip_time": -1.0,
+          "timeout": 15.0,
+          "device": 0,
+          "type_config_index": 0,
+          "axis_values": [
+            {
+              "name": "T{ct}",
+              "type": "string",
+              "value": "F16"
+            },
+            {
+              "name": "is_2d",
+              "type": "int64",
+              "value": "1"
+            },
+            {
+              "name": "Timesteps",
+              "type": "int64",
+              "value": "262144"
+            }
+          ],
+          "summaries": [
+            {
+              "tag": "nv/cold/sample_size",
+              "name": "Samples",
+              "description": "Number of isolated kernel executions",
+              "hint": "sample_size",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "int64",
+                  "value": "752"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/min",
+              "name": "Min CPU Time",
+              "description": "Fastest isolated kernel execution time (measured on host CPU)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.0011043910000000001"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/max",
+              "name": "Max CPU Time",
+              "description": "Slowest isolated kernel execution time (measured on host CPU)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.047620071"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/mean",
+              "name": "CPU Time",
+              "description": "Mean isolated kernel execution time (measured on host CPU)",
+              "hint": "duration",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.0012377879109042541"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/stdev/absolute",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated CPU times",
+              "hint": "percentage",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.0017612666997956405"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/stdev/relative",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated CPU times",
+              "hint": "percentage",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "1.4229147693880482"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/min",
+              "name": "Min GPU Time",
+              "description": "Fastest isolated kernel execution time (measured with CUDA events)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.001098431944847107"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/max",
+              "name": "Max GPU Time",
+              "description": "Slowest isolated kernel execution time (measured with CUDA events)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.04761231994628906"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/mean",
+              "name": "GPU Time",
+              "description": "Mean isolated kernel execution time (measured with CUDA events)",
+              "hint": "duration",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.001231782722980418"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/stdev/absolute",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated GPU times",
+              "hint": "percentage",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.0017611853179910534"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/stdev/relative",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated GPU times",
+              "hint": "percentage",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "1.4297856960760857"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/bw/item_rate",
+              "name": "Elem/s",
+              "description": "Number of input elements processed per second",
+              "hint": "item_rate",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "8512670136.035586"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/walltime",
+              "name": "Walltime",
+              "description": "Walltime used for isolated measurements",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.953230852"
+                }
+              ]
+            }
+          ],
+          "is_skipped": false
+        },
+        {
+          "name": "Device=0 T{ct}=F16 is_2d=1 Timesteps=2^20",
+          "min_samples": 10,
+          "skip_time": -1.0,
+          "timeout": 15.0,
+          "device": 0,
+          "type_config_index": 0,
+          "axis_values": [
+            {
+              "name": "T{ct}",
+              "type": "string",
+              "value": "F16"
+            },
+            {
+              "name": "is_2d",
+              "type": "int64",
+              "value": "1"
+            },
+            {
+              "name": "Timesteps",
+              "type": "int64",
+              "value": "1048576"
+            }
+          ],
+          "summaries": [
+            {
+              "tag": "nv/cold/sample_size",
+              "name": "Samples",
+              "description": "Number of isolated kernel executions",
+              "hint": "sample_size",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "int64",
+                  "value": "882"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/min",
+              "name": "Min CPU Time",
+              "description": "Fastest isolated kernel execution time (measured on host CPU)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.0037507060000000004"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/max",
+              "name": "Max CPU Time",
+              "description": "Slowest isolated kernel execution time (measured on host CPU)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.004707477000000001"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/mean",
+              "name": "CPU Time",
+              "description": "Mean isolated kernel execution time (measured on host CPU)",
+              "hint": "duration",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.0037870939138321983"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/stdev/absolute",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated CPU times",
+              "hint": "percentage",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "3.140428507867107e-05"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/stdev/relative",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated CPU times",
+              "hint": "percentage",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.008292449512268039"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/min",
+              "name": "Min GPU Time",
+              "description": "Fastest isolated kernel execution time (measured with CUDA events)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.0037446401119232177"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/max",
+              "name": "Max GPU Time",
+              "description": "Slowest isolated kernel execution time (measured with CUDA events)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.0047001919746398925"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/mean",
+              "name": "GPU Time",
+              "description": "Mean isolated kernel execution time (measured with CUDA events)",
+              "hint": "duration",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.0037810469298135687"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/stdev/absolute",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated GPU times",
+              "hint": "percentage",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "3.136165958672004e-05"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/stdev/relative",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated GPU times",
+              "hint": "percentage",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.008294438066725182"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/bw/item_rate",
+              "name": "Elem/s",
+              "description": "Number of input elements processed per second",
+              "hint": "item_rate",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "11092969957.415491"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/walltime",
+              "name": "Walltime",
+              "description": "Walltime used for isolated measurements",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "3.366432806"
+                }
+              ]
+            }
+          ],
+          "is_skipped": false
+        },
+        {
+          "name": "Device=0 T{ct}=F16 is_2d=1 Timesteps=2^22",
+          "min_samples": 10,
+          "skip_time": -1.0,
+          "timeout": 15.0,
+          "device": 0,
+          "type_config_index": 0,
+          "axis_values": [
+            {
+              "name": "T{ct}",
+              "type": "string",
+              "value": "F16"
+            },
+            {
+              "name": "is_2d",
+              "type": "int64",
+              "value": "1"
+            },
+            {
+              "name": "Timesteps",
+              "type": "int64",
+              "value": "4194304"
+            }
+          ],
+          "summaries": [
+            {
+              "tag": "nv/cold/sample_size",
+              "name": "Samples",
+              "description": "Number of isolated kernel executions",
+              "hint": "sample_size",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "int64",
+                  "value": "1021"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/min",
+              "name": "Min CPU Time",
+              "description": "Fastest isolated kernel execution time (measured on host CPU)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.014613571"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/max",
+              "name": "Max CPU Time",
+              "description": "Slowest isolated kernel execution time (measured on host CPU)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.014793261"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/mean",
+              "name": "CPU Time",
+              "description": "Mean isolated kernel execution time (measured on host CPU)",
+              "hint": "duration",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.014673701105778663"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/stdev/absolute",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated CPU times",
+              "hint": "percentage",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "1.4306453316686338e-05"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/stdev/relative",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated CPU times",
+              "hint": "percentage",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.0009749723817839182"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/min",
+              "name": "Min GPU Time",
+              "description": "Fastest isolated kernel execution time (measured with CUDA events)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.01460758399963379"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/max",
+              "name": "Max GPU Time",
+              "description": "Slowest isolated kernel execution time (measured with CUDA events)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.01478656005859375"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/mean",
+              "name": "GPU Time",
+              "description": "Mean isolated kernel execution time (measured with CUDA events)",
+              "hint": "duration",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.014667680656291133"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/stdev/absolute",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated GPU times",
+              "hint": "percentage",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "1.4274867155762662e-05"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/stdev/relative",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated GPU times",
+              "hint": "percentage",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.0009732191128418118"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/bw/item_rate",
+              "name": "Elem/s",
+              "description": "Number of input elements processed per second",
+              "hint": "item_rate",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "11438220120.23698"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/walltime",
+              "name": "Walltime",
+              "description": "Walltime used for isolated measurements",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "15.013607129"
+                }
+              ]
+            }
+          ],
+          "is_skipped": false
+        },
+        {
+          "name": "Device=0 T{ct}=F16 is_2d=1 Timesteps=2^24",
+          "min_samples": 10,
+          "skip_time": -1.0,
+          "timeout": 15.0,
+          "device": 0,
+          "type_config_index": 0,
+          "axis_values": [
+            {
+              "name": "T{ct}",
+              "type": "string",
+              "value": "F16"
+            },
+            {
+              "name": "is_2d",
+              "type": "int64",
+              "value": "1"
+            },
+            {
+              "name": "Timesteps",
+              "type": "int64",
+              "value": "16777216"
+            }
+          ],
+          "summaries": [
+            {
+              "tag": "nv/cold/sample_size",
+              "name": "Samples",
+              "description": "Number of isolated kernel executions",
+              "hint": "sample_size",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "int64",
+                  "value": "275"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/min",
+              "name": "Min CPU Time",
+              "description": "Fastest isolated kernel execution time (measured on host CPU)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.054370524"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/max",
+              "name": "Max CPU Time",
+              "description": "Slowest isolated kernel execution time (measured on host CPU)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.054736956"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/mean",
+              "name": "CPU Time",
+              "description": "Mean isolated kernel execution time (measured on host CPU)",
+              "hint": "duration",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.05454892137090911"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/stdev/absolute",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated CPU times",
+              "hint": "percentage",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "4.9518937051334715e-05"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/stdev/relative",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated CPU times",
+              "hint": "percentage",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.000907789481566965"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/min",
+              "name": "Min GPU Time",
+              "description": "Fastest isolated kernel execution time (measured with CUDA events)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.05436342239379883"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/max",
+              "name": "Max GPU Time",
+              "description": "Slowest isolated kernel execution time (measured with CUDA events)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.054728958129882814"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/mean",
+              "name": "GPU Time",
+              "description": "Mean isolated kernel execution time (measured with CUDA events)",
+              "hint": "duration",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.05454175692471594"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/stdev/absolute",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated GPU times",
+              "hint": "percentage",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "4.9486630136181854e-05"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/stdev/relative",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated GPU times",
+              "hint": "percentage",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.0009073163925483427"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/bw/item_rate",
+              "name": "Elem/s",
+              "description": "Number of input elements processed per second",
+              "hint": "item_rate",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "12304125826.498486"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/walltime",
+              "name": "Walltime",
+              "description": "Walltime used for isolated measurements",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "15.009542831000001"
+                }
+              ]
+            }
+          ],
+          "is_skipped": false
+        },
+        {
+          "name": "Device=0 T{ct}=F32 is_2d=1 Timesteps=2^12",
+          "min_samples": 10,
+          "skip_time": -1.0,
+          "timeout": 15.0,
+          "device": 0,
+          "type_config_index": 1,
+          "axis_values": [
+            {
+              "name": "T{ct}",
+              "type": "string",
+              "value": "F32"
+            },
+            {
+              "name": "is_2d",
+              "type": "int64",
+              "value": "1"
+            },
+            {
+              "name": "Timesteps",
+              "type": "int64",
+              "value": "4096"
+            }
+          ],
+          "summaries": [
+            {
+              "tag": "nv/cold/sample_size",
+              "name": "Samples",
+              "description": "Number of isolated kernel executions",
+              "hint": "sample_size",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "int64",
+                  "value": "502"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/min",
+              "name": "Min CPU Time",
+              "description": "Fastest isolated kernel execution time (measured on host CPU)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.00016858900000000002"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/max",
+              "name": "Max CPU Time",
+              "description": "Slowest isolated kernel execution time (measured on host CPU)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.001200922"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/mean",
+              "name": "CPU Time",
+              "description": "Mean isolated kernel execution time (measured on host CPU)",
+              "hint": "duration",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.00017803827091633458"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/stdev/absolute",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated CPU times",
+              "hint": "percentage",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "7.758056399598065e-05"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/stdev/relative",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated CPU times",
+              "hint": "percentage",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.43575217618484985"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/min",
+              "name": "Min GPU Time",
+              "description": "Fastest isolated kernel execution time (measured with CUDA events)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.00016249600052833558"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/max",
+              "name": "Max GPU Time",
+              "description": "Slowest isolated kernel execution time (measured with CUDA events)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.0011949440240859985"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/mean",
+              "name": "GPU Time",
+              "description": "Mean isolated kernel execution time (measured with CUDA events)",
+              "hint": "duration",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.00017212086025462223"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/stdev/absolute",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated GPU times",
+              "hint": "percentage",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "7.757634307762531e-05"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/stdev/relative",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated GPU times",
+              "hint": "percentage",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.4507085484168793"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/bw/item_rate",
+              "name": "Elem/s",
+              "description": "Number of input elements processed per second",
+              "hint": "item_rate",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "951889269.8864497"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/walltime",
+              "name": "Walltime",
+              "description": "Walltime used for isolated measurements",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.103412234"
+                }
+              ]
+            }
+          ],
+          "is_skipped": false
+        },
+        {
+          "name": "Device=0 T{ct}=F32 is_2d=1 Timesteps=2^14",
+          "min_samples": 10,
+          "skip_time": -1.0,
+          "timeout": 15.0,
+          "device": 0,
+          "type_config_index": 1,
+          "axis_values": [
+            {
+              "name": "T{ct}",
+              "type": "string",
+              "value": "F32"
+            },
+            {
+              "name": "is_2d",
+              "type": "int64",
+              "value": "1"
+            },
+            {
+              "name": "Timesteps",
+              "type": "int64",
+              "value": "16384"
+            }
+          ],
+          "summaries": [
+            {
+              "tag": "nv/cold/sample_size",
+              "name": "Samples",
+              "description": "Number of isolated kernel executions",
+              "hint": "sample_size",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "int64",
+                  "value": "652"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/min",
+              "name": "Min CPU Time",
+              "description": "Fastest isolated kernel execution time (measured on host CPU)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.00035372400000000003"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/max",
+              "name": "Max CPU Time",
+              "description": "Slowest isolated kernel execution time (measured on host CPU)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.00038826500000000005"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/mean",
+              "name": "CPU Time",
+              "description": "Mean isolated kernel execution time (measured on host CPU)",
+              "hint": "duration",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.00035759264263803675"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/stdev/absolute",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated CPU times",
+              "hint": "percentage",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "2.370083303589108e-06"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/stdev/relative",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated CPU times",
+              "hint": "percentage",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.006627886094368444"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/min",
+              "name": "Min GPU Time",
+              "description": "Fastest isolated kernel execution time (measured with CUDA events)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.00034787198901176455"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/max",
+              "name": "Max GPU Time",
+              "description": "Slowest isolated kernel execution time (measured with CUDA events)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.0003823679983615875"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/mean",
+              "name": "GPU Time",
+              "description": "Mean isolated kernel execution time (measured with CUDA events)",
+              "hint": "duration",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.00035162905553367255"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/stdev/absolute",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated GPU times",
+              "hint": "percentage",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "2.3680866561282583e-06"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/stdev/relative",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated GPU times",
+              "hint": "percentage",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.006734615979143642"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/bw/item_rate",
+              "name": "Elem/s",
+              "description": "Number of input elements processed per second",
+              "hint": "item_rate",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "1863782271.932422"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/walltime",
+              "name": "Walltime",
+              "description": "Walltime used for isolated measurements",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.251520902"
+                }
+              ]
+            }
+          ],
+          "is_skipped": false
+        },
+        {
+          "name": "Device=0 T{ct}=F32 is_2d=1 Timesteps=2^16",
+          "min_samples": 10,
+          "skip_time": -1.0,
+          "timeout": 15.0,
+          "device": 0,
+          "type_config_index": 1,
+          "axis_values": [
+            {
+              "name": "T{ct}",
+              "type": "string",
+              "value": "F32"
+            },
+            {
+              "name": "is_2d",
+              "type": "int64",
+              "value": "1"
+            },
+            {
+              "name": "Timesteps",
+              "type": "int64",
+              "value": "65536"
+            }
+          ],
+          "summaries": [
+            {
+              "tag": "nv/cold/sample_size",
+              "name": "Samples",
+              "description": "Number of isolated kernel executions",
+              "hint": "sample_size",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "int64",
+                  "value": "644"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/min",
+              "name": "Min CPU Time",
+              "description": "Fastest isolated kernel execution time (measured on host CPU)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.000570339"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/max",
+              "name": "Max CPU Time",
+              "description": "Slowest isolated kernel execution time (measured on host CPU)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.000589731"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/mean",
+              "name": "CPU Time",
+              "description": "Mean isolated kernel execution time (measured on host CPU)",
+              "hint": "duration",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.0005765503524844721"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/stdev/absolute",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated CPU times",
+              "hint": "percentage",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "2.058569072615216e-06"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/stdev/relative",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated CPU times",
+              "hint": "percentage",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.0035704931299485386"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/min",
+              "name": "Min GPU Time",
+              "description": "Fastest isolated kernel execution time (measured with CUDA events)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.0005643839836120605"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/max",
+              "name": "Max GPU Time",
+              "description": "Slowest isolated kernel execution time (measured with CUDA events)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.0005837119817733765"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/mean",
+              "name": "GPU Time",
+              "description": "Mean isolated kernel execution time (measured with CUDA events)",
+              "hint": "duration",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.0005704686213169038"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/stdev/absolute",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated GPU times",
+              "hint": "percentage",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "2.0676046328103642e-06"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/stdev/relative",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated GPU times",
+              "hint": "percentage",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.003624396777578024"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/bw/item_rate",
+              "name": "Elem/s",
+              "description": "Number of input elements processed per second",
+              "hint": "item_rate",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "4595239601.344789"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/walltime",
+              "name": "Walltime",
+              "description": "Walltime used for isolated measurements",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.389601487"
+                }
+              ]
+            }
+          ],
+          "is_skipped": false
+        },
+        {
+          "name": "Device=0 T{ct}=F32 is_2d=1 Timesteps=2^18",
+          "min_samples": 10,
+          "skip_time": -1.0,
+          "timeout": 15.0,
+          "device": 0,
+          "type_config_index": 1,
+          "axis_values": [
+            {
+              "name": "T{ct}",
+              "type": "string",
+              "value": "F32"
+            },
+            {
+              "name": "is_2d",
+              "type": "int64",
+              "value": "1"
+            },
+            {
+              "name": "Timesteps",
+              "type": "int64",
+              "value": "262144"
+            }
+          ],
+          "summaries": [
+            {
+              "tag": "nv/cold/sample_size",
+              "name": "Samples",
+              "description": "Number of isolated kernel executions",
+              "hint": "sample_size",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "int64",
+                  "value": "1014"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/min",
+              "name": "Min CPU Time",
+              "description": "Fastest isolated kernel execution time (measured on host CPU)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.0014525590000000002"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/max",
+              "name": "Max CPU Time",
+              "description": "Slowest isolated kernel execution time (measured on host CPU)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.0015807680000000002"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/mean",
+              "name": "CPU Time",
+              "description": "Mean isolated kernel execution time (measured on host CPU)",
+              "hint": "duration",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.001471663600591715"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/stdev/absolute",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated CPU times",
+              "hint": "percentage",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "7.986505990362514e-06"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/stdev/relative",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated CPU times",
+              "hint": "percentage",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.00542685569389048"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/min",
+              "name": "Min GPU Time",
+              "description": "Fastest isolated kernel execution time (measured with CUDA events)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.0014464960098266601"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/max",
+              "name": "Max GPU Time",
+              "description": "Slowest isolated kernel execution time (measured with CUDA events)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.001574272036552429"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/mean",
+              "name": "GPU Time",
+              "description": "Mean isolated kernel execution time (measured with CUDA events)",
+              "hint": "duration",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.0014655141607073886"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/stdev/absolute",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated GPU times",
+              "hint": "percentage",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "7.965812689450798e-06"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/stdev/relative",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated GPU times",
+              "hint": "percentage",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.005435507143517318"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/bw/item_rate",
+              "name": "Elem/s",
+              "description": "Number of input elements processed per second",
+              "hint": "item_rate",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "7155004217.044639"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/walltime",
+              "name": "Walltime",
+              "description": "Walltime used for isolated measurements",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "1.522880392"
+                }
+              ]
+            }
+          ],
+          "is_skipped": false
+        },
+        {
+          "name": "Device=0 T{ct}=F32 is_2d=1 Timesteps=2^20",
+          "min_samples": 10,
+          "skip_time": -1.0,
+          "timeout": 15.0,
+          "device": 0,
+          "type_config_index": 1,
+          "axis_values": [
+            {
+              "name": "T{ct}",
+              "type": "string",
+              "value": "F32"
+            },
+            {
+              "name": "is_2d",
+              "type": "int64",
+              "value": "1"
+            },
+            {
+              "name": "Timesteps",
+              "type": "int64",
+              "value": "1048576"
+            }
+          ],
+          "summaries": [
+            {
+              "tag": "nv/cold/sample_size",
+              "name": "Samples",
+              "description": "Number of isolated kernel executions",
+              "hint": "sample_size",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "int64",
+                  "value": "1368"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/min",
+              "name": "Min CPU Time",
+              "description": "Fastest isolated kernel execution time (measured on host CPU)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.005512342"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/max",
+              "name": "Max CPU Time",
+              "description": "Slowest isolated kernel execution time (measured on host CPU)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.005643672000000001"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/mean",
+              "name": "CPU Time",
+              "description": "Mean isolated kernel execution time (measured on host CPU)",
+              "hint": "duration",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.005567912151315782"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/stdev/absolute",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated CPU times",
+              "hint": "percentage",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "3.311847753156151e-05"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/stdev/relative",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated CPU times",
+              "hint": "percentage",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.005948096275860802"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/min",
+              "name": "Min GPU Time",
+              "description": "Fastest isolated kernel execution time (measured with CUDA events)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.005505375862121582"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/max",
+              "name": "Max GPU Time",
+              "description": "Slowest isolated kernel execution time (measured with CUDA events)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.005636608123779297"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/mean",
+              "name": "GPU Time",
+              "description": "Mean isolated kernel execution time (measured with CUDA events)",
+              "hint": "duration",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.00556078144751097"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/stdev/absolute",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated GPU times",
+              "hint": "percentage",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "3.308873641486154e-05"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/stdev/relative",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated GPU times",
+              "hint": "percentage",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.005950375271387837"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/bw/item_rate",
+              "name": "Elem/s",
+              "description": "Number of input elements processed per second",
+              "hint": "item_rate",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "7542652124.689037"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/walltime",
+              "name": "Walltime",
+              "description": "Walltime used for isolated measurements",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "7.661201268"
+                }
+              ]
+            }
+          ],
+          "is_skipped": false
+        },
+        {
+          "name": "Device=0 T{ct}=F32 is_2d=1 Timesteps=2^22",
+          "min_samples": 10,
+          "skip_time": -1.0,
+          "timeout": 15.0,
+          "device": 0,
+          "type_config_index": 1,
+          "axis_values": [
+            {
+              "name": "T{ct}",
+              "type": "string",
+              "value": "F32"
+            },
+            {
+              "name": "is_2d",
+              "type": "int64",
+              "value": "1"
+            },
+            {
+              "name": "Timesteps",
+              "type": "int64",
+              "value": "4194304"
+            }
+          ],
+          "summaries": [
+            {
+              "tag": "nv/cold/sample_size",
+              "name": "Samples",
+              "description": "Number of isolated kernel executions",
+              "hint": "sample_size",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "int64",
+                  "value": "723"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/min",
+              "name": "Min CPU Time",
+              "description": "Fastest isolated kernel execution time (measured on host CPU)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.020538445000000002"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/max",
+              "name": "Max CPU Time",
+              "description": "Slowest isolated kernel execution time (measured on host CPU)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.020924993000000003"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/mean",
+              "name": "CPU Time",
+              "description": "Mean isolated kernel execution time (measured on host CPU)",
+              "hint": "duration",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.02072157391839558"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/stdev/absolute",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated CPU times",
+              "hint": "percentage",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.00010822238727595429"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/stdev/relative",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated CPU times",
+              "hint": "percentage",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.0052226914664952094"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/min",
+              "name": "Min GPU Time",
+              "description": "Fastest isolated kernel execution time (measured with CUDA events)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.020531295776367187"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/max",
+              "name": "Max GPU Time",
+              "description": "Slowest isolated kernel execution time (measured with CUDA events)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.020917535781860352"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/mean",
+              "name": "GPU Time",
+              "description": "Mean isolated kernel execution time (measured with CUDA events)",
+              "hint": "duration",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.020714436186794406"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/stdev/absolute",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated GPU times",
+              "hint": "percentage",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.00010823683542373197"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/stdev/relative",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated GPU times",
+              "hint": "percentage",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.005225188580934377"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/bw/item_rate",
+              "name": "Elem/s",
+              "description": "Number of input elements processed per second",
+              "hint": "item_rate",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "8099286820.413481"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/walltime",
+              "name": "Walltime",
+              "description": "Walltime used for isolated measurements",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "15.004625705"
+                }
+              ]
+            }
+          ],
+          "is_skipped": false
+        },
+        {
+          "name": "Device=0 T{ct}=F32 is_2d=1 Timesteps=2^24",
+          "min_samples": 10,
+          "skip_time": -1.0,
+          "timeout": 15.0,
+          "device": 0,
+          "type_config_index": 1,
+          "axis_values": [
+            {
+              "name": "T{ct}",
+              "type": "string",
+              "value": "F32"
+            },
+            {
+              "name": "is_2d",
+              "type": "int64",
+              "value": "1"
+            },
+            {
+              "name": "Timesteps",
+              "type": "int64",
+              "value": "16777216"
+            }
+          ],
+          "summaries": [
+            {
+              "tag": "nv/cold/sample_size",
+              "name": "Samples",
+              "description": "Number of isolated kernel executions",
+              "hint": "sample_size",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "int64",
+                  "value": "196"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/min",
+              "name": "Min CPU Time",
+              "description": "Fastest isolated kernel execution time (measured on host CPU)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.075779171"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/max",
+              "name": "Max CPU Time",
+              "description": "Slowest isolated kernel execution time (measured on host CPU)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.077932901"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/mean",
+              "name": "CPU Time",
+              "description": "Mean isolated kernel execution time (measured on host CPU)",
+              "hint": "duration",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.07657955068367346"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/stdev/absolute",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated CPU times",
+              "hint": "percentage",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.0006290775338715653"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/stdev/relative",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated CPU times",
+              "hint": "percentage",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.008214693456091049"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/min",
+              "name": "Min GPU Time",
+              "description": "Fastest isolated kernel execution time (measured with CUDA events)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.07577193450927734"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/max",
+              "name": "Max GPU Time",
+              "description": "Slowest isolated kernel execution time (measured with CUDA events)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.07792572784423828"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/mean",
+              "name": "GPU Time",
+              "description": "Mean isolated kernel execution time (measured with CUDA events)",
+              "hint": "duration",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.07657226134319696"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/stdev/absolute",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated GPU times",
+              "hint": "percentage",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.0006290932912140092"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/stdev/relative",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated GPU times",
+              "hint": "percentage",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.008215681242511728"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/bw/item_rate",
+              "name": "Elem/s",
+              "description": "Number of input elements processed per second",
+              "hint": "item_rate",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "8764121997.026834"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/walltime",
+              "name": "Walltime",
+              "description": "Walltime used for isolated measurements",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "15.015659247"
+                }
+              ]
+            }
+          ],
+          "is_skipped": false
+        },
+        {
+          "name": "Device=0 T{ct}=F64 is_2d=1 Timesteps=2^12",
+          "min_samples": 10,
+          "skip_time": -1.0,
+          "timeout": 15.0,
+          "device": 0,
+          "type_config_index": 2,
+          "axis_values": [
+            {
+              "name": "T{ct}",
+              "type": "string",
+              "value": "F64"
+            },
+            {
+              "name": "is_2d",
+              "type": "int64",
+              "value": "1"
+            },
+            {
+              "name": "Timesteps",
+              "type": "int64",
+              "value": "4096"
+            }
+          ],
+          "summaries": [
+            {
+              "tag": "nv/cold/sample_size",
+              "name": "Samples",
+              "description": "Number of isolated kernel executions",
+              "hint": "sample_size",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "int64",
+                  "value": "644"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/min",
+              "name": "Min CPU Time",
+              "description": "Fastest isolated kernel execution time (measured on host CPU)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.000305686"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/max",
+              "name": "Max CPU Time",
+              "description": "Slowest isolated kernel execution time (measured on host CPU)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.002426203"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/mean",
+              "name": "CPU Time",
+              "description": "Mean isolated kernel execution time (measured on host CPU)",
+              "hint": "duration",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.00032755494409937905"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/stdev/absolute",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated CPU times",
+              "hint": "percentage",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.00017907502766430173"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/stdev/relative",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated CPU times",
+              "hint": "percentage",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.5467022583239378"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/min",
+              "name": "Min GPU Time",
+              "description": "Fastest isolated kernel execution time (measured with CUDA events)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.00029980799555778505"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/max",
+              "name": "Max GPU Time",
+              "description": "Slowest isolated kernel execution time (measured with CUDA events)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.0024201920032501222"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/mean",
+              "name": "GPU Time",
+              "description": "Mean isolated kernel execution time (measured with CUDA events)",
+              "hint": "duration",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.0003216326461167806"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/stdev/absolute",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated GPU times",
+              "hint": "percentage",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.00017907409243630843"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/stdev/relative",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated GPU times",
+              "hint": "percentage",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.5567659085554673"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/bw/item_rate",
+              "name": "Elem/s",
+              "description": "Number of input elements processed per second",
+              "hint": "item_rate",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "509401026.22702"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/walltime",
+              "name": "Walltime",
+              "description": "Walltime used for isolated measurements",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.22892595200000002"
+                }
+              ]
+            }
+          ],
+          "is_skipped": false
+        },
+        {
+          "name": "Device=0 T{ct}=F64 is_2d=1 Timesteps=2^14",
+          "min_samples": 10,
+          "skip_time": -1.0,
+          "timeout": 15.0,
+          "device": 0,
+          "type_config_index": 2,
+          "axis_values": [
+            {
+              "name": "T{ct}",
+              "type": "string",
+              "value": "F64"
+            },
+            {
+              "name": "is_2d",
+              "type": "int64",
+              "value": "1"
+            },
+            {
+              "name": "Timesteps",
+              "type": "int64",
+              "value": "16384"
+            }
+          ],
+          "summaries": [
+            {
+              "tag": "nv/cold/sample_size",
+              "name": "Samples",
+              "description": "Number of isolated kernel executions",
+              "hint": "sample_size",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "int64",
+                  "value": "654"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/min",
+              "name": "Min CPU Time",
+              "description": "Fastest isolated kernel execution time (measured on host CPU)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.00038428700000000003"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/max",
+              "name": "Max CPU Time",
+              "description": "Slowest isolated kernel execution time (measured on host CPU)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.00041297100000000004"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/mean",
+              "name": "CPU Time",
+              "description": "Mean isolated kernel execution time (measured on host CPU)",
+              "hint": "duration",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.0003880461834862384"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/stdev/absolute",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated CPU times",
+              "hint": "percentage",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "2.1204833718863812e-06"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/stdev/relative",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated CPU times",
+              "hint": "percentage",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.005464512890800231"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/min",
+              "name": "Min GPU Time",
+              "description": "Fastest isolated kernel execution time (measured with CUDA events)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.00037827199697494505"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/max",
+              "name": "Max GPU Time",
+              "description": "Slowest isolated kernel execution time (measured with CUDA events)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.0004068480134010315"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/mean",
+              "name": "GPU Time",
+              "description": "Mean isolated kernel execution time (measured with CUDA events)",
+              "hint": "duration",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.0003819364894876422"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/stdev/absolute",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated GPU times",
+              "hint": "percentage",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "2.124648799785917e-06"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/stdev/relative",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated GPU times",
+              "hint": "percentage",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.005562832717649151"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/bw/item_rate",
+              "name": "Elem/s",
+              "description": "Number of input elements processed per second",
+              "hint": "item_rate",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "1715887374.047838"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/walltime",
+              "name": "Walltime",
+              "description": "Walltime used for isolated measurements",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.272086492"
+                }
+              ]
+            }
+          ],
+          "is_skipped": false
+        },
+        {
+          "name": "Device=0 T{ct}=F64 is_2d=1 Timesteps=2^16",
+          "min_samples": 10,
+          "skip_time": -1.0,
+          "timeout": 15.0,
+          "device": 0,
+          "type_config_index": 2,
+          "axis_values": [
+            {
+              "name": "T{ct}",
+              "type": "string",
+              "value": "F64"
+            },
+            {
+              "name": "is_2d",
+              "type": "int64",
+              "value": "1"
+            },
+            {
+              "name": "Timesteps",
+              "type": "int64",
+              "value": "65536"
+            }
+          ],
+          "summaries": [
+            {
+              "tag": "nv/cold/sample_size",
+              "name": "Samples",
+              "description": "Number of isolated kernel executions",
+              "hint": "sample_size",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "int64",
+                  "value": "686"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/min",
+              "name": "Min CPU Time",
+              "description": "Fastest isolated kernel execution time (measured on host CPU)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.000693551"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/max",
+              "name": "Max CPU Time",
+              "description": "Slowest isolated kernel execution time (measured on host CPU)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.001053389"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/mean",
+              "name": "CPU Time",
+              "description": "Mean isolated kernel execution time (measured on host CPU)",
+              "hint": "duration",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.0006998220641399413"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/stdev/absolute",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated CPU times",
+              "hint": "percentage",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "1.4929273589633498e-05"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/stdev/relative",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated CPU times",
+              "hint": "percentage",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.02133295641082865"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/min",
+              "name": "Min GPU Time",
+              "description": "Fastest isolated kernel execution time (measured with CUDA events)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.0006872959733009339"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/max",
+              "name": "Max GPU Time",
+              "description": "Slowest isolated kernel execution time (measured with CUDA events)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.00104585599899292"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/mean",
+              "name": "GPU Time",
+              "description": "Mean isolated kernel execution time (measured with CUDA events)",
+              "hint": "duration",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.0006936382514047203"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/stdev/absolute",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated GPU times",
+              "hint": "percentage",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "1.4878199891682896e-05"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/stdev/relative",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated GPU times",
+              "hint": "percentage",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.021449508964582528"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/bw/item_rate",
+              "name": "Elem/s",
+              "description": "Number of input elements processed per second",
+              "hint": "item_rate",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "3779261012.04943"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/walltime",
+              "name": "Walltime",
+              "description": "Walltime used for isolated measurements",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.5002317660000001"
+                }
+              ]
+            }
+          ],
+          "is_skipped": false
+        },
+        {
+          "name": "Device=0 T{ct}=F64 is_2d=1 Timesteps=2^18",
+          "min_samples": 10,
+          "skip_time": -1.0,
+          "timeout": 15.0,
+          "device": 0,
+          "type_config_index": 2,
+          "axis_values": [
+            {
+              "name": "T{ct}",
+              "type": "string",
+              "value": "F64"
+            },
+            {
+              "name": "is_2d",
+              "type": "int64",
+              "value": "1"
+            },
+            {
+              "name": "Timesteps",
+              "type": "int64",
+              "value": "262144"
+            }
+          ],
+          "summaries": [
+            {
+              "tag": "nv/cold/sample_size",
+              "name": "Samples",
+              "description": "Number of isolated kernel executions",
+              "hint": "sample_size",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "int64",
+                  "value": "870"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/min",
+              "name": "Min CPU Time",
+              "description": "Fastest isolated kernel execution time (measured on host CPU)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.002120718"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/max",
+              "name": "Max CPU Time",
+              "description": "Slowest isolated kernel execution time (measured on host CPU)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.0023014050000000003"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/mean",
+              "name": "CPU Time",
+              "description": "Mean isolated kernel execution time (measured on host CPU)",
+              "hint": "duration",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.0021539572540229903"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/stdev/absolute",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated CPU times",
+              "hint": "percentage",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "6.824828674140508e-06"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/stdev/relative",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated CPU times",
+              "hint": "percentage",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.003168507017209202"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/min",
+              "name": "Min GPU Time",
+              "description": "Fastest isolated kernel execution time (measured with CUDA events)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.0021147520542144777"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/max",
+              "name": "Max GPU Time",
+              "description": "Slowest isolated kernel execution time (measured with CUDA events)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.002294559955596924"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/mean",
+              "name": "GPU Time",
+              "description": "Mean isolated kernel execution time (measured with CUDA events)",
+              "hint": "duration",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.0021478260599333662"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/stdev/absolute",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated GPU times",
+              "hint": "percentage",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "6.792485363848297e-06"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/stdev/relative",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated GPU times",
+              "hint": "percentage",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.003162493225386708"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/bw/item_rate",
+              "name": "Elem/s",
+              "description": "Number of input elements processed per second",
+              "hint": "item_rate",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "4882034069.521117"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/walltime",
+              "name": "Walltime",
+              "description": "Walltime used for isolated measurements",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "1.8993431010000001"
+                }
+              ]
+            }
+          ],
+          "is_skipped": false
+        },
+        {
+          "name": "Device=0 T{ct}=F64 is_2d=1 Timesteps=2^20",
+          "min_samples": 10,
+          "skip_time": -1.0,
+          "timeout": 15.0,
+          "device": 0,
+          "type_config_index": 2,
+          "axis_values": [
+            {
+              "name": "T{ct}",
+              "type": "string",
+              "value": "F64"
+            },
+            {
+              "name": "is_2d",
+              "type": "int64",
+              "value": "1"
+            },
+            {
+              "name": "Timesteps",
+              "type": "int64",
+              "value": "1048576"
+            }
+          ],
+          "summaries": [
+            {
+              "tag": "nv/cold/sample_size",
+              "name": "Samples",
+              "description": "Number of isolated kernel executions",
+              "hint": "sample_size",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "int64",
+                  "value": "1224"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/min",
+              "name": "Min CPU Time",
+              "description": "Fastest isolated kernel execution time (measured on host CPU)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.007845326"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/max",
+              "name": "Max CPU Time",
+              "description": "Slowest isolated kernel execution time (measured on host CPU)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.008464213"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/mean",
+              "name": "CPU Time",
+              "description": "Mean isolated kernel execution time (measured on host CPU)",
+              "hint": "duration",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.00816524379003269"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/stdev/absolute",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated CPU times",
+              "hint": "percentage",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "1.870063061837675e-05"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/stdev/relative",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated CPU times",
+              "hint": "percentage",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.0022902721705878033"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/min",
+              "name": "Min GPU Time",
+              "description": "Fastest isolated kernel execution time (measured with CUDA events)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.00783846378326416"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/max",
+              "name": "Max GPU Time",
+              "description": "Slowest isolated kernel execution time (measured with CUDA events)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.008455904006958007"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/mean",
+              "name": "GPU Time",
+              "description": "Mean isolated kernel execution time (measured with CUDA events)",
+              "hint": "duration",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.008158227280853615"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/stdev/absolute",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated GPU times",
+              "hint": "percentage",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "1.8677574330335217e-05"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/stdev/relative",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated GPU times",
+              "hint": "percentage",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.002289415786952792"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/bw/item_rate",
+              "name": "Elem/s",
+              "description": "Number of input elements processed per second",
+              "hint": "item_rate",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "5141195330.318304"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/walltime",
+              "name": "Walltime",
+              "description": "Walltime used for isolated measurements",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "10.032896269"
+                }
+              ]
+            }
+          ],
+          "is_skipped": false
+        },
+        {
+          "name": "Device=0 T{ct}=F64 is_2d=1 Timesteps=2^22",
+          "min_samples": 10,
+          "skip_time": -1.0,
+          "timeout": 15.0,
+          "device": 0,
+          "type_config_index": 2,
+          "axis_values": [
+            {
+              "name": "T{ct}",
+              "type": "string",
+              "value": "F64"
+            },
+            {
+              "name": "is_2d",
+              "type": "int64",
+              "value": "1"
+            },
+            {
+              "name": "Timesteps",
+              "type": "int64",
+              "value": "4194304"
+            }
+          ],
+          "summaries": [
+            {
+              "tag": "nv/cold/sample_size",
+              "name": "Samples",
+              "description": "Number of isolated kernel executions",
+              "hint": "sample_size",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "int64",
+                  "value": "524"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/min",
+              "name": "Min CPU Time",
+              "description": "Fastest isolated kernel execution time (measured on host CPU)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.028405681000000002"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/max",
+              "name": "Max CPU Time",
+              "description": "Slowest isolated kernel execution time (measured on host CPU)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.028839233000000002"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/mean",
+              "name": "CPU Time",
+              "description": "Mean isolated kernel execution time (measured on host CPU)",
+              "hint": "duration",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.028621193041984752"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/stdev/absolute",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated CPU times",
+              "hint": "percentage",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "5.6476947871919185e-05"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/stdev/relative",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated CPU times",
+              "hint": "percentage",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.001973256243688812"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/min",
+              "name": "Min GPU Time",
+              "description": "Fastest isolated kernel execution time (measured with CUDA events)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.0283986873626709"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/max",
+              "name": "Max GPU Time",
+              "description": "Slowest isolated kernel execution time (measured with CUDA events)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.02883216094970703"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/mean",
+              "name": "GPU Time",
+              "description": "Mean isolated kernel execution time (measured with CUDA events)",
+              "hint": "duration",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.02861411781529432"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/stdev/absolute",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated GPU times",
+              "hint": "percentage",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "5.647972831259453e-05"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/stdev/relative",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated GPU times",
+              "hint": "percentage",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.0019738413281574583"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/bw/item_rate",
+              "name": "Elem/s",
+              "description": "Number of input elements processed per second",
+              "hint": "item_rate",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "5863265157.534416"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/walltime",
+              "name": "Walltime",
+              "description": "Walltime used for isolated measurements",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "15.013885502"
+                }
+              ]
+            }
+          ],
+          "is_skipped": false
+        },
+        {
+          "name": "Device=0 T{ct}=F64 is_2d=1 Timesteps=2^24",
+          "min_samples": 10,
+          "skip_time": -1.0,
+          "timeout": 15.0,
+          "device": 0,
+          "type_config_index": 2,
+          "axis_values": [
+            {
+              "name": "T{ct}",
+              "type": "string",
+              "value": "F64"
+            },
+            {
+              "name": "is_2d",
+              "type": "int64",
+              "value": "1"
+            },
+            {
+              "name": "Timesteps",
+              "type": "int64",
+              "value": "16777216"
+            }
+          ],
+          "summaries": [
+            {
+              "tag": "nv/cold/sample_size",
+              "name": "Samples",
+              "description": "Number of isolated kernel executions",
+              "hint": "sample_size",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "int64",
+                  "value": "138"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/min",
+              "name": "Min CPU Time",
+              "description": "Fastest isolated kernel execution time (measured on host CPU)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.10869659100000001"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/max",
+              "name": "Max CPU Time",
+              "description": "Slowest isolated kernel execution time (measured on host CPU)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.11006035900000001"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/mean",
+              "name": "CPU Time",
+              "description": "Mean isolated kernel execution time (measured on host CPU)",
+              "hint": "duration",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.1093236750072464"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/stdev/absolute",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated CPU times",
+              "hint": "percentage",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.0002933396099827872"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/cpu/stdev/relative",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated CPU times",
+              "hint": "percentage",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.00268322126898262"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/min",
+              "name": "Min GPU Time",
+              "description": "Fastest isolated kernel execution time (measured with CUDA events)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.10868934631347656"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/max",
+              "name": "Max GPU Time",
+              "description": "Slowest isolated kernel execution time (measured with CUDA events)",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.11005315399169922"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/mean",
+              "name": "GPU Time",
+              "description": "Mean isolated kernel execution time (measured with CUDA events)",
+              "hint": "duration",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.10931629601077754"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/stdev/absolute",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated GPU times",
+              "hint": "percentage",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.00029335539676899415"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/time/gpu/stdev/relative",
+              "name": "Noise",
+              "description": "Relative standard deviation of isolated GPU times",
+              "hint": "percentage",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "0.0026835468038550457"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/bw/item_rate",
+              "name": "Elem/s",
+              "description": "Number of input elements processed per second",
+              "hint": "item_rate",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "6138962483.085203"
+                }
+              ]
+            },
+            {
+              "tag": "nv/cold/walltime",
+              "name": "Walltime",
+              "description": "Walltime used for isolated measurements",
+              "hint": "duration",
+              "hide": "Hidden by default.",
+              "data": [
+                {
+                  "name": "value",
+                  "type": "float64",
+                  "value": "15.091142770000001"
+                }
+              ]
+            }
+          ],
+          "is_skipped": false
+        }
+      ]
+    }
+  ]
+}
