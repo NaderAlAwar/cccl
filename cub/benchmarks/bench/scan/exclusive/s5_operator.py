@@ -79,7 +79,7 @@ if __name__ == "__main__":
     b = bench.register(s5_associative_scan)
 
     # b.add_string_axis("dtype", ["float16", "float32", "float64"])
-    b.add_string_axis("dtype", ["float32", "float64"])
-    b.add_int64_power_of_two_axis("Timesteps", range(12, 29, 4))
+    b.add_string_axis("dtype", ["float16", "float32", "float64"])
+    b.add_int64_power_of_two_axis("Timesteps", range(12, 25, 2))
 
     bench.run_all_benchmarks(sys.argv)
