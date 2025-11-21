@@ -19,6 +19,7 @@
 
 #include "filter_flat_array.cuh"
 #include "filter_segmented_array.cuh"
+#include "filter_segmented_array_upper_bound.cuh"
 
 template <typename T>
 static void print_array(const thrust::device_vector<T>& d_values)
@@ -80,7 +81,6 @@ static void filter(nvbench::state& state, nvbench::type_list<T>)
   state.exec(nvbench::exec_tag::sync, [&](nvbench::launch& launch) {
     filter(d_values, threshold);
   });
-
 #endif
 }
 
@@ -143,20 +143,66 @@ static void segmented_filter(nvbench::state& state, nvbench::type_list<T>)
   state.exec(nvbench::exec_tag::sync, [&](nvbench::launch& launch) {
     segmented_filter(d_values, d_offsets, threshold);
   });
+#endif
+}
 
+// Step 3: Use upper_bound to get segment ids
+template <typename T>
+static void segmented_filter_upper_bound(nvbench::state& state, nvbench::type_list<T>)
+{
+#if RUN_SAMPLE
+  // Example: [[30], [40,20], [50], [10,30,80]]
+  // Flatten:
+  thrust::device_vector<T> d_values{30, 40, 20, 50, 10, 30, 80};
+  thrust::device_vector<int> d_offsets{0, 1, 3, 4, 7}; // 4 segments
+  constexpr T threshold = 25;
+
+  std::cout << "Running segmented array filter sample:" << std::endl;
+  std::cout << "Before filtering:" << std::endl;
+  print_array(d_values, d_offsets);
+  segmented_filter_upper_bound(d_values, d_offsets, threshold);
+  std::cout << "After filtering (threshold = " << threshold << "):" << std::endl;
+  print_array(d_values, d_offsets);
+#else
+  // Retrieve axis parameters
+  const auto elements       = static_cast<std::size_t>(state.get_int64("Elements{io}"));
+  const bit_entropy entropy = str_to_entropy(state.get_string("Entropy"));
+
+  constexpr int max_segment_size = 20;
+  const int max_num_segments     = cuda::ceil_div(elements, max_segment_size);
+
+  thrust::device_vector<T> d_values = generate(elements);
+
+  auto segment_sizes = partition_into_segments(elements, max_segment_size);
+  thrust::host_vector<int> h_offsets(segment_sizes.size() + 1, 0);
+  std::exclusive_scan(segment_sizes.begin(), segment_sizes.end(), h_offsets.begin() + 1, 0);
+  h_offsets[segment_sizes.size()] = segment_sizes[segment_sizes.size() - 1] + segment_sizes[segment_sizes.size() - 1];
+
+  thrust::device_vector<int> d_offsets = h_offsets;
+  const T threshold                    = lerp_min_max<T>(entropy_to_probability(entropy));
+
+  state.exec(nvbench::exec_tag::sync, [&](nvbench::launch& launch) {
+    segmented_filter_upper_bound(d_values, d_offsets, threshold);
+  });
 #endif
 }
 
 using current_data_types = nvbench::type_list<int>;
 
 NVBENCH_BENCH_TYPES(filter, NVBENCH_TYPE_AXES(current_data_types))
-  .set_name("base")
+  .set_name("filter")
   .set_type_axes_names({"T{ct}"})
   .add_int64_power_of_two_axis("Elements{io}", nvbench::range(12, 24, 4))
   .add_string_axis("Entropy", {"1.000", "0.544", "0.000"});
 
 NVBENCH_BENCH_TYPES(segmented_filter, NVBENCH_TYPE_AXES(current_data_types))
-  .set_name("base")
+  .set_name("segmented_filter")
+  .set_type_axes_names({"T{ct}"})
+  .add_int64_power_of_two_axis("Elements{io}", nvbench::range(12, 24, 4))
+  .add_string_axis("Entropy", {"1.000", "0.544", "0.000"});
+
+NVBENCH_BENCH_TYPES(segmented_filter_upper_bound, NVBENCH_TYPE_AXES(current_data_types))
+  .set_name("segmented_filter_upper_bound")
   .set_type_axes_names({"T{ct}"})
   .add_int64_power_of_two_axis("Elements{io}", nvbench::range(12, 24, 4))
   .add_string_axis("Entropy", {"1.000", "0.544", "0.000"});
