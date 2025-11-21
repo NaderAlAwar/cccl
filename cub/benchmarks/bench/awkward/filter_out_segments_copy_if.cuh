@@ -84,7 +84,7 @@ static void filter_out_segments_copy_if(
     cuda::counting_iterator{0},
     d_offsets.begin(),
     thrust::raw_pointer_cast(d_num_segments_out.data()),
-    num_selected + 1,
+    num_selected,
     copy_boundaries_op);
 
   if (error != cudaSuccess)
@@ -101,7 +101,7 @@ static void filter_out_segments_copy_if(
     cuda::counting_iterator{0},
     d_offsets.begin(),
     thrust::raw_pointer_cast(d_num_segments_out.data()),
-    num_selected + 1,
+    num_selected,
     copy_boundaries_op);
 
   if (error != cudaSuccess)
@@ -114,5 +114,6 @@ static void filter_out_segments_copy_if(
 
   d_selected_values.resize(num_selected);
   d_values.swap(d_selected_values);
-  d_offsets.resize(num_segments);
+  d_offsets.resize(num_segments + 1);
+  d_offsets[num_segments] = num_selected;
 }

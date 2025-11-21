@@ -17,44 +17,11 @@
 
 #include <nvbench_helper.cuh>
 
+#include "bench_util.cuh"
 #include "filter_flat_array.cuh"
 #include "filter_segmented_array.cuh"
 #include "filter_segmented_array_upper_bound.cuh"
 #include "filter_segmented_array_zipped.cuh"
-
-template <typename T>
-static void print_array(const thrust::device_vector<T>& d_values)
-{
-  thrust::host_vector<int> h_values = d_values;
-
-  for (T x : h_values)
-  {
-    std::cout << x << " ";
-  }
-  std::cout << std::endl;
-}
-
-template <typename T>
-static void print_array(const thrust::device_vector<T>& d_values, const thrust::device_vector<int>& d_offsets)
-{
-  thrust::host_vector<T> h_values    = d_values;
-  thrust::host_vector<int> h_offsets = d_offsets;
-
-  int num_segments = static_cast<int>(h_offsets.size()) - 1;
-
-  for (int seg = 0; seg < num_segments; ++seg)
-  {
-    int start = h_offsets[seg];
-    int end   = h_offsets[seg + 1];
-
-    std::cout << "Segment " << seg << ": ";
-    for (int i = start; i < end; ++i)
-    {
-      std::cout << h_values[i] << " ";
-    }
-    std::cout << std::endl;
-  }
-}
 
 // Step 1: Filter out a single array
 template <typename T>
@@ -83,27 +50,6 @@ static void filter(nvbench::state& state, nvbench::type_list<T>)
     filter(d_values, threshold);
   });
 #endif
-}
-
-thrust::host_vector<int> partition_into_segments(size_t num_elements, int max_segment_size)
-{
-  thrust::host_vector<int> sizes;
-
-  std::random_device rd;
-  std::mt19937 gen(rd());
-
-  int remaining = num_elements;
-  while (remaining > 0)
-  {
-    int max_size = std::min(max_segment_size, remaining);
-    std::uniform_int_distribution<int> dist(1, max_size);
-    int size = dist(gen);
-
-    sizes.push_back(size);
-    remaining -= size;
-  }
-
-  return sizes;
 }
 
 // Step 2: Extend to a segmented array
@@ -258,6 +204,8 @@ NVBENCH_BENCH_TYPES(segmented_filter_upper_bound, NVBENCH_TYPE_AXES(current_data
   .set_type_axes_names({"T{ct}"})
   .add_int64_power_of_two_axis("Elements{io}", nvbench::range(12, 24, 4))
   .add_string_axis("Entropy", {"1.000", "0.544", "0.000"});
+
+// TODO: add zipped version of stateful op
 
 NVBENCH_BENCH_TYPES(segmented_filter_upper_bound_zipped, NVBENCH_TYPE_AXES(current_data_types))
   .set_name("segmented_filter_upper_bound_zipped")
