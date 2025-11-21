@@ -9,7 +9,7 @@
 #include <thrust/host_vector.h>
 
 template <typename T>
-static void filter_out_segments_rle_scan(
+static void filter_out_segments_copy_if(
   thrust::device_vector<T>& d_values, thrust::device_vector<int>& d_offsets, const thrust::device_vector<bool>& d_mask)
 {
   thrust::device_vector<int> d_segment_ids(d_values.size(), thrust::no_init);
@@ -64,19 +64,28 @@ static void filter_out_segments_rle_scan(
     return;
   }
 
-  thrust::device_vector<int> d_new_segment_sizes(d_offsets.size() - 1, thrust::no_init);
   thrust::device_vector<int> d_num_segments_out(1, thrust::no_init);
 
   int num_selected = d_num_selected_out[0];
 
-  error = cub::DeviceRunLengthEncode::Encode(
+  auto copy_boundaries_op =
+    [num_selected,
+     d_selected_segment_ids = thrust::raw_pointer_cast(d_selected_segment_ids.data())] __device__(int segment_id) {
+      if (segment_id == 0)
+      {
+        return true;
+      }
+      return d_selected_segment_ids[segment_id] != d_selected_segment_ids[segment_id - 1];
+    };
+
+  error = cub::DeviceSelect::If(
     nullptr,
     temp_storage_bytes,
-    thrust::raw_pointer_cast(d_selected_segment_ids.data()),
-    cuda::make_discard_iterator(),
-    thrust::raw_pointer_cast(d_new_segment_sizes.data()),
+    cuda::counting_iterator{0},
+    d_offsets.begin(),
     thrust::raw_pointer_cast(d_num_segments_out.data()),
-    num_selected);
+    num_selected + 1,
+    copy_boundaries_op);
 
   if (error != cudaSuccess)
   {
@@ -86,52 +95,24 @@ static void filter_out_segments_rle_scan(
 
   d_temp_storage.resize(temp_storage_bytes, thrust::no_init);
 
-  error = cub::DeviceRunLengthEncode::Encode(
+  error = cub::DeviceSelect::If(
     thrust::raw_pointer_cast(d_temp_storage.data()),
     temp_storage_bytes,
-    thrust::raw_pointer_cast(d_selected_segment_ids.data()),
-    cuda::make_discard_iterator(),
-    thrust::raw_pointer_cast(d_new_segment_sizes.data()),
+    cuda::counting_iterator{0},
+    d_offsets.begin(),
     thrust::raw_pointer_cast(d_num_segments_out.data()),
-    num_selected);
+    num_selected + 1,
+    copy_boundaries_op);
 
   if (error != cudaSuccess)
   {
-    std::cerr << "Error during run-length encoding: " << cudaGetErrorString(error) << std::endl;
+    std::cerr << "Error during selection: " << cudaGetErrorString(error) << std::endl;
     return;
   }
 
   int num_segments = d_num_segments_out[0];
 
-  error = cub::DeviceScan::ExclusiveSum(
-    nullptr,
-    temp_storage_bytes,
-    thrust::raw_pointer_cast(d_new_segment_sizes.data()),
-    thrust::raw_pointer_cast(d_offsets.data()),
-    num_segments + 1);
-
-  if (error != cudaSuccess)
-  {
-    std::cerr << "Error during temp storage size calculation: " << cudaGetErrorString(error) << std::endl;
-    return;
-  }
-
-  d_temp_storage.resize(temp_storage_bytes, thrust::no_init);
-
-  error = cub::DeviceScan::ExclusiveSum(
-    thrust::raw_pointer_cast(d_temp_storage.data()),
-    temp_storage_bytes,
-    thrust::raw_pointer_cast(d_new_segment_sizes.data()),
-    thrust::raw_pointer_cast(d_offsets.data()),
-    num_segments + 1);
-
-  if (error != cudaSuccess)
-  {
-    std::cerr << "Error during exclusive sum: " << cudaGetErrorString(error) << std::endl;
-    return;
-  }
-
   d_selected_values.resize(num_selected);
   d_values.swap(d_selected_values);
-  d_offsets.resize(num_segments + 1);
+  d_offsets.resize(num_segments);
 }
