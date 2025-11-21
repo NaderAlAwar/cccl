@@ -62,7 +62,8 @@ segmented_filter_upper_bound(thrust::device_vector<T>& d_values, thrust::device_
 
   int num_selected = d_num_selected_out[0];
 
-  d_values.resize(num_selected);
+  d_selected_values.resize(num_selected);
+  d_values.swap(d_selected_values);
   d_selected_segment_ids.resize(num_selected);
 
   thrust::lower_bound(

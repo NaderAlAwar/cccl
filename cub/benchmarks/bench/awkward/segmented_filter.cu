@@ -157,7 +157,7 @@ static void segmented_filter_upper_bound(nvbench::state& state, nvbench::type_li
   thrust::device_vector<int> d_offsets{0, 1, 3, 4, 7}; // 4 segments
   constexpr T threshold = 25;
 
-  std::cout << "Running segmented array filter sample:" << std::endl;
+  std::cout << "Running segmented array filter with upper_bound sample:" << std::endl;
   std::cout << "Before filtering:" << std::endl;
   print_array(d_values, d_offsets);
   segmented_filter_upper_bound(d_values, d_offsets, threshold);
