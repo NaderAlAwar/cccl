@@ -8,10 +8,10 @@
 
 #include <nvbench_helper.cuh>
 
-template <typename T>
+template <typename T, typename PredicateOp>
 struct stateful_select_op
 {
-  T threshold;
+  PredicateOp pred;
   const T* values;
   const int* offsets;
   int num_segments;
@@ -20,7 +20,7 @@ struct stateful_select_op
   __device__ bool operator()(int global_index) const
   {
     T value   = values[global_index];
-    bool keep = value > threshold;
+    bool keep = pred(value);
 
     if (!keep)
     {
@@ -63,8 +63,8 @@ struct adjust_offsets_op
 };
 
 // Step 2: Extend to a segmented array
-template <typename T>
-static void segmented_filter(thrust::device_vector<T>& d_values, thrust::device_vector<int>& d_offsets, T threshold)
+template <typename T, typename PredicateOp>
+static void segmented_filter(thrust::device_vector<T>& d_values, thrust::device_vector<int>& d_offsets, PredicateOp pred)
 {
   const auto num_segments = d_offsets.size() - 1;
 
@@ -78,8 +78,8 @@ static void segmented_filter(thrust::device_vector<T>& d_values, thrust::device_
       return values[idx];
     });
 
-  stateful_select_op<T> select_op{
-    threshold,
+  stateful_select_op<T, PredicateOp> select_op{
+    pred,
     thrust::raw_pointer_cast(d_values.data()),
     thrust::raw_pointer_cast(d_offsets.data()),
     static_cast<int>(num_segments),

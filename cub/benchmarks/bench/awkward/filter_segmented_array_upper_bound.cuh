@@ -5,9 +5,9 @@
 #include <thrust/execution_policy.h>
 
 // Step 3: Use upper_bound to get segment ids
-template <typename T>
-static void
-segmented_filter_upper_bound(thrust::device_vector<T>& d_values, thrust::device_vector<int>& d_offsets, T threshold)
+template <typename T, typename PredicateOp>
+static void segmented_filter_upper_bound(
+  thrust::device_vector<T>& d_values, thrust::device_vector<int>& d_offsets, PredicateOp pred)
 {
   thrust::device_vector<int> d_segment_ids(d_values.size(), thrust::no_init);
   thrust::upper_bound(
@@ -23,9 +23,9 @@ segmented_filter_upper_bound(thrust::device_vector<T>& d_values, thrust::device_
   thrust::device_vector<T> d_selected_values(d_values.size(), thrust::no_init);
   thrust::device_vector<int> d_selected_segment_ids(d_values.size(), thrust::no_init);
   thrust::device_vector<int> d_num_selected_out(1, thrust::no_init);
-  auto select_op = [threshold] __device__(const cuda::std::tuple<T, int>& t) {
+  auto select_op = [pred] __device__(const cuda::std::tuple<T, int>& t) {
     T value = cuda::std::get<0>(t);
-    return value >= threshold;
+    return pred(value);
   };
 
   size_t temp_storage_bytes = 0;

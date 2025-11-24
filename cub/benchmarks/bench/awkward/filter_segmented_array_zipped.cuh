@@ -8,19 +8,20 @@
 
 #include <nvbench_helper.cuh>
 
-template <typename T>
+template <typename T, typename PredicateOp>
 struct stateful_select_zipped_op
 {
-  T threshold;
-  const T* values;
+  PredicateOp pred;
+  const T* pt;
+  const T* eta;
+  const T* phi;
   const int* offsets;
   int num_segments;
   int* num_removed_per_segment;
 
   __device__ bool operator()(int global_index) const
   {
-    T value   = values[global_index];
-    bool keep = value > threshold;
+    bool keep = pred(cuda::std::tuple<T, T, T>{pt[global_index], eta[global_index], phi[global_index]});
 
     if (!keep)
     {
@@ -62,13 +63,13 @@ struct adjust_offsets_zipped_op
   }
 };
 
-template <typename T>
+template <typename T, typename PredicateOp>
 static void segmented_filter_zipped(
   thrust::device_vector<T>& d_pt,
   thrust::device_vector<T>& d_eta,
   thrust::device_vector<T>& d_phi,
   thrust::device_vector<int>& d_offsets,
-  T threshold)
+  PredicateOp pred)
 {
   const auto num_segments = d_offsets.size() - 1;
 
@@ -86,9 +87,11 @@ static void segmented_filter_zipped(
       return cuda::std::make_tuple(pt[idx], eta[idx], phi[idx]);
     });
 
-  stateful_select_zipped_op<T> select_op{
-    threshold,
+  stateful_select_zipped_op<T, PredicateOp> select_op{
+    pred,
     thrust::raw_pointer_cast(d_pt.data()),
+    thrust::raw_pointer_cast(d_eta.data()),
+    thrust::raw_pointer_cast(d_phi.data()),
     thrust::raw_pointer_cast(d_offsets.data()),
     static_cast<int>(num_segments),
     thrust::raw_pointer_cast(d_num_removed_per_segment.data())};

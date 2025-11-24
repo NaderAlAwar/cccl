@@ -1,12 +1,16 @@
 #pragma once
 
-template <typename T>
+#include <thrust/binary_search.h>
+#include <thrust/device_vector.h>
+#include <thrust/execution_policy.h>
+
+template <typename T, typename PredicateOp>
 static void segmented_filter_upper_bound_zipped(
   thrust::device_vector<T>& d_pt,
   thrust::device_vector<T>& d_eta,
   thrust::device_vector<T>& d_phi,
   thrust::device_vector<int>& d_offsets,
-  T threshold)
+  PredicateOp pred)
 {
   auto num_values = d_pt.size();
 
@@ -33,10 +37,10 @@ static void segmented_filter_upper_bound_zipped(
   thrust::device_vector<int> d_selected_segment_ids(num_values, thrust::no_init);
   thrust::device_vector<int> d_num_selected_out(1, thrust::no_init);
 
-  // Selecting based on value from the pt array
-  auto select_op = [threshold] __device__(const cuda::std::tuple<cuda::std::tuple<T, T, T>, int>& t) {
-    T value = cuda::std::get<0>(cuda::std::get<0>(t));
-    return value >= threshold;
+  // Selecting based on predicate that receives a tuple of (pt, eta, phi)
+  auto select_op = [pred] __device__(const cuda::std::tuple<cuda::std::tuple<T, T, T>, int>& t) {
+    const auto& values = cuda::std::get<0>(t);
+    return pred(values);
   };
 
   size_t temp_storage_bytes = 0;

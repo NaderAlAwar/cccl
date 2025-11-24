@@ -8,14 +8,10 @@
 #include <nvbench_helper.cuh>
 
 // Step 1: Filter out a single array
-template <typename T>
-static void filter(thrust::device_vector<T>& d_values, T threshold)
+template <typename T, typename PredicateOp>
+static void filter(thrust::device_vector<T>& d_values, PredicateOp pred)
 {
   thrust::device_vector<int> d_num_selected_out(1, thrust::no_init);
-
-  auto select_op = [] __device__(int value) {
-    return value > 25;
-  };
 
   size_t temp_storage_bytes = 0;
   cub::DeviceSelect::If(
@@ -24,7 +20,7 @@ static void filter(thrust::device_vector<T>& d_values, T threshold)
     thrust::raw_pointer_cast(d_values.data()),
     thrust::raw_pointer_cast(d_num_selected_out.data()),
     d_values.size(),
-    select_op);
+    pred);
 
   thrust::device_vector<uint8_t> d_temp_storage(temp_storage_bytes, thrust::no_init);
 
@@ -34,7 +30,7 @@ static void filter(thrust::device_vector<T>& d_values, T threshold)
     thrust::raw_pointer_cast(d_values.data()),
     thrust::raw_pointer_cast(d_num_selected_out.data()),
     d_values.size(),
-    select_op);
+    pred);
 
   // Retrieve number of selected elements
   thrust::host_vector<int> h_num_selected_out = d_num_selected_out;
