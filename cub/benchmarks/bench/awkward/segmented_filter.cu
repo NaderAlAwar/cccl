@@ -21,6 +21,7 @@
 #include "filter_flat_array.cuh"
 #include "filter_segmented_array.cuh"
 #include "filter_segmented_array_upper_bound.cuh"
+#include "filter_segmented_array_upper_bound_zipped.cuh"
 #include "filter_segmented_array_zipped.cuh"
 
 // Step 1: Filter out a single array
@@ -134,7 +135,58 @@ static void segmented_filter_upper_bound(nvbench::state& state, nvbench::type_li
 #endif
 }
 
-// Step 4: Zip three input value arrays
+// Step 4: stateful operator + zip three input arrays
+template <typename T>
+static void segmented_filter_zipped(nvbench::state& state, nvbench::type_list<T>)
+{
+#if RUN_SAMPLE
+  // Example: [[30], [40,20], [50], [10,30,80]]
+  //          [[2.1], [2.2,-1.5], [3], [0.4,3.7,-1.2]]
+  //          [[0.3], [0.5,0.6], [0.3], [0.1,0.7,0.4]]
+  // Flatten:
+  thrust::device_vector<T> d_pt{30, 40, 20, 50, 10, 30, 80};
+  thrust::device_vector<T> d_eta{2.1, 2.2, -1.5, 3, 0.4, 3.7, -1.2};
+  thrust::device_vector<T> d_phi{0.3, 0.5, 0.6, 0.3, 0.1, 0.7, 0.4};
+  thrust::device_vector<int> d_offsets{0, 1, 3, 4, 7}; // 4 segments
+  constexpr T threshold = 25;
+
+  std::cout << "Running segmented array filter with upper_bound on three zipped arrays sample:" << std::endl;
+  std::cout << "Before filtering:" << std::endl;
+  print_array(d_pt, d_offsets);
+  print_array(d_eta, d_offsets);
+  print_array(d_phi, d_offsets);
+  segmented_filter_zipped(d_pt, d_eta, d_phi, d_offsets, threshold);
+  std::cout << "After filtering (threshold = " << threshold << "):" << std::endl;
+  print_array(d_pt, d_offsets);
+  print_array(d_eta, d_offsets);
+  print_array(d_phi, d_offsets);
+#else
+  // Retrieve axis parameters
+  const auto elements       = static_cast<std::size_t>(state.get_int64("Elements{io}"));
+  const bit_entropy entropy = str_to_entropy(state.get_string("Entropy"));
+
+  constexpr int max_segment_size = 20;
+  const int max_num_segments     = cuda::ceil_div(elements, max_segment_size);
+
+  thrust::device_vector<T> d_pt  = generate(elements);
+  thrust::device_vector<T> d_eta = generate(elements);
+  thrust::device_vector<T> d_phi = generate(elements);
+
+  auto segment_sizes = partition_into_segments(elements, max_segment_size);
+  thrust::host_vector<int> h_offsets(segment_sizes.size() + 1);
+  std::exclusive_scan(segment_sizes.begin(), segment_sizes.end(), h_offsets.begin(), 0);
+  h_offsets[segment_sizes.size()] = h_offsets[segment_sizes.size() - 1] + segment_sizes.back();
+
+  thrust::device_vector<int> d_offsets = h_offsets;
+  const T threshold                    = lerp_min_max<T>(entropy_to_probability(entropy));
+
+  state.exec(nvbench::exec_tag::sync, [&](nvbench::launch& launch) {
+    segmented_filter_zipped(d_pt, d_eta, d_phi, d_offsets, threshold);
+  });
+#endif
+}
+
+// Step 5: upper bound + zip three input arrays
 template <typename T>
 static void segmented_filter_upper_bound_zipped(nvbench::state& state, nvbench::type_list<T>)
 {
@@ -205,7 +257,11 @@ NVBENCH_BENCH_TYPES(segmented_filter_upper_bound, NVBENCH_TYPE_AXES(current_data
   .add_int64_power_of_two_axis("Elements{io}", nvbench::range(12, 24, 4))
   .add_string_axis("Entropy", {"1.000", "0.544", "0.000"});
 
-// TODO: add zipped version of stateful op
+NVBENCH_BENCH_TYPES(segmented_filter_zipped, NVBENCH_TYPE_AXES(current_data_types))
+  .set_name("segmented_filter_zipped")
+  .set_type_axes_names({"T{ct}"})
+  .add_int64_power_of_two_axis("Elements{io}", nvbench::range(12, 24, 4))
+  .add_string_axis("Entropy", {"1.000", "0.544", "0.000"});
 
 NVBENCH_BENCH_TYPES(segmented_filter_upper_bound_zipped, NVBENCH_TYPE_AXES(current_data_types))
   .set_name("segmented_filter_upper_bound_zipped")

@@ -1,93 +1,177 @@
 #pragma once
 
-// Step 4: Zip three input value arrays
+#include <cub/device/device_select.cuh>
+
+#include <thrust/binary_search.h> // thrust::lower_bound
+#include <thrust/device_vector.h>
+#include <thrust/host_vector.h>
+
+#include <nvbench_helper.cuh>
+
 template <typename T>
-static void segmented_filter_upper_bound_zipped(
+struct stateful_select_zipped_op
+{
+  T threshold;
+  const T* values;
+  const int* offsets;
+  int num_segments;
+  int* num_removed_per_segment;
+
+  __device__ bool operator()(int global_index) const
+  {
+    T value   = values[global_index];
+    bool keep = value > threshold;
+
+    if (!keep)
+    {
+      // figure out which segment this value belongs to
+      // increment num_removed_per_segment for that segment
+
+      // `it` is a memory location in the offsets array, so we still need to
+      // find the segment index. We do this with pointer arithmetic.
+      const int* it = thrust::lower_bound(thrust::seq, offsets, offsets + num_segments + 1, global_index + 1);
+
+      int segment_index = static_cast<int>(it - offsets - 1);
+
+      atomicAdd(&(num_removed_per_segment[segment_index]), 1);
+    }
+
+    return keep;
+  }
+};
+
+struct adjust_offsets_zipped_op
+{
+  const int* num_removed_per_segment;
+  int num_segments;
+  const int* input_offsets; // size num_segments + 1
+
+  __device__ int operator()(int segment_index) const
+  {
+    if (segment_index == num_segments)
+    {
+      return 0;
+    }
+
+    int segment_start = input_offsets[segment_index];
+    int segment_end   = input_offsets[segment_index + 1];
+
+    int new_length = (segment_end - segment_start) - num_removed_per_segment[segment_index];
+
+    return new_length;
+  }
+};
+
+template <typename T>
+static void segmented_filter_zipped(
   thrust::device_vector<T>& d_pt,
   thrust::device_vector<T>& d_eta,
   thrust::device_vector<T>& d_phi,
   thrust::device_vector<int>& d_offsets,
   T threshold)
 {
-  auto num_values = d_pt.size();
+  const auto num_segments = d_offsets.size() - 1;
 
-  thrust::device_vector<int> d_segment_ids(num_values, thrust::no_init);
-  thrust::upper_bound(
-    thrust::device,
-    d_offsets.begin(),
-    d_offsets.end(),
-    cuda::counting_iterator{0},
-    cuda::counting_iterator{static_cast<int>(num_values)},
-    cuda::make_transform_output_iterator(d_segment_ids.begin(), [] __device__(int value) {
-      return value - 1;
-    }));
-
-  // Create zipped input and output iterators
-  thrust::device_vector<T> d_selected_pt(num_values, thrust::no_init);
-  thrust::device_vector<T> d_selected_eta(num_values, thrust::no_init);
-  thrust::device_vector<T> d_selected_phi(num_values, thrust::no_init);
-
-  auto input_values_iter = cuda::make_zip_iterator(d_pt.begin(), d_eta.begin(), d_phi.begin());
-  auto output_values_iter =
-    cuda::make_zip_iterator(d_selected_pt.begin(), d_selected_eta.begin(), d_selected_phi.begin());
-
-  thrust::device_vector<int> d_selected_segment_ids(num_values, thrust::no_init);
   thrust::device_vector<int> d_num_selected_out(1, thrust::no_init);
+  thrust::device_vector<int> d_num_removed_per_segment(num_segments, 0);
 
-  // Selecting based on value from the pt array
-  auto select_op = [threshold] __device__(const cuda::std::tuple<cuda::std::tuple<T, T, T>, int>& t) {
-    T value = cuda::std::get<0>(cuda::std::get<0>(t));
-    return value >= threshold;
-  };
+  // Write directly to d_values
+  auto output_iter = cuda::make_transform_output_iterator(
+    cuda::make_zip_iterator(thrust::raw_pointer_cast(d_pt.data()),
+                            thrust::raw_pointer_cast(d_eta.data()),
+                            thrust::raw_pointer_cast(d_phi.data())),
+    [pt  = thrust::raw_pointer_cast(d_pt.data()),
+     eta = thrust::raw_pointer_cast(d_eta.data()),
+     phi = thrust::raw_pointer_cast(d_phi.data())] __device__(int idx) {
+      return cuda::std::make_tuple(pt[idx], eta[idx], phi[idx]);
+    });
+
+  stateful_select_zipped_op<T> select_op{
+    threshold,
+    thrust::raw_pointer_cast(d_pt.data()),
+    thrust::raw_pointer_cast(d_offsets.data()),
+    static_cast<int>(num_segments),
+    thrust::raw_pointer_cast(d_num_removed_per_segment.data())};
 
   size_t temp_storage_bytes = 0;
   auto error                = cub::DeviceSelect::If(
     nullptr,
     temp_storage_bytes,
-    cuda::make_zip_iterator(input_values_iter, d_segment_ids.begin()),
-    cuda::make_zip_iterator(output_values_iter, d_selected_segment_ids.begin()),
+    cuda::counting_iterator{0},
+    output_iter,
     thrust::raw_pointer_cast(d_num_selected_out.data()),
-    num_values,
+    d_pt.size(),
     select_op);
 
   if (error != cudaSuccess)
   {
-    std::cerr << "Error during temporary storage size calculation: " << cudaGetErrorString(error) << std::endl;
+    std::cerr << "Error during temp storage size calculation: " << cudaGetErrorString(error) << std::endl;
     return;
   }
 
   thrust::device_vector<uint8_t> d_temp_storage(temp_storage_bytes, thrust::no_init);
+
   error = cub::DeviceSelect::If(
     thrust::raw_pointer_cast(d_temp_storage.data()),
     temp_storage_bytes,
-    cuda::make_zip_iterator(input_values_iter, d_segment_ids.begin()),
-    cuda::make_zip_iterator(output_values_iter, d_selected_segment_ids.begin()),
+    cuda::counting_iterator{0},
+    output_iter,
     thrust::raw_pointer_cast(d_num_selected_out.data()),
-    num_values,
+    d_pt.size(),
     select_op);
 
   if (error != cudaSuccess)
   {
-    std::cerr << "Error during selection: " << cudaGetErrorString(error) << std::endl;
+    std::cerr << "Error during DeviceSelect::If: " << cudaGetErrorString(error) << std::endl;
     return;
   }
 
-  int num_selected = d_num_selected_out[0];
+  int num_selected = thrust::host_vector<int>(d_num_selected_out)[0];
 
-  d_selected_pt.resize(num_selected);
-  d_selected_eta.resize(num_selected);
-  d_selected_phi.resize(num_selected);
-  d_pt.swap(d_selected_pt);
-  d_eta.swap(d_selected_eta);
-  d_phi.swap(d_selected_phi);
+  d_pt.resize(num_selected);
+  d_eta.resize(num_selected);
+  d_phi.resize(num_selected);
 
-  d_selected_segment_ids.resize(num_selected);
+  adjust_offsets_zipped_op adjust_op{
+    thrust::raw_pointer_cast(d_num_removed_per_segment.data()),
+    static_cast<int>(num_segments),
+    thrust::raw_pointer_cast(d_offsets.data())};
 
-  thrust::lower_bound(
-    thrust::device,
-    d_selected_segment_ids.begin(),
-    d_selected_segment_ids.end(),
-    cuda::counting_iterator{0},
-    cuda::counting_iterator{static_cast<int>(d_offsets.size())},
-    d_offsets.begin());
+  auto input_iter = cuda::make_transform_iterator(cuda::counting_iterator{0}, adjust_op);
+  thrust::device_vector<int> d_new_offsets(num_segments + 1, thrust::no_init);
+
+  error = cub::DeviceScan::ExclusiveScan(
+    nullptr,
+    temp_storage_bytes,
+    input_iter,
+    thrust::raw_pointer_cast(d_new_offsets.data()),
+    cuda::std::plus<>{},
+    0,
+    num_segments + 1);
+
+  if (error != cudaSuccess)
+  {
+    std::cerr
+      << "Error during temp storage size calculation for ExclusiveScan: " << cudaGetErrorString(error) << std::endl;
+    return;
+  }
+
+  d_temp_storage.resize(temp_storage_bytes);
+
+  error = cub::DeviceScan::ExclusiveScan(
+    thrust::raw_pointer_cast(d_temp_storage.data()),
+    temp_storage_bytes,
+    input_iter,
+    thrust::raw_pointer_cast(d_new_offsets.data()),
+    cuda::std::plus<>{},
+    0,
+    num_segments + 1);
+
+  if (error != cudaSuccess)
+  {
+    std::cerr << "Error during ExclusiveScan: " << cudaGetErrorString(error) << std::endl;
+    return;
+  }
+
+  d_offsets.swap(d_new_offsets);
 }
