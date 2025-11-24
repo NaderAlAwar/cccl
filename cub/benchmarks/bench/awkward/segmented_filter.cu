@@ -24,6 +24,30 @@
 #include "filter_segmented_array_upper_bound_zipped.cuh"
 #include "filter_segmented_array_zipped.cuh"
 
+// Predicate for single value filtering
+template <typename T>
+struct single_value_predicate
+{
+  T threshold;
+
+  __device__ bool operator()(T value) const
+  {
+    return value > threshold;
+  }
+};
+
+// Predicate for zipped tuple filtering (based on first element, pt)
+template <typename T>
+struct zipped_tuple_predicate
+{
+  T threshold;
+
+  __device__ bool operator()(const cuda::std::tuple<T, T, T>& values) const
+  {
+    return cuda::std::get<0>(values) > threshold;
+  }
+};
+
 // Step 1: Filter out a single array
 template <typename T>
 static void filter(nvbench::state& state, nvbench::type_list<T>)
@@ -32,11 +56,12 @@ static void filter(nvbench::state& state, nvbench::type_list<T>)
   // Example: [[30, 40, 20, 50, 10, 30, 80]]
   thrust::device_vector<T> d_values{30, 40, 20, 50, 10, 30, 80};
   constexpr T threshold = 25;
+  single_value_predicate<T> pred{threshold};
 
   std::cout << "Running single array filter sample:" << std::endl;
   std::cout << "Before filtering:" << std::endl;
   print_array(d_values);
-  filter(d_values, threshold);
+  filter(d_values, pred);
   std::cout << "After filtering (threshold = " << threshold << "):" << std::endl;
   print_array(d_values);
 #else
@@ -46,9 +71,10 @@ static void filter(nvbench::state& state, nvbench::type_list<T>)
 
   thrust::device_vector<T> d_values = generate(elements);
   const T threshold                 = lerp_min_max<T>(entropy_to_probability(entropy));
+  single_value_predicate<T> pred{threshold};
 
   state.exec(nvbench::exec_tag::sync, [&](nvbench::launch& launch) {
-    filter(d_values, threshold);
+    filter(d_values, pred);
   });
 #endif
 }
@@ -63,11 +89,12 @@ static void segmented_filter(nvbench::state& state, nvbench::type_list<T>)
   thrust::device_vector<T> d_values{30, 40, 20, 50, 10, 30, 80};
   thrust::device_vector<int> d_offsets{0, 1, 3, 4, 7}; // 4 segments
   constexpr T threshold = 25;
+  single_value_predicate<T> pred{threshold};
 
   std::cout << "Running segmented array filter sample:" << std::endl;
   std::cout << "Before filtering:" << std::endl;
   print_array(d_values, d_offsets);
-  segmented_filter(d_values, d_offsets, threshold);
+  segmented_filter(d_values, d_offsets, pred);
   std::cout << "After filtering (threshold = " << threshold << "):" << std::endl;
   print_array(d_values, d_offsets);
 #else
@@ -87,9 +114,10 @@ static void segmented_filter(nvbench::state& state, nvbench::type_list<T>)
 
   thrust::device_vector<int> d_offsets = h_offsets;
   const T threshold                    = lerp_min_max<T>(entropy_to_probability(entropy));
+  single_value_predicate<T> pred{threshold};
 
   state.exec(nvbench::exec_tag::sync, [&](nvbench::launch& launch) {
-    segmented_filter(d_values, d_offsets, threshold);
+    segmented_filter(d_values, d_offsets, pred);
   });
 #endif
 }
@@ -104,11 +132,12 @@ static void segmented_filter_upper_bound(nvbench::state& state, nvbench::type_li
   thrust::device_vector<T> d_values{30, 40, 20, 50, 10, 30, 80};
   thrust::device_vector<int> d_offsets{0, 1, 3, 4, 7}; // 4 segments
   constexpr T threshold = 25;
+  single_value_predicate<T> pred{threshold};
 
   std::cout << "Running segmented array filter with upper_bound sample:" << std::endl;
   std::cout << "Before filtering:" << std::endl;
   print_array(d_values, d_offsets);
-  segmented_filter_upper_bound(d_values, d_offsets, threshold);
+  segmented_filter_upper_bound(d_values, d_offsets, pred);
   std::cout << "After filtering (threshold = " << threshold << "):" << std::endl;
   print_array(d_values, d_offsets);
 #else
@@ -128,9 +157,10 @@ static void segmented_filter_upper_bound(nvbench::state& state, nvbench::type_li
 
   thrust::device_vector<int> d_offsets = h_offsets;
   const T threshold                    = lerp_min_max<T>(entropy_to_probability(entropy));
+  single_value_predicate<T> pred{threshold};
 
   state.exec(nvbench::exec_tag::sync, [&](nvbench::launch& launch) {
-    segmented_filter_upper_bound(d_values, d_offsets, threshold);
+    segmented_filter_upper_bound(d_values, d_offsets, pred);
   });
 #endif
 }
@@ -149,13 +179,14 @@ static void segmented_filter_zipped(nvbench::state& state, nvbench::type_list<T>
   thrust::device_vector<T> d_phi{0.3, 0.5, 0.6, 0.3, 0.1, 0.7, 0.4};
   thrust::device_vector<int> d_offsets{0, 1, 3, 4, 7}; // 4 segments
   constexpr T threshold = 25;
+  zipped_tuple_predicate<T> pred{threshold};
 
   std::cout << "Running segmented array filter with upper_bound on three zipped arrays sample:" << std::endl;
   std::cout << "Before filtering:" << std::endl;
   print_array(d_pt, d_offsets);
   print_array(d_eta, d_offsets);
   print_array(d_phi, d_offsets);
-  segmented_filter_zipped(d_pt, d_eta, d_phi, d_offsets, threshold);
+  segmented_filter_zipped(d_pt, d_eta, d_phi, d_offsets, pred);
   std::cout << "After filtering (threshold = " << threshold << "):" << std::endl;
   print_array(d_pt, d_offsets);
   print_array(d_eta, d_offsets);
@@ -179,9 +210,10 @@ static void segmented_filter_zipped(nvbench::state& state, nvbench::type_list<T>
 
   thrust::device_vector<int> d_offsets = h_offsets;
   const T threshold                    = lerp_min_max<T>(entropy_to_probability(entropy));
+  zipped_tuple_predicate<T> pred{threshold};
 
   state.exec(nvbench::exec_tag::sync, [&](nvbench::launch& launch) {
-    segmented_filter_zipped(d_pt, d_eta, d_phi, d_offsets, threshold);
+    segmented_filter_zipped(d_pt, d_eta, d_phi, d_offsets, pred);
   });
 #endif
 }
@@ -200,13 +232,14 @@ static void segmented_filter_upper_bound_zipped(nvbench::state& state, nvbench::
   thrust::device_vector<T> d_phi{0.3, 0.5, 0.6, 0.3, 0.1, 0.7, 0.4};
   thrust::device_vector<int> d_offsets{0, 1, 3, 4, 7}; // 4 segments
   constexpr T threshold = 25;
+  zipped_tuple_predicate<T> pred{threshold};
 
   std::cout << "Running segmented array filter with upper_bound on three zipped arrays sample:" << std::endl;
   std::cout << "Before filtering:" << std::endl;
   print_array(d_pt, d_offsets);
   print_array(d_eta, d_offsets);
   print_array(d_phi, d_offsets);
-  segmented_filter_upper_bound_zipped(d_pt, d_eta, d_phi, d_offsets, threshold);
+  segmented_filter_upper_bound_zipped(d_pt, d_eta, d_phi, d_offsets, pred);
   std::cout << "After filtering (threshold = " << threshold << "):" << std::endl;
   print_array(d_pt, d_offsets);
   print_array(d_eta, d_offsets);
@@ -230,9 +263,10 @@ static void segmented_filter_upper_bound_zipped(nvbench::state& state, nvbench::
 
   thrust::device_vector<int> d_offsets = h_offsets;
   const T threshold                    = lerp_min_max<T>(entropy_to_probability(entropy));
+  zipped_tuple_predicate<T> pred{threshold};
 
   state.exec(nvbench::exec_tag::sync, [&](nvbench::launch& launch) {
-    segmented_filter_upper_bound_zipped(d_pt, d_eta, d_phi, d_offsets, threshold);
+    segmented_filter_upper_bound_zipped(d_pt, d_eta, d_phi, d_offsets, pred);
   });
 #endif
 }
