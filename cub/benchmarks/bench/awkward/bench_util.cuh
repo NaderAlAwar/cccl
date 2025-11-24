@@ -9,7 +9,7 @@
 template <typename T>
 static void print_array(const thrust::device_vector<T>& d_values)
 {
-  thrust::host_vector<int> h_values = d_values;
+  thrust::host_vector<T> h_values = d_values;
 
   for (T x : h_values)
   {
