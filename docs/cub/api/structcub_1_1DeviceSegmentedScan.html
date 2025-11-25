@@ -586,6 +586,7 @@
 <li class="toctree-l4"><a class="reference internal" href="namespacecub_1a03d07a1e0e455128713337bc38992ec6.html">cub::StoreDirectWarpStriped</a></li>
 <li class="toctree-l4"><a class="reference internal" href="namespacecub_1af987f4650f9ab899588513632a7a335c.html">cub::ThreadLoad</a></li>
 <li class="toctree-l4"><a class="reference internal" href="namespacecub_1a553633b74da5b2b77992aa60c1f278f3.html">cub::ThreadStore</a></li>
+<li class="toctree-l4"><a class="reference internal" href="namespacecub_1a2ed79a837d7d04fc62062a113f41819f.html">cub::operator&lt;&lt;</a></li>
 <li class="toctree-l4"><a class="reference internal" href="namespacecub_1a1b6e2aaf857cfd72861cf2499bf9acb3.html">cub::MergePath</a></li>
 <li class="toctree-l4"><a class="reference internal" href="namespacecub_1aed5ce3db2c0ebfafd33d5ef6a1eb71a8.html">cub::SerialMerge</a></li>
 <li class="toctree-l4"><a class="reference internal" href="namespacecub_1a5bc54df3b7da4260d8c1d8579f63f0c0.html">cub::ThreadReduce</a></li>
@@ -1561,7 +1562,7 @@ is, <code class="docutils literal notranslate"><span class="pre">op(op(a,</span>
 and may vary from run to run.</p></li>
 <li><p>When <code class="docutils literal notranslate"><span class="pre">d_in</span></code> and <code class="docutils literal notranslate"><span class="pre">d_out</span></code> are equal, the scan is performed in-place. The input and output sequences
 shall not overlap in any other way.</p></li>
-<li><p>When <code class="docutils literal notranslate"><span class="pre">d_temp_storage</span></code> is <code class="docutils literal notranslate"><span class="pre">nullptr</span></code>, no work is done and the required allocation size is returned in <code class="docutils literal notranslate"><span class="pre">temp_storage_bytes</span></code>.</p></li>
+<li><p>When <code class="docutils literal notranslate"><span class="pre">d_temp_storage</span></code> is <code class="docutils literal notranslate"><span class="pre">nullptr</span></code>, no work is done and the required allocation size is returned in <code class="docutils literal notranslate"><span class="pre">temp_storage_bytes</span></code>. See <a class="reference internal" href="../api_docs/device_wide.html#device-temp-storage"><span class="std std-ref">Determining Temporary Storage Requirements</span></a> for usage guidance.</p></li>
 </ul>
 <section id="preconditions">
 <h2>Preconditions<a class="headerlink" href="#preconditions" title="Link to this heading">#</a></h2>
@@ -1667,7 +1668,7 @@ is considered empty.</p>
 and may vary from run to run.</p></li>
 <li><p>When <code class="docutils literal notranslate"><span class="pre">d_in</span></code> and <code class="docutils literal notranslate"><span class="pre">d_out</span></code> are equal, the scan is performed in-place. The input and output sequences
 shall not overlap in any other way.</p></li>
-<li><p>When <code class="docutils literal notranslate"><span class="pre">d_temp_storage</span></code> is <code class="docutils literal notranslate"><span class="pre">nullptr</span></code>, no work is done and the required allocation size is returned in <code class="docutils literal notranslate"><span class="pre">temp_storage_bytes</span></code>.</p></li>
+<li><p>When <code class="docutils literal notranslate"><span class="pre">d_temp_storage</span></code> is <code class="docutils literal notranslate"><span class="pre">nullptr</span></code>, no work is done and the required allocation size is returned in <code class="docutils literal notranslate"><span class="pre">temp_storage_bytes</span></code>. See <a class="reference internal" href="../api_docs/device_wide.html#device-temp-storage"><span class="std std-ref">Determining Temporary Storage Requirements</span></a> for usage guidance.</p></li>
 </ul>
 <section id="id1">
 <h2>Snippet<a class="headerlink" href="#id1" title="Link to this heading">#</a></h2>
@@ -1746,7 +1747,7 @@ addition of floating-point types). Results for pseudo-associative
 operators may vary from run to run.</p></li>
 <li><p>When <code class="docutils literal notranslate"><span class="pre">d_in</span></code> and <code class="docutils literal notranslate"><span class="pre">d_out</span></code> are equal, the scan is performed in-place. The input and output sequences
 shall not overlap in any other way.</p></li>
-<li><p>When <code class="docutils literal notranslate"><span class="pre">d_temp_storage</span></code> is <code class="docutils literal notranslate"><span class="pre">nullptr</span></code>, no work is done and the required allocation size is returned in <code class="docutils literal notranslate"><span class="pre">temp_storage_bytes</span></code>.</p></li>
+<li><p>When <code class="docutils literal notranslate"><span class="pre">d_temp_storage</span></code> is <code class="docutils literal notranslate"><span class="pre">nullptr</span></code>, no work is done and the required allocation size is returned in <code class="docutils literal notranslate"><span class="pre">temp_storage_bytes</span></code>. See <a class="reference internal" href="../api_docs/device_wide.html#device-temp-storage"><span class="std std-ref">Determining Temporary Storage Requirements</span></a> for usage guidance.</p></li>
 </ul>
 <section id="id2">
 <h2>Snippet<a class="headerlink" href="#id2" title="Link to this heading">#</a></h2>
@@ -1824,7 +1825,7 @@ addition of floating-point types). Results for pseudo-associative
 operators may vary from run to run.</p></li>
 <li><p>When <code class="docutils literal notranslate"><span class="pre">d_in</span></code> and <code class="docutils literal notranslate"><span class="pre">d_out</span></code> are equal, the scan is performed in-place. The input and output sequences
 shall not overlap in any other way.</p></li>
-<li><p>When <code class="docutils literal notranslate"><span class="pre">d_temp_storage</span></code> is <code class="docutils literal notranslate"><span class="pre">nullptr</span></code>, no work is done and the required allocation size is returned in <code class="docutils literal notranslate"><span class="pre">temp_storage_bytes</span></code>.</p></li>
+<li><p>When <code class="docutils literal notranslate"><span class="pre">d_temp_storage</span></code> is <code class="docutils literal notranslate"><span class="pre">nullptr</span></code>, no work is done and the required allocation size is returned in <code class="docutils literal notranslate"><span class="pre">temp_storage_bytes</span></code>. See <a class="reference internal" href="../api_docs/device_wide.html#device-temp-storage"><span class="std std-ref">Determining Temporary Storage Requirements</span></a> for usage guidance.</p></li>
 </ul>
 </p>
  </p>
@@ -1896,7 +1897,7 @@ element of the <em>i</em><sup>th</sup> data segment in <code class="docutils lit
 and may vary from run to run.</p></li>
 <li><p>When <code class="docutils literal notranslate"><span class="pre">d_in</span></code> and <code class="docutils literal notranslate"><span class="pre">d_out</span></code> are equal, the scan is performed in-place. The input and output sequences
 shall not overlap in any other way.</p></li>
-<li><p>When <code class="docutils literal notranslate"><span class="pre">d_temp_storage</span></code> is <code class="docutils literal notranslate"><span class="pre">nullptr</span></code>, no work is done and the required allocation size is returned in <code class="docutils literal notranslate"><span class="pre">temp_storage_bytes</span></code>.</p></li>
+<li><p>When <code class="docutils literal notranslate"><span class="pre">d_temp_storage</span></code> is <code class="docutils literal notranslate"><span class="pre">nullptr</span></code>, no work is done and the required allocation size is returned in <code class="docutils literal notranslate"><span class="pre">temp_storage_bytes</span></code>. See <a class="reference internal" href="../api_docs/device_wide.html#device-temp-storage"><span class="std std-ref">Determining Temporary Storage Requirements</span></a> for usage guidance.</p></li>
 </ul>
 <section id="id3">
 <h2>Snippet<a class="headerlink" href="#id3" title="Link to this heading">#</a></h2>
@@ -1965,7 +1966,7 @@ is considered empty.</p>
 and may vary from run to run.</p></li>
 <li><p>When <code class="docutils literal notranslate"><span class="pre">d_in</span></code> and <code class="docutils literal notranslate"><span class="pre">d_out</span></code> are equal, the scan is performed in-place. The input and output sequences
 shall not overlap in any other way.</p></li>
-<li><p>When <code class="docutils literal notranslate"><span class="pre">d_temp_storage</span></code> is <code class="docutils literal notranslate"><span class="pre">nullptr</span></code>, no work is done and the required allocation size is returned in <code class="docutils literal notranslate"><span class="pre">temp_storage_bytes</span></code>.</p></li>
+<li><p>When <code class="docutils literal notranslate"><span class="pre">d_temp_storage</span></code> is <code class="docutils literal notranslate"><span class="pre">nullptr</span></code>, no work is done and the required allocation size is returned in <code class="docutils literal notranslate"><span class="pre">temp_storage_bytes</span></code>. See <a class="reference internal" href="../api_docs/device_wide.html#device-temp-storage"><span class="std std-ref">Determining Temporary Storage Requirements</span></a> for usage guidance.</p></li>
 </ul>
 <section id="id4">
 <h2>Snippet<a class="headerlink" href="#id4" title="Link to this heading">#</a></h2>
@@ -2042,7 +2043,7 @@ addition of floating-point types). Results for pseudo-associative
 operators may vary from run to run.</p></li>
 <li><p>When <code class="docutils literal notranslate"><span class="pre">d_in</span></code> and <code class="docutils literal notranslate"><span class="pre">d_out</span></code> are equal, the scan is performed in-place. The input and output sequences
 shall not overlap in any other way.</p></li>
-<li><p>When <code class="docutils literal notranslate"><span class="pre">d_temp_storage</span></code> is <code class="docutils literal notranslate"><span class="pre">nullptr</span></code>, no work is done and the required allocation size is returned in <code class="docutils literal notranslate"><span class="pre">temp_storage_bytes</span></code>.</p></li>
+<li><p>When <code class="docutils literal notranslate"><span class="pre">d_temp_storage</span></code> is <code class="docutils literal notranslate"><span class="pre">nullptr</span></code>, no work is done and the required allocation size is returned in <code class="docutils literal notranslate"><span class="pre">temp_storage_bytes</span></code>. See <a class="reference internal" href="../api_docs/device_wide.html#device-temp-storage"><span class="std std-ref">Determining Temporary Storage Requirements</span></a> for usage guidance.</p></li>
 </ul>
 </p>
  </p>
@@ -2110,7 +2111,7 @@ addition of floating-point types). Results for pseudo-associative
 operators may vary from run to run.</p></li>
 <li><p>When <code class="docutils literal notranslate"><span class="pre">d_in</span></code> and <code class="docutils literal notranslate"><span class="pre">d_out</span></code> are equal, the scan is performed in-place. The input and output sequences
 shall not overlap in any other way.</p></li>
-<li><p>When <code class="docutils literal notranslate"><span class="pre">d_temp_storage</span></code> is <code class="docutils literal notranslate"><span class="pre">nullptr</span></code>, no work is done and the required allocation size is returned in <code class="docutils literal notranslate"><span class="pre">temp_storage_bytes</span></code>.</p></li>
+<li><p>When <code class="docutils literal notranslate"><span class="pre">d_temp_storage</span></code> is <code class="docutils literal notranslate"><span class="pre">nullptr</span></code>, no work is done and the required allocation size is returned in <code class="docutils literal notranslate"><span class="pre">temp_storage_bytes</span></code>. See <a class="reference internal" href="../api_docs/device_wide.html#device-temp-storage"><span class="std std-ref">Determining Temporary Storage Requirements</span></a> for usage guidance.</p></li>
 </ul>
 <section id="id5">
 <h2>Snippet<a class="headerlink" href="#id5" title="Link to this heading">#</a></h2>
@@ -2191,7 +2192,7 @@ addition of floating-point types). Results for pseudo-associative
 operators may vary from run to run.</p></li>
 <li><p>When <code class="docutils literal notranslate"><span class="pre">d_in</span></code> and <code class="docutils literal notranslate"><span class="pre">d_out</span></code> are equal, the scan is performed in-place. The input and output sequences
 shall not overlap in any other way.</p></li>
-<li><p>When <code class="docutils literal notranslate"><span class="pre">d_temp_storage</span></code> is <code class="docutils literal notranslate"><span class="pre">nullptr</span></code>, no work is done and the required allocation size is returned in <code class="docutils literal notranslate"><span class="pre">temp_storage_bytes</span></code>.</p></li>
+<li><p>When <code class="docutils literal notranslate"><span class="pre">d_temp_storage</span></code> is <code class="docutils literal notranslate"><span class="pre">nullptr</span></code>, no work is done and the required allocation size is returned in <code class="docutils literal notranslate"><span class="pre">temp_storage_bytes</span></code>. See <a class="reference internal" href="../api_docs/device_wide.html#device-temp-storage"><span class="std std-ref">Determining Temporary Storage Requirements</span></a> for usage guidance.</p></li>
 </ul>
 <section id="id6">
 <h2>Snippet<a class="headerlink" href="#id6" title="Link to this heading">#</a></h2>
@@ -2268,7 +2269,7 @@ addition of floating-point types). Results for pseudo-associative
 operators may vary from run to run.</p></li>
 <li><p>When <code class="docutils literal notranslate"><span class="pre">d_in</span></code> and <code class="docutils literal notranslate"><span class="pre">d_out</span></code> are equal, the scan is performed in-place. The input and output sequences
 shall not overlap in any other way.</p></li>
-<li><p>When <code class="docutils literal notranslate"><span class="pre">d_temp_storage</span></code> is <code class="docutils literal notranslate"><span class="pre">nullptr</span></code>, no work is done and the required allocation size is returned in <code class="docutils literal notranslate"><span class="pre">temp_storage_bytes</span></code>.</p></li>
+<li><p>When <code class="docutils literal notranslate"><span class="pre">d_temp_storage</span></code> is <code class="docutils literal notranslate"><span class="pre">nullptr</span></code>, no work is done and the required allocation size is returned in <code class="docutils literal notranslate"><span class="pre">temp_storage_bytes</span></code>. See <a class="reference internal" href="../api_docs/device_wide.html#device-temp-storage"><span class="std std-ref">Determining Temporary Storage Requirements</span></a> for usage guidance.</p></li>
 </ul>
 </p>
 <dl class="field-list simple">
