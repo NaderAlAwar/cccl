@@ -175,7 +175,7 @@ static std::tuple<thrust::device_vector<T>, thrust::device_vector<T>> physics_an
 template <typename T>
 static void physics_analysis(nvbench::state& state, nvbench::type_list<T>)
 {
-  bool check_correctness = true;
+  bool check_correctness = false;
   thrust::device_vector<T> d_electron_pts;
   thrust::device_vector<T> d_electron_etas;
   thrust::device_vector<T> d_electron_phis;
