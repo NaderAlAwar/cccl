@@ -20,7 +20,8 @@ static std::tuple<thrust::device_vector<T>, thrust::device_vector<int>> filter_o
   thrust::device_vector<T> d_selected_values(d_values.size(), thrust::no_init);
   thrust::device_vector<int> d_selected_segment_ids(d_values.size(), thrust::no_init);
   thrust::device_vector<int> d_num_selected_out(1, thrust::no_init);
-  auto select_op = [d_mask = thrust::raw_pointer_cast(d_mask.data())] __device__(const cuda::std::tuple<T, int>& t) {
+  auto select_op =
+    [d_mask = thrust::raw_pointer_cast(d_mask.data())] __device__(const cuda::std::tuple<T, int>& t) -> bool {
     int segment_id = cuda::std::get<1>(t);
     return d_mask[segment_id];
   };
@@ -29,7 +30,7 @@ static std::tuple<thrust::device_vector<T>, thrust::device_vector<int>> filter_o
 
   auto fancy_iterator = cuda::make_transform_iterator(
     cuda::counting_iterator{0},
-    [offsets = thrust::raw_pointer_cast(d_new_offsets.data()), num_segments] __device__(int global_index) {
+    [offsets = thrust::raw_pointer_cast(d_new_offsets.data()), num_segments] __device__(int global_index) -> int {
       // Determine which segment this index belongs to
       const int* it     = thrust::lower_bound(thrust::seq, offsets, offsets + num_segments + 1, global_index + 1);
       int segment_index = static_cast<int>(it - offsets - 1);
@@ -74,14 +75,14 @@ static std::tuple<thrust::device_vector<T>, thrust::device_vector<int>> filter_o
   int num_selected = d_num_selected_out[0];
 
   auto copy_boundaries_op =
-    [num_selected,
-     d_selected_segment_ids = thrust::raw_pointer_cast(d_selected_segment_ids.data())] __device__(int segment_id) {
-      if (segment_id == 0)
-      {
-        return true;
-      }
-      return d_selected_segment_ids[segment_id] != d_selected_segment_ids[segment_id - 1];
-    };
+    [num_selected, d_selected_segment_ids = thrust::raw_pointer_cast(d_selected_segment_ids.data())] __device__(
+      int segment_id) -> bool {
+    if (segment_id == 0)
+    {
+      return true;
+    }
+    return d_selected_segment_ids[segment_id] != d_selected_segment_ids[segment_id - 1];
+  };
 
   error = cub::DeviceSelect::If(
     nullptr,
