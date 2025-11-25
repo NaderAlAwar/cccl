@@ -163,11 +163,24 @@ template <typename T>
 static void physics_analysis(nvbench::state& state, nvbench::type_list<T>)
 {
   bool check_correctness = true;
+  thrust::device_vector<T> d_electron_pts;
+  thrust::device_vector<T> d_electron_etas;
+  thrust::device_vector<T> d_electron_phis;
+  thrust::device_vector<T> d_muons_pts;
+  thrust::device_vector<T> d_muons_etas;
+  thrust::device_vector<T> d_muons_phis;
+  thrust::device_vector<int> d_electron_offsets;
+  thrust::device_vector<int> d_muon_offsets;
+
+  thrust::device_vector<T> masses_electrons;
+  thrust::device_vector<T> masses_muons;
+
+  fs::path repo_root{"/home/coder/cccl"};
+
   if (check_correctness)
   {
     try
     {
-      const fs::path repo_root{"/home/coder/cccl"};
       const auto build_path = [&](const std::string& name) {
         return repo_root / (name + ".npy");
       };
@@ -201,40 +214,20 @@ static void physics_analysis(nvbench::state& state, nvbench::type_list<T>)
       require(expected_electron_count == electron_pts_host.size(), "electron offsets total does not match data length");
       require(expected_muon_count == muons_pts_host.size(), "muon offsets total does not match data length");
 
-      thrust::device_vector<T> d_electron_pts(electron_pts_host.begin(), electron_pts_host.end());
-      thrust::device_vector<T> d_electron_etas(electron_etas_host.begin(), electron_etas_host.end());
-      thrust::device_vector<T> d_electron_phis(electron_phis_host.begin(), electron_phis_host.end());
-      thrust::device_vector<T> d_muons_pts(muons_pts_host.begin(), muons_pts_host.end());
-      thrust::device_vector<T> d_muons_etas(muons_etas_host.begin(), muons_etas_host.end());
-      thrust::device_vector<T> d_muons_phis(muons_phis_host.begin(), muons_phis_host.end());
-      thrust::device_vector<int> d_electron_offsets(electron_offsets_host.begin(), electron_offsets_host.end());
-      thrust::device_vector<int> d_muon_offsets(muon_offsets_host.begin(), muon_offsets_host.end());
-
-      auto [masses_electrons, masses_muons] = physics_analysis(
-        d_electron_pts,
-        d_electron_etas,
-        d_electron_phis,
-        d_muons_pts,
-        d_muons_etas,
-        d_muons_phis,
-        d_electron_offsets,
-        d_muon_offsets);
-
-      const auto build_output_path = [&](const std::string& name) {
-        return repo_root / (name + "_cpp.npy");
-      };
-      const auto masses_electrons_host = copy_device_to_host(masses_electrons);
-      const auto masses_muons_host     = copy_device_to_host(masses_muons);
-
-      write_npy_vector(masses_electrons_host, build_output_path("masses_electrons"));
-      write_npy_vector(masses_muons_host, build_output_path("masses_muons"));
-      return;
+      d_electron_pts.assign(electron_pts_host.begin(), electron_pts_host.end());
+      d_electron_etas.assign(electron_etas_host.begin(), electron_etas_host.end());
+      d_electron_phis.assign(electron_phis_host.begin(), electron_phis_host.end());
+      d_muons_pts.assign(muons_pts_host.begin(), muons_pts_host.end());
+      d_muons_etas.assign(muons_etas_host.begin(), muons_etas_host.end());
+      d_muons_phis.assign(muons_phis_host.begin(), muons_phis_host.end());
+      d_electron_offsets.assign(electron_offsets_host.begin(), electron_offsets_host.end());
+      d_muon_offsets.assign(muon_offsets_host.begin(), muon_offsets_host.end());
     }
     catch (const std::exception& ex)
     {
       std::cerr << "Failed to load Awkward benchmark data from disk: " << ex.what() << std::endl;
+      return;
     }
-    return;
   }
   else
   {
@@ -244,30 +237,52 @@ static void physics_analysis(nvbench::state& state, nvbench::type_list<T>)
     thrust::device_vector<int> num_electrons_per_event = generate(num_events, bit_entropy::_1_000, int{0}, int{10});
     thrust::device_vector<int> num_muons_per_event     = generate(num_events, bit_entropy::_1_000, int{0}, int{10});
 
-    thrust::device_vector<int> electron_offsets(num_events + 1, thrust::no_init);
-    thrust::device_vector<int> muon_offsets(num_events + 1, thrust::no_init);
+    d_electron_offsets.resize(num_events + 1);
+    d_muon_offsets.resize(num_events + 1);
 
-    thrust::exclusive_scan(num_electrons_per_event.begin(), num_electrons_per_event.end(), electron_offsets.begin(), 0);
-    electron_offsets[num_events] = electron_offsets[num_events - 1] + num_electrons_per_event[num_events - 1];
+    thrust::exclusive_scan(
+      num_electrons_per_event.begin(), num_electrons_per_event.end(), d_electron_offsets.begin(), 0);
+    d_electron_offsets[num_events] = d_electron_offsets[num_events - 1] + num_electrons_per_event[num_events - 1];
 
-    thrust::exclusive_scan(num_muons_per_event.begin(), num_muons_per_event.end(), muon_offsets.begin(), 0);
-    muon_offsets[num_events] = muon_offsets[num_events - 1] + num_muons_per_event[num_events - 1];
+    thrust::exclusive_scan(num_muons_per_event.begin(), num_muons_per_event.end(), d_muon_offsets.begin(), 0);
+    d_muon_offsets[num_events] = d_muon_offsets[num_events - 1] + num_muons_per_event[num_events - 1];
 
-    int total_electrons = electron_offsets[num_events];
-    int total_muons     = muon_offsets[num_events];
+    const int total_electrons = d_electron_offsets[num_events];
+    const int total_muons     = d_muon_offsets[num_events];
 
-    thrust::device_vector<T> electron_pts  = generate(total_electrons, bit_entropy::_1_000, T{10.0}, T{100.0});
-    thrust::device_vector<T> electron_etas = generate(total_electrons, bit_entropy::_1_000, T{-3.0}, T{3.0});
-    thrust::device_vector<T> electron_phis = generate(total_electrons, bit_entropy::_1_000, T{0.0}, T{2.0 * M_PI});
+    d_electron_pts  = generate(total_electrons, bit_entropy::_1_000, T{10.0}, T{100.0});
+    d_electron_etas = generate(total_electrons, bit_entropy::_1_000, T{-3.0}, T{3.0});
+    d_electron_phis = generate(total_electrons, bit_entropy::_1_000, T{0.0}, T{2.0 * M_PI});
 
-    thrust::device_vector<T> muons_pts  = generate(total_muons, bit_entropy::_1_000, T{10.0}, T{100.0});
-    thrust::device_vector<T> muons_etas = generate(total_muons, bit_entropy::_1_000, T{-3.0}, T{3.0});
-    thrust::device_vector<T> muons_phis = generate(total_muons, bit_entropy::_1_000, T{0.0}, T{2.0 * M_PI});
+    d_muons_pts  = generate(total_muons, bit_entropy::_1_000, T{10.0}, T{100.0});
+    d_muons_etas = generate(total_muons, bit_entropy::_1_000, T{-3.0}, T{3.0});
+    d_muons_phis = generate(total_muons, bit_entropy::_1_000, T{0.0}, T{2.0 * M_PI});
+  }
 
-    state.exec(nvbench::exec_tag::sync, [&](nvbench::launch&) {
-      physics_analysis(
-        electron_pts, electron_etas, electron_phis, muons_pts, muons_etas, muons_phis, electron_offsets, muon_offsets);
-    });
+  state.exec(nvbench::exec_tag::sync, [&](nvbench::launch&) {
+    auto [masses_e, masses_m] = physics_analysis(
+      d_electron_pts,
+      d_electron_etas,
+      d_electron_phis,
+      d_muons_pts,
+      d_muons_etas,
+      d_muons_phis,
+      d_electron_offsets,
+      d_muon_offsets);
+    masses_electrons = std::move(masses_e);
+    masses_muons     = std::move(masses_m);
+  });
+
+  if (check_correctness)
+  {
+    const auto build_output_path = [&](const std::string& name) {
+      return repo_root / (name + "_cpp.npy");
+    };
+    const auto masses_electrons_host = copy_device_to_host(masses_electrons);
+    const auto masses_muons_host     = copy_device_to_host(masses_muons);
+
+    write_npy_vector(masses_electrons_host, build_output_path("masses_electrons"));
+    write_npy_vector(masses_muons_host, build_output_path("masses_muons"));
   }
 }
 

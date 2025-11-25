@@ -8,6 +8,44 @@
 #include <thrust/host_vector.h>
 
 template <typename T>
+struct fancy_select_mask_op
+{
+  const bool* mask;
+
+  __host__ __device__ bool operator()(const cuda::std::tuple<T, T, T, int>& t) const
+  {
+    const int segment_id = cuda::std::get<3>(t);
+    return mask[segment_id];
+  }
+};
+
+struct fancy_segment_lookup_op
+{
+  const int* offsets;
+  int num_segments;
+
+  __host__ __device__ int operator()(int global_index) const
+  {
+    const int* it = thrust::lower_bound(thrust::seq, offsets, offsets + num_segments + 1, global_index + 1);
+    return static_cast<int>(it - offsets - 1);
+  }
+};
+
+struct fancy_copy_boundaries_op
+{
+  const int* selected_segment_ids;
+
+  __host__ __device__ bool operator()(int segment_id) const
+  {
+    if (segment_id == 0)
+    {
+      return true;
+    }
+    return selected_segment_ids[segment_id] != selected_segment_ids[segment_id - 1];
+  }
+};
+
+template <typename T>
 static std::
   tuple<thrust::device_vector<T>, thrust::device_vector<T>, thrust::device_vector<T>, thrust::device_vector<int>>
   filter_out_segments_fancy_iterator_zipped(
@@ -24,22 +62,11 @@ static std::
 
   thrust::device_vector<int> d_selected_segment_ids(d_pt.size(), thrust::no_init);
   thrust::device_vector<int> d_num_selected_out(1, thrust::no_init);
-  auto select_op =
-    [d_mask = thrust::raw_pointer_cast(d_mask.data())] __device__(const cuda::std::tuple<T, T, T, int>& t) {
-      int segment_id = cuda::std::get<3>(t);
-      return d_mask[segment_id];
-    };
+  fancy_select_mask_op<T> select_op{thrust::raw_pointer_cast(d_mask.data())};
 
   int num_segments = static_cast<int>(d_offsets.size() - 1);
-
-  auto fancy_iterator = cuda::make_transform_iterator(
-    cuda::counting_iterator{0},
-    [offsets = thrust::raw_pointer_cast(d_new_offsets.data()), num_segments] __device__(int global_index) {
-      // Determine which segment this index belongs to
-      const int* it     = thrust::lower_bound(thrust::seq, offsets, offsets + num_segments + 1, global_index + 1);
-      int segment_index = static_cast<int>(it - offsets - 1);
-      return segment_index;
-    });
+  fancy_segment_lookup_op segment_lookup{thrust::raw_pointer_cast(d_new_offsets.data()), num_segments};
+  auto fancy_iterator = cuda::make_transform_iterator(cuda::counting_iterator{0}, segment_lookup);
 
   size_t temp_storage_bytes = 0;
   auto error                = cub::DeviceSelect::If(
@@ -80,15 +107,7 @@ static std::
 
   int num_selected = d_num_selected_out[0];
 
-  auto copy_boundaries_op =
-    [num_selected,
-     d_selected_segment_ids = thrust::raw_pointer_cast(d_selected_segment_ids.data())] __device__(int segment_id) {
-      if (segment_id == 0)
-      {
-        return true;
-      }
-      return d_selected_segment_ids[segment_id] != d_selected_segment_ids[segment_id - 1];
-    };
+  fancy_copy_boundaries_op copy_boundaries_op{thrust::raw_pointer_cast(d_selected_segment_ids.data())};
 
   error = cub::DeviceSelect::If(
     nullptr,

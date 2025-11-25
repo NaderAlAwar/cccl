@@ -6,7 +6,10 @@
 
 template <typename T>
 static thrust::device_vector<T> invariant_mass_segmented_reduce(
-  thrust::device_vector<T>& d_pt, thrust::device_vector<T>& d_eta, thrust::device_vector<T>& d_phi, int segment_size)
+  const thrust::device_vector<T>& d_pt,
+  const thrust::device_vector<T>& d_eta,
+  const thrust::device_vector<T>& d_phi,
+  int segment_size)
 {
   auto input_iter         = cuda::make_zip_iterator(d_pt.begin(), d_eta.begin(), d_phi.begin());
   const auto num_elements = d_pt.size() / segment_size;
