@@ -64,19 +64,17 @@ struct adjust_offsets_zipped_op
 };
 
 template <typename T, typename PredicateOp>
-static std::
-  tuple<thrust::device_vector<T>, thrust::device_vector<T>, thrust::device_vector<T>, thrust::device_vector<int>>
-  segmented_filter_zipped(
-    const thrust::device_vector<T>& d_pt,
-    const thrust::device_vector<T>& d_eta,
-    const thrust::device_vector<T>& d_phi,
-    const thrust::device_vector<int>& d_offsets,
-    PredicateOp pred)
+static void segmented_filter_zipped(
+  const thrust::device_vector<T>& d_pt,
+  const thrust::device_vector<T>& d_eta,
+  const thrust::device_vector<T>& d_phi,
+  const thrust::device_vector<int>& d_offsets,
+  thrust::device_vector<T>& d_selected_pt,
+  thrust::device_vector<T>& d_selected_eta,
+  thrust::device_vector<T>& d_selected_phi,
+  thrust::device_vector<int>& d_new_offsets,
+  PredicateOp pred)
 {
-  thrust::device_vector<T> d_selected_pt(d_pt.size(), thrust::no_init);
-  thrust::device_vector<T> d_selected_eta(d_eta.size(), thrust::no_init);
-  thrust::device_vector<T> d_selected_phi(d_phi.size(), thrust::no_init);
-
   const auto num_segments = d_offsets.size() - 1;
 
   thrust::device_vector<int> d_num_selected_out(1, thrust::no_init);
@@ -115,7 +113,7 @@ static std::
   if (error != cudaSuccess)
   {
     std::cerr << "Error during temp storage size calculation: " << cudaGetErrorString(error) << std::endl;
-    return {};
+    return;
   }
 
   thrust::device_vector<uint8_t> d_temp_storage(temp_storage_bytes, thrust::no_init);
@@ -132,7 +130,7 @@ static std::
   if (error != cudaSuccess)
   {
     std::cerr << "Error during DeviceSelect::If: " << cudaGetErrorString(error) << std::endl;
-    return {};
+    return;
   }
 
   int num_selected = thrust::host_vector<int>(d_num_selected_out)[0];
@@ -147,7 +145,7 @@ static std::
     thrust::raw_pointer_cast(d_offsets.data())};
 
   auto input_iter = cuda::make_transform_iterator(cuda::counting_iterator{0}, adjust_op);
-  thrust::device_vector<int> d_new_offsets(num_segments + 1, thrust::no_init);
+  // thrust::device_vector<int> d_new_offsets(num_segments + 1, thrust::no_init);
 
   error = cub::DeviceScan::ExclusiveScan(
     nullptr,
@@ -162,7 +160,7 @@ static std::
   {
     std::cerr
       << "Error during temp storage size calculation for ExclusiveScan: " << cudaGetErrorString(error) << std::endl;
-    return {};
+    return;
   }
 
   d_temp_storage.resize(temp_storage_bytes);
@@ -179,8 +177,6 @@ static std::
   if (error != cudaSuccess)
   {
     std::cerr << "Error during ExclusiveScan: " << cudaGetErrorString(error) << std::endl;
-    return {};
+    return;
   }
-
-  return {d_selected_pt, d_selected_eta, d_selected_phi, d_new_offsets};
 }

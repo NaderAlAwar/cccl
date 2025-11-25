@@ -68,7 +68,17 @@ static std::tuple<thrust::device_vector<T>, thrust::device_vector<T>> physics_an
   const thrust::device_vector<T>& d_muon_etas,
   const thrust::device_vector<T>& d_muon_phis,
   const thrust::device_vector<int>& d_electron_offsets,
-  const thrust::device_vector<int>& d_muon_offsets)
+  const thrust::device_vector<int>& d_muon_offsets,
+  thrust::device_vector<T>& d_temp_electron_pts,
+  thrust::device_vector<T>& d_temp_electron_etas,
+  thrust::device_vector<T>& d_temp_electron_phis,
+  thrust::device_vector<T>& d_temp_muon_pts,
+  thrust::device_vector<T>& d_temp_muon_etas,
+  thrust::device_vector<T>& d_temp_muon_phis,
+  thrust::device_vector<int>& d_temp_electron_offsets,
+  thrust::device_vector<int>& d_temp_muon_offsets,
+  thrust::device_vector<bool>& d_electron_segment_mask,
+  thrust::device_vector<bool>& d_muon_segment_mask)
 {
   auto cond_electron = [] __device__(const cuda::std::tuple<T, T, T>& x) {
     return cuda::std::get<0>(x) > 40.0;
@@ -79,24 +89,38 @@ static std::tuple<thrust::device_vector<T>, thrust::device_vector<T>> physics_an
 
   // The stateful op version seems to perform better. Uncommenting out the upper bound version yields the same result
   // with different performance.
-  auto [d_selected_electron_pts, d_selected_electron_etas, d_selected_electron_phis, d_new_electron_offsets] =
-    segmented_filter_zipped(d_electron_pts, d_electron_etas, d_electron_phis, d_electron_offsets, cond_electron);
-  auto [d_selected_muon_pts, d_selected_muon_etas, d_selected_muon_phis, d_new_muon_offsets] =
-    segmented_filter_zipped(d_muon_pts, d_muon_etas, d_muon_phis, d_muon_offsets, cond_muon);
-  // auto [d_selected_electron_pts, d_selected_electron_etas, d_selected_electron_phis, d_new_electron_offsets] =
-  // segmented_filter_upper_bound_zipped(d_electron_pts, d_electron_etas, d_electron_phis,
-  // d_electron_offsets,cond_electron); auto [d_selected_muon_pts, d_selected_muon_etas, d_selected_muon_phis,
-  // d_new_muon_offsets] = segmented_filter_upper_bound_zipped(d_muon_pts, d_muon_etas, d_muon_phis, d_muon_offsets,
-  // cond_muon);
+  segmented_filter_zipped(
+    d_electron_pts,
+    d_electron_etas,
+    d_electron_phis,
+    d_electron_offsets,
+    d_temp_electron_pts,
+    d_temp_electron_etas,
+    d_temp_electron_phis,
+    d_temp_electron_offsets,
+    cond_electron);
+  segmented_filter_zipped(
+    d_muon_pts,
+    d_muon_etas,
+    d_muon_phis,
+    d_muon_offsets,
+    d_temp_muon_pts,
+    d_temp_muon_etas,
+    d_temp_muon_phis,
+    d_temp_muon_offsets,
+    cond_muon);
+  // segmented_filter_upper_bound_zipped(d_electron_pts, d_electron_etas, d_electron_phis, d_electron_offsets,
+  // d_temp_electron_pts, d_temp_electron_etas, d_temp_electron_phis, d_temp_electron_offsets, cond_electron);
+  // segmented_filter_upper_bound_zipped(d_muon_pts, d_muon_etas, d_muon_phis, d_muon_offsets, d_temp_muon_pts,
+  // d_temp_muon_etas, d_temp_muon_phis, d_temp_muon_offsets, cond_muon);
 
-  const auto num_electron_segments = d_new_electron_offsets.size() - 1;
-  const auto num_muon_segments     = d_new_muon_offsets.size() - 1;
+  const auto num_electron_segments = d_temp_electron_offsets.size() - 1;
+  const auto num_muon_segments     = d_temp_muon_offsets.size() - 1;
 
   constexpr int segment_size = 2;
 
-  thrust::device_vector<bool> d_electron_segment_mask(num_electron_segments, thrust::no_init);
   auto error = cub::DeviceTransform::Transform(
-    cuda::std::tuple{d_new_electron_offsets.begin(), d_new_electron_offsets.begin() + 1},
+    cuda::std::tuple{d_temp_electron_offsets.begin(), d_temp_electron_offsets.begin() + 1},
     thrust::raw_pointer_cast(d_electron_segment_mask.data()),
     num_electron_segments,
     [segment_size] __device__(int start, int end) {
@@ -109,9 +133,8 @@ static std::tuple<thrust::device_vector<T>, thrust::device_vector<T>> physics_an
     return {};
   }
 
-  thrust::device_vector<bool> d_muon_segment_mask(num_muon_segments, thrust::no_init);
   error = cub::DeviceTransform::Transform(
-    cuda::std::tuple{d_new_muon_offsets.begin(), d_new_muon_offsets.begin() + 1},
+    cuda::std::tuple{d_temp_muon_offsets.begin(), d_temp_muon_offsets.begin() + 1},
     thrust::raw_pointer_cast(d_muon_segment_mask.data()),
     num_muon_segments,
     [segment_size] __device__(int start, int end) {
@@ -126,35 +149,25 @@ static std::tuple<thrust::device_vector<T>, thrust::device_vector<T>> physics_an
 
   // The fancy iterator version seems to perform better. Uncommenting out the copy_if and rle_scan versions yields the
   // same result with different performance.
-  auto [d_final_electron_pts, d_final_electron_etas, d_final_electron_phis, d_final_electron_offsets] =
-    filter_out_segments_fancy_iterator_zipped(
-      d_selected_electron_pts,
-      d_selected_electron_etas,
-      d_selected_electron_phis,
-      d_new_electron_offsets,
-      d_electron_segment_mask);
-  auto [d_final_muon_pts, d_final_muon_etas, d_final_muon_phis, d_final_muon_offsets] =
-    filter_out_segments_fancy_iterator_zipped(
-      d_selected_muon_pts, d_selected_muon_etas, d_selected_muon_phis, d_new_muon_offsets, d_muon_segment_mask);
-  // auto [d_final_electron_pts, d_final_electron_etas, d_final_electron_phis, d_final_electron_offsets] =
-  // filter_out_segments_copy_if_zipped(d_selected_electron_pts, d_selected_electron_etas, d_selected_electron_phis,
-  // d_new_electron_offsets, d_electron_segment_mask); auto [d_final_muon_pts, d_final_muon_etas, d_final_muon_phis,
-  // d_final_muon_offsets] = filter_out_segments_copy_if_zipped(d_selected_muon_pts, d_selected_muon_etas,
-  // d_selected_muon_phis, d_new_muon_offsets, d_muon_segment_mask); auto [d_final_electron_pts, d_final_electron_etas,
-  // d_final_electron_phis, d_final_electron_offsets] = filter_out_segments_copy_if_zipped(d_selected_electron_pts,
-  // d_selected_electron_etas, d_selected_electron_phis, d_new_electron_offsets, d_electron_segment_mask); auto
-  // [d_final_muon_pts, d_final_muon_etas, d_final_muon_phis, d_final_muon_offsets] =
-  // filter_out_segments_rle_scan_zipped(d_selected_muon_pts, d_selected_muon_etas, d_selected_muon_phis,
-  // d_new_muon_offsets, d_muon_segment_mask);
+  filter_out_segments_fancy_iterator_zipped(
+    d_temp_electron_pts, d_temp_electron_etas, d_temp_electron_phis, d_temp_electron_offsets, d_electron_segment_mask);
+  filter_out_segments_fancy_iterator_zipped(
+    d_temp_muon_pts, d_temp_muon_etas, d_temp_muon_phis, d_temp_muon_offsets, d_muon_segment_mask);
+  // filter_out_segments_copy_if_zipped(d_temp_electron_pts, d_temp_electron_etas, d_temp_electron_phis,
+  // d_temp_electron_offsets, d_electron_segment_mask); filter_out_segments_copy_if_zipped(d_temp_muon_pts,
+  // d_temp_muon_etas, d_temp_muon_phis, d_temp_muon_offsets, d_muon_segment_mask);
+  // filter_out_segments_rle_scan_zipped(d_temp_electron_pts, d_temp_electron_etas, d_temp_electron_phis,
+  // d_temp_electron_offsets, d_electron_segment_mask); filter_out_segments_rle_scan_zipped(d_temp_muon_pts,
+  // d_temp_muon_etas, d_temp_muon_phis, d_temp_muon_offsets, d_muon_segment_mask);
 
   // The transform version seems to perform better. Uncommenting out the segmented reduce version yields the same result
   // with different performance.
   auto masses_electrons =
-    invariant_mass_transform(d_final_electron_pts, d_final_electron_etas, d_final_electron_phis, segment_size);
-  auto masses_muons = invariant_mass_transform(d_final_muon_pts, d_final_muon_etas, d_final_muon_phis, segment_size);
-  // auto masses_electrons = invariant_mass_segmented_reduce(d_electron_pts, d_electron_etas, d_electron_phis,
-  // segment_size); auto masses_muons     = invariant_mass_segmented_reduce(d_muon_pts, d_muon_etas, d_muon_phis,
-  // segment_size);
+    invariant_mass_transform(d_temp_electron_pts, d_temp_electron_etas, d_temp_electron_phis, segment_size);
+  auto masses_muons = invariant_mass_transform(d_temp_muon_pts, d_temp_muon_etas, d_temp_muon_phis, segment_size);
+  // auto masses_electrons = invariant_mass_segmented_reduce(d_temp_electron_pts, d_temp_electron_etas,
+  // d_temp_electron_phis, segment_size); auto masses_muons     = invariant_mass_segmented_reduce(d_temp_muon_pts,
+  // d_temp_muon_etas, d_temp_muon_phis, segment_size);
 
   return {masses_electrons, masses_muons};
 }
@@ -259,6 +272,20 @@ static void physics_analysis(nvbench::state& state, nvbench::type_list<T>)
     d_muons_phis = generate(total_muons, bit_entropy::_1_000, T{0.0}, T{2.0 * M_PI});
   }
 
+  // In order to do a fair comparison with cupy, which allocates these
+  // arrays inside the benchmark using a caching allocator, we need to
+  // pre-allocate all the temporary intermediate arrays here.
+  thrust::device_vector<T> d_temp_electron_pts(d_electron_pts.size(), thrust::no_init);
+  thrust::device_vector<T> d_temp_electron_etas(d_electron_etas.size(), thrust::no_init);
+  thrust::device_vector<T> d_temp_electron_phis(d_electron_phis.size(), thrust::no_init);
+  thrust::device_vector<T> d_temp_muon_pts(d_muons_pts.size(), thrust::no_init);
+  thrust::device_vector<T> d_temp_muon_etas(d_muons_etas.size(), thrust::no_init);
+  thrust::device_vector<T> d_temp_muon_phis(d_muons_phis.size(), thrust::no_init);
+  thrust::device_vector<int> d_temp_electron_offsets(d_electron_offsets.size(), thrust::no_init);
+  thrust::device_vector<int> d_temp_muon_offsets(d_muon_offsets.size(), thrust::no_init);
+  thrust::device_vector<bool> d_electron_segment_mask(d_electron_offsets.size() - 1, thrust::no_init);
+  thrust::device_vector<bool> d_muon_segment_mask(d_muon_offsets.size() - 1, thrust::no_init);
+
   state.exec(nvbench::exec_tag::sync, [&](nvbench::launch&) {
     auto [masses_e, masses_m] = physics_analysis(
       d_electron_pts,
@@ -268,7 +295,17 @@ static void physics_analysis(nvbench::state& state, nvbench::type_list<T>)
       d_muons_etas,
       d_muons_phis,
       d_electron_offsets,
-      d_muon_offsets);
+      d_muon_offsets,
+      d_temp_electron_pts,
+      d_temp_electron_etas,
+      d_temp_electron_phis,
+      d_temp_muon_pts,
+      d_temp_muon_etas,
+      d_temp_muon_phis,
+      d_temp_electron_offsets,
+      d_temp_muon_offsets,
+      d_electron_segment_mask,
+      d_muon_segment_mask);
     masses_electrons = std::move(masses_e);
     masses_muons     = std::move(masses_m);
   });
