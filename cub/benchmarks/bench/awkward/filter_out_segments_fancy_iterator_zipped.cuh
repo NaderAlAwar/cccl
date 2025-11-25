@@ -8,13 +8,16 @@
 #include <thrust/host_vector.h>
 
 template <typename T>
-static void filter_out_segments_fancy_iterator_zipped(
-  thrust::device_vector<T>& d_pt,
-  thrust::device_vector<T>& d_eta,
-  thrust::device_vector<T>& d_phi,
-  thrust::device_vector<int>& d_offsets,
-  const thrust::device_vector<bool>& d_mask)
+static std::
+  tuple<thrust::device_vector<T>, thrust::device_vector<T>, thrust::device_vector<T>, thrust::device_vector<int>>
+  filter_out_segments_fancy_iterator_zipped(
+    const thrust::device_vector<T>& d_pt,
+    const thrust::device_vector<T>& d_eta,
+    const thrust::device_vector<T>& d_phi,
+    const thrust::device_vector<int>& d_offsets,
+    const thrust::device_vector<bool>& d_mask)
 {
+  thrust::device_vector<int> d_new_offsets = d_offsets;
   thrust::device_vector<T> d_selected_pt(d_pt.size(), thrust::no_init);
   thrust::device_vector<T> d_selected_eta(d_eta.size(), thrust::no_init);
   thrust::device_vector<T> d_selected_phi(d_phi.size(), thrust::no_init);
@@ -31,7 +34,7 @@ static void filter_out_segments_fancy_iterator_zipped(
 
   auto fancy_iterator = cuda::make_transform_iterator(
     cuda::counting_iterator{0},
-    [offsets = thrust::raw_pointer_cast(d_offsets.data()), num_segments] __device__(int global_index) {
+    [offsets = thrust::raw_pointer_cast(d_new_offsets.data()), num_segments] __device__(int global_index) {
       // Determine which segment this index belongs to
       const int* it     = thrust::lower_bound(thrust::seq, offsets, offsets + num_segments + 1, global_index + 1);
       int segment_index = static_cast<int>(it - offsets - 1);
@@ -52,7 +55,7 @@ static void filter_out_segments_fancy_iterator_zipped(
   if (error != cudaSuccess)
   {
     std::cerr << "Error during temporary storage size calculation: " << cudaGetErrorString(error) << std::endl;
-    return;
+    return {};
   }
 
   thrust::device_vector<uint8_t> d_temp_storage(temp_storage_bytes, thrust::no_init);
@@ -70,7 +73,7 @@ static void filter_out_segments_fancy_iterator_zipped(
   if (error != cudaSuccess)
   {
     std::cerr << "Error during selection: " << cudaGetErrorString(error) << std::endl;
-    return;
+    return {};
   }
 
   thrust::device_vector<int> d_num_segments_out(1, thrust::no_init);
@@ -91,7 +94,7 @@ static void filter_out_segments_fancy_iterator_zipped(
     nullptr,
     temp_storage_bytes,
     cuda::counting_iterator{0},
-    d_offsets.begin(),
+    d_new_offsets.begin(),
     thrust::raw_pointer_cast(d_num_segments_out.data()),
     num_selected,
     copy_boundaries_op);
@@ -99,7 +102,7 @@ static void filter_out_segments_fancy_iterator_zipped(
   if (error != cudaSuccess)
   {
     std::cerr << "Error during temporary storage size calculation: " << cudaGetErrorString(error) << std::endl;
-    return;
+    return {};
   }
 
   d_temp_storage.resize(temp_storage_bytes, thrust::no_init);
@@ -108,7 +111,7 @@ static void filter_out_segments_fancy_iterator_zipped(
     thrust::raw_pointer_cast(d_temp_storage.data()),
     temp_storage_bytes,
     cuda::counting_iterator{0},
-    d_offsets.begin(),
+    d_new_offsets.begin(),
     thrust::raw_pointer_cast(d_num_segments_out.data()),
     num_selected,
     copy_boundaries_op);
@@ -116,18 +119,17 @@ static void filter_out_segments_fancy_iterator_zipped(
   if (error != cudaSuccess)
   {
     std::cerr << "Error during selection: " << cudaGetErrorString(error) << std::endl;
-    return;
+    return {};
   }
 
   int new_num_segments = d_num_segments_out[0];
 
   d_selected_pt.resize(num_selected);
-  d_pt.swap(d_selected_pt);
   d_selected_eta.resize(num_selected);
-  d_eta.swap(d_selected_eta);
   d_selected_phi.resize(num_selected);
-  d_phi.swap(d_selected_phi);
 
-  d_offsets.resize(new_num_segments + 1);
-  d_offsets[new_num_segments] = num_selected;
+  d_new_offsets.resize(new_num_segments + 1);
+  d_new_offsets[new_num_segments] = num_selected;
+
+  return {d_selected_pt, d_selected_eta, d_selected_phi, d_new_offsets};
 }

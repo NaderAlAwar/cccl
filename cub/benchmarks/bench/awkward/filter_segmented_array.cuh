@@ -64,8 +64,10 @@ struct adjust_offsets_op
 
 // Step 2: Extend to a segmented array
 template <typename T, typename PredicateOp>
-static void segmented_filter(thrust::device_vector<T>& d_values, thrust::device_vector<int>& d_offsets, PredicateOp pred)
+static std::tuple<thrust::device_vector<T>, thrust::device_vector<int>> segmented_filter(
+  const thrust::device_vector<T>& d_values, const thrust::device_vector<int>& d_offsets, PredicateOp pred)
 {
+  thrust::device_vector<T> d_selected_values(d_values.size(), thrust::no_init);
   const auto num_segments = d_offsets.size() - 1;
 
   thrust::device_vector<int> d_num_selected_out(1, thrust::no_init);
@@ -73,7 +75,7 @@ static void segmented_filter(thrust::device_vector<T>& d_values, thrust::device_
 
   // Write directly to d_values
   auto output_iter = cuda::make_transform_output_iterator(
-    thrust::raw_pointer_cast(d_values.data()),
+    thrust::raw_pointer_cast(d_selected_values.data()),
     [values = thrust::raw_pointer_cast(d_values.data())] __device__(int idx) {
       return values[idx];
     });
@@ -98,7 +100,7 @@ static void segmented_filter(thrust::device_vector<T>& d_values, thrust::device_
   if (error != cudaSuccess)
   {
     std::cerr << "Error during temp storage size calculation: " << cudaGetErrorString(error) << std::endl;
-    return;
+    return {};
   }
 
   thrust::device_vector<uint8_t> d_temp_storage(temp_storage_bytes, thrust::no_init);
@@ -115,11 +117,11 @@ static void segmented_filter(thrust::device_vector<T>& d_values, thrust::device_
   if (error != cudaSuccess)
   {
     std::cerr << "Error during DeviceSelect::If: " << cudaGetErrorString(error) << std::endl;
-    return;
+    return {};
   }
 
   // Resize to actual number of selected elements
-  d_values.resize(thrust::host_vector<int>(d_num_selected_out)[0]);
+  d_selected_values.resize(thrust::host_vector<int>(d_num_selected_out)[0]);
 
   adjust_offsets_op adjust_op{thrust::raw_pointer_cast(d_num_removed_per_segment.data()),
                               static_cast<int>(num_segments),
@@ -141,7 +143,7 @@ static void segmented_filter(thrust::device_vector<T>& d_values, thrust::device_
   {
     std::cerr
       << "Error during temp storage size calculation for ExclusiveScan: " << cudaGetErrorString(error) << std::endl;
-    return;
+    return {};
   }
 
   d_temp_storage.resize(temp_storage_bytes);
@@ -158,8 +160,8 @@ static void segmented_filter(thrust::device_vector<T>& d_values, thrust::device_
   if (error != cudaSuccess)
   {
     std::cerr << "Error during ExclusiveScan: " << cudaGetErrorString(error) << std::endl;
-    return;
+    return {};
   }
 
-  d_offsets.swap(d_new_offsets);
+  return {d_selected_values, d_new_offsets};
 }

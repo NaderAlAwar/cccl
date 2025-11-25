@@ -1,6 +1,5 @@
 #pragma once
 
-#include <cub/device/device_run_length_encode.cuh>
 #include <cub/device/device_select.cuh>
 
 #include <thrust/binary_search.h>
@@ -8,31 +7,36 @@
 #include <thrust/execution_policy.h>
 #include <thrust/host_vector.h>
 
+#include <tuple>
+
 template <typename T>
-static void filter_out_segments_copy_if_zipped(
-  thrust::device_vector<T>& d_pt,
-  thrust::device_vector<T>& d_eta,
-  thrust::device_vector<T>& d_phi,
-  thrust::device_vector<int>& d_offsets,
-  const thrust::device_vector<bool>& d_mask)
+static std::
+  tuple<thrust::device_vector<T>, thrust::device_vector<T>, thrust::device_vector<T>, thrust::device_vector<int>>
+  filter_out_segments_copy_if_zipped(
+    const thrust::device_vector<T>& d_pt,
+    const thrust::device_vector<T>& d_eta,
+    const thrust::device_vector<T>& d_phi,
+    const thrust::device_vector<int>& d_offsets,
+    const thrust::device_vector<bool>& d_mask)
 {
+  thrust::device_vector<int> d_new_offsets = d_offsets;
+  thrust::device_vector<T> d_selected_pt(d_pt.size(), thrust::no_init);
+  thrust::device_vector<T> d_selected_eta(d_eta.size(), thrust::no_init);
+  thrust::device_vector<T> d_selected_phi(d_phi.size(), thrust::no_init);
+  thrust::device_vector<int> d_selected_segment_ids(d_pt.size(), thrust::no_init);
+  thrust::device_vector<int> d_num_selected_out(1, thrust::no_init);
+
   thrust::device_vector<int> d_segment_ids(d_pt.size(), thrust::no_init);
   thrust::upper_bound(
     thrust::device,
-    d_offsets.begin(),
-    d_offsets.end(),
+    d_new_offsets.begin(),
+    d_new_offsets.end(),
     cuda::counting_iterator{0},
     cuda::counting_iterator{static_cast<int>(d_pt.size())},
     cuda::make_transform_output_iterator(d_segment_ids.begin(), [] __device__(int value) {
       return value - 1;
     }));
 
-  thrust::device_vector<T> d_selected_pt(d_pt.size(), thrust::no_init);
-  thrust::device_vector<T> d_selected_eta(d_eta.size(), thrust::no_init);
-  thrust::device_vector<T> d_selected_phi(d_phi.size(), thrust::no_init);
-
-  thrust::device_vector<int> d_selected_segment_ids(d_pt.size(), thrust::no_init);
-  thrust::device_vector<int> d_num_selected_out(1, thrust::no_init);
   auto select_op =
     [d_mask = thrust::raw_pointer_cast(d_mask.data())] __device__(const cuda::std::tuple<T, T, T, int>& t) {
       int segment_id = cuda::std::get<3>(t);
@@ -53,7 +57,7 @@ static void filter_out_segments_copy_if_zipped(
   if (error != cudaSuccess)
   {
     std::cerr << "Error during temporary storage size calculation: " << cudaGetErrorString(error) << std::endl;
-    return;
+    return {};
   }
 
   thrust::device_vector<uint8_t> d_temp_storage(temp_storage_bytes, thrust::no_init);
@@ -71,7 +75,7 @@ static void filter_out_segments_copy_if_zipped(
   if (error != cudaSuccess)
   {
     std::cerr << "Error during selection: " << cudaGetErrorString(error) << std::endl;
-    return;
+    return {};
   }
 
   thrust::device_vector<int> d_num_segments_out(1, thrust::no_init);
@@ -92,7 +96,7 @@ static void filter_out_segments_copy_if_zipped(
     nullptr,
     temp_storage_bytes,
     cuda::counting_iterator{0},
-    d_offsets.begin(),
+    d_new_offsets.begin(),
     thrust::raw_pointer_cast(d_num_segments_out.data()),
     num_selected,
     copy_boundaries_op);
@@ -100,7 +104,7 @@ static void filter_out_segments_copy_if_zipped(
   if (error != cudaSuccess)
   {
     std::cerr << "Error during temporary storage size calculation: " << cudaGetErrorString(error) << std::endl;
-    return;
+    return {};
   }
 
   d_temp_storage.resize(temp_storage_bytes, thrust::no_init);
@@ -109,7 +113,7 @@ static void filter_out_segments_copy_if_zipped(
     thrust::raw_pointer_cast(d_temp_storage.data()),
     temp_storage_bytes,
     cuda::counting_iterator{0},
-    d_offsets.begin(),
+    d_new_offsets.begin(),
     thrust::raw_pointer_cast(d_num_segments_out.data()),
     num_selected,
     copy_boundaries_op);
@@ -117,18 +121,17 @@ static void filter_out_segments_copy_if_zipped(
   if (error != cudaSuccess)
   {
     std::cerr << "Error during selection: " << cudaGetErrorString(error) << std::endl;
-    return;
+    return {};
   }
 
   int num_segments = d_num_segments_out[0];
 
   d_selected_pt.resize(num_selected);
-  d_pt.swap(d_selected_pt);
   d_selected_eta.resize(num_selected);
-  d_eta.swap(d_selected_eta);
   d_selected_phi.resize(num_selected);
-  d_phi.swap(d_selected_phi);
 
-  d_offsets.resize(num_segments + 1);
-  d_offsets[num_segments] = num_selected;
+  d_new_offsets.resize(num_segments + 1);
+  d_new_offsets[num_segments] = num_selected;
+
+  return {d_selected_pt, d_selected_eta, d_selected_phi, d_new_offsets};
 }

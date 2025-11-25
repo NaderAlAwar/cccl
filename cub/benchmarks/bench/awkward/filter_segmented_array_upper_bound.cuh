@@ -6,23 +6,25 @@
 
 // Step 3: Use upper_bound to get segment ids
 template <typename T, typename PredicateOp>
-static void segmented_filter_upper_bound(
-  thrust::device_vector<T>& d_values, thrust::device_vector<int>& d_offsets, PredicateOp pred)
+static std::tuple<thrust::device_vector<T>, thrust::device_vector<int>> segmented_filter_upper_bound(
+  const thrust::device_vector<T>& d_values, const thrust::device_vector<int>& d_offsets, PredicateOp pred)
 {
+  thrust::device_vector<int> d_new_offsets = d_offsets;
+  thrust::device_vector<T> d_selected_values(d_values.size(), thrust::no_init);
+  thrust::device_vector<int> d_selected_segment_ids(d_values.size(), thrust::no_init);
+  thrust::device_vector<int> d_num_selected_out(1, thrust::no_init);
+
   thrust::device_vector<int> d_segment_ids(d_values.size(), thrust::no_init);
   thrust::upper_bound(
     thrust::device,
-    d_offsets.begin(),
-    d_offsets.end(),
+    d_new_offsets.begin(),
+    d_new_offsets.end(),
     cuda::counting_iterator{0},
     cuda::counting_iterator{static_cast<int>(d_values.size())},
     cuda::make_transform_output_iterator(d_segment_ids.begin(), [] __device__(int value) {
       return value - 1;
     }));
 
-  thrust::device_vector<T> d_selected_values(d_values.size(), thrust::no_init);
-  thrust::device_vector<int> d_selected_segment_ids(d_values.size(), thrust::no_init);
-  thrust::device_vector<int> d_num_selected_out(1, thrust::no_init);
   auto select_op = [pred] __device__(const cuda::std::tuple<T, int>& t) {
     T value = cuda::std::get<0>(t);
     return pred(value);
@@ -41,7 +43,7 @@ static void segmented_filter_upper_bound(
   if (error != cudaSuccess)
   {
     std::cerr << "Error during temporary storage size calculation: " << cudaGetErrorString(error) << std::endl;
-    return;
+    return {};
   }
 
   thrust::device_vector<uint8_t> d_temp_storage(temp_storage_bytes, thrust::no_init);
@@ -57,13 +59,12 @@ static void segmented_filter_upper_bound(
   if (error != cudaSuccess)
   {
     std::cerr << "Error during selection: " << cudaGetErrorString(error) << std::endl;
-    return;
+    return {};
   }
 
   int num_selected = d_num_selected_out[0];
 
   d_selected_values.resize(num_selected);
-  d_values.swap(d_selected_values);
   d_selected_segment_ids.resize(num_selected);
 
   thrust::lower_bound(
@@ -71,6 +72,8 @@ static void segmented_filter_upper_bound(
     d_selected_segment_ids.begin(),
     d_selected_segment_ids.end(),
     cuda::counting_iterator{0},
-    cuda::counting_iterator{static_cast<int>(d_offsets.size())},
-    d_offsets.begin());
+    cuda::counting_iterator{static_cast<int>(d_new_offsets.size())},
+    d_new_offsets.begin());
+
+  return {d_selected_values, d_new_offsets};
 }

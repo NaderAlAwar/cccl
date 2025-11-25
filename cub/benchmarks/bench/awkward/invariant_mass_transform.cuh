@@ -6,7 +6,10 @@
 
 template <typename T>
 static thrust::device_vector<T> invariant_mass_transform(
-  thrust::device_vector<T>& d_pt, thrust::device_vector<T>& d_eta, thrust::device_vector<T>& d_phi, int segment_size)
+  const thrust::device_vector<T>& d_pt,
+  const thrust::device_vector<T>& d_eta,
+  const thrust::device_vector<T>& d_phi,
+  int segment_size)
 {
   // Right now this implementation is hardcoded to assume stride == 2.
   // We would need a zip iterator of `stride` iterators instead of

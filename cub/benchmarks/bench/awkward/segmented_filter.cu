@@ -61,16 +61,16 @@ static void filter(nvbench::state& state, nvbench::type_list<T>)
   std::cout << "Running single array filter sample:" << std::endl;
   std::cout << "Before filtering:" << std::endl;
   print_array(d_values);
-  filter(d_values, pred);
+  auto d_selected_values = filter(d_values, pred);
   std::cout << "After filtering (threshold = " << threshold << "):" << std::endl;
-  print_array(d_values);
+  print_array(d_selected_values);
 #else
   // Retrieve axis parameters
   const auto elements       = static_cast<std::size_t>(state.get_int64("Elements{io}"));
   const bit_entropy entropy = str_to_entropy(state.get_string("Entropy"));
 
-  thrust::device_vector<T> d_values = generate(elements);
-  const T threshold                 = lerp_min_max<T>(entropy_to_probability(entropy));
+  const thrust::device_vector<T> d_values = generate(elements);
+  const T threshold                       = lerp_min_max<T>(entropy_to_probability(entropy));
   single_value_predicate<T> pred{threshold};
 
   state.exec(nvbench::exec_tag::sync, [&](nvbench::launch& launch) {
@@ -94,9 +94,9 @@ static void segmented_filter(nvbench::state& state, nvbench::type_list<T>)
   std::cout << "Running segmented array filter sample:" << std::endl;
   std::cout << "Before filtering:" << std::endl;
   print_array(d_values, d_offsets);
-  segmented_filter(d_values, d_offsets, pred);
+  auto [d_selected_values, d_new_offsets] = segmented_filter(d_values, d_offsets, pred);
   std::cout << "After filtering (threshold = " << threshold << "):" << std::endl;
-  print_array(d_values, d_offsets);
+  print_array(d_selected_values, d_new_offsets);
 #else
   // Retrieve axis parameters
   const auto elements       = static_cast<std::size_t>(state.get_int64("Elements{io}"));
@@ -137,9 +137,9 @@ static void segmented_filter_upper_bound(nvbench::state& state, nvbench::type_li
   std::cout << "Running segmented array filter with upper_bound sample:" << std::endl;
   std::cout << "Before filtering:" << std::endl;
   print_array(d_values, d_offsets);
-  segmented_filter_upper_bound(d_values, d_offsets, pred);
+  auto [d_selected_values, d_new_offsets] = segmented_filter_upper_bound(d_values, d_offsets, pred);
   std::cout << "After filtering (threshold = " << threshold << "):" << std::endl;
-  print_array(d_values, d_offsets);
+  print_array(d_selected_values, d_new_offsets);
 #else
   // Retrieve axis parameters
   const auto elements       = static_cast<std::size_t>(state.get_int64("Elements{io}"));
@@ -186,11 +186,12 @@ static void segmented_filter_zipped(nvbench::state& state, nvbench::type_list<T>
   print_array(d_pt, d_offsets);
   print_array(d_eta, d_offsets);
   print_array(d_phi, d_offsets);
-  segmented_filter_zipped(d_pt, d_eta, d_phi, d_offsets, pred);
+  auto [d_selected_pt, d_selected_eta, d_selected_phi, d_new_offsets] =
+    segmented_filter_zipped(d_pt, d_eta, d_phi, d_offsets, pred);
   std::cout << "After filtering (threshold = " << threshold << "):" << std::endl;
-  print_array(d_pt, d_offsets);
-  print_array(d_eta, d_offsets);
-  print_array(d_phi, d_offsets);
+  print_array(d_selected_pt, d_new_offsets);
+  print_array(d_selected_eta, d_new_offsets);
+  print_array(d_selected_phi, d_new_offsets);
 #else
   // Retrieve axis parameters
   const auto elements       = static_cast<std::size_t>(state.get_int64("Elements{io}"));
@@ -239,11 +240,12 @@ static void segmented_filter_upper_bound_zipped(nvbench::state& state, nvbench::
   print_array(d_pt, d_offsets);
   print_array(d_eta, d_offsets);
   print_array(d_phi, d_offsets);
-  segmented_filter_upper_bound_zipped(d_pt, d_eta, d_phi, d_offsets, pred);
+  auto [d_selected_pt, d_selected_eta, d_selected_phi, d_new_offsets] =
+    segmented_filter_upper_bound_zipped(d_pt, d_eta, d_phi, d_offsets, pred);
   std::cout << "After filtering (threshold = " << threshold << "):" << std::endl;
-  print_array(d_pt, d_offsets);
-  print_array(d_eta, d_offsets);
-  print_array(d_phi, d_offsets);
+  print_array(d_selected_pt, d_new_offsets);
+  print_array(d_selected_eta, d_new_offsets);
+  print_array(d_selected_phi, d_new_offsets);
 #else
   // Retrieve axis parameters
   const auto elements       = static_cast<std::size_t>(state.get_int64("Elements{io}"));

@@ -24,10 +24,10 @@ static void filter_out_segments_rle_scan(nvbench::state& state, nvbench::type_li
   std::cout << "Before filtering:" << std::endl;
   print_array(d_values, d_offsets);
 
-  filter_out_segments_rle_scan(d_values, d_offsets, d_mask);
+  auto [d_selected_values, d_new_offsets] = filter_out_segments_rle_scan(d_values, d_offsets, d_mask);
 
   std::cout << "After filtering:" << std::endl;
-  print_array(d_values, d_offsets);
+  print_array(d_selected_values, d_new_offsets);
 #else
   // Retrieve axis parameters
   const auto elements       = static_cast<std::size_t>(state.get_int64("Elements{io}"));
@@ -65,10 +65,10 @@ static void filter_out_segments_copy_if(nvbench::state& state, nvbench::type_lis
   std::cout << "Before filtering:" << std::endl;
   print_array(d_values, d_offsets);
 
-  filter_out_segments_copy_if(d_values, d_offsets, d_mask);
+  auto [d_selected_values, d_new_offsets] = filter_out_segments_copy_if(d_values, d_offsets, d_mask);
 
   std::cout << "After filtering:" << std::endl;
-  print_array(d_values, d_offsets);
+  print_array(d_selected_values, d_new_offsets);
 #else
   // Retrieve axis parameters
   const auto elements       = static_cast<std::size_t>(state.get_int64("Elements{io}"));
@@ -106,10 +106,10 @@ static void filter_out_segments_fancy_iterator(nvbench::state& state, nvbench::t
   std::cout << "Before filtering:" << std::endl;
   print_array(d_values, d_offsets);
 
-  filter_out_segments_fancy_iterator(d_values, d_offsets, d_mask);
+  auto [d_selected_values, d_new_offsets] = filter_out_segments_fancy_iterator(d_values, d_offsets, d_mask);
 
   std::cout << "After filtering:" << std::endl;
-  print_array(d_values, d_offsets);
+  print_array(d_selected_values, d_new_offsets);
 #else
   // Retrieve axis parameters
   const auto elements       = static_cast<std::size_t>(state.get_int64("Elements{io}"));
@@ -153,12 +153,13 @@ static void filter_out_segments_rle_scan_zipped(nvbench::state& state, nvbench::
   print_array(d_eta, d_offsets);
   print_array(d_phi, d_offsets);
 
-  filter_out_segments_rle_scan_zipped(d_pt, d_eta, d_phi, d_offsets, d_mask);
+  auto [d_selected_pt, d_selected_eta, d_selected_phi, d_new_offsets] =
+    filter_out_segments_rle_scan_zipped(d_pt, d_eta, d_phi, d_offsets, d_mask);
 
   std::cout << "After filtering:" << std::endl;
-  print_array(d_pt, d_offsets);
-  print_array(d_eta, d_offsets);
-  print_array(d_phi, d_offsets);
+  print_array(d_selected_pt, d_new_offsets);
+  print_array(d_selected_eta, d_new_offsets);
+  print_array(d_selected_phi, d_new_offsets);
 #else
   // Retrieve axis parameters
   const auto elements       = static_cast<std::size_t>(state.get_int64("Elements{io}"));
@@ -204,12 +205,13 @@ static void filter_out_segments_copy_if_zipped(nvbench::state& state, nvbench::t
   print_array(d_eta, d_offsets);
   print_array(d_phi, d_offsets);
 
-  filter_out_segments_copy_if_zipped(d_pt, d_eta, d_phi, d_offsets, d_mask);
+  auto [d_selected_pt, d_selected_eta, d_selected_phi, d_new_offsets] =
+    filter_out_segments_copy_if_zipped(d_pt, d_eta, d_phi, d_offsets, d_mask);
 
   std::cout << "After filtering:" << std::endl;
-  print_array(d_pt, d_offsets);
-  print_array(d_eta, d_offsets);
-  print_array(d_phi, d_offsets);
+  print_array(d_selected_pt, d_new_offsets);
+  print_array(d_selected_eta, d_new_offsets);
+  print_array(d_selected_phi, d_new_offsets);
 #else
   // Retrieve axis parameters
   const auto elements       = static_cast<std::size_t>(state.get_int64("Elements{io}"));
@@ -255,12 +257,13 @@ static void filter_out_segments_fancy_iterator_zipped(nvbench::state& state, nvb
   print_array(d_eta, d_offsets);
   print_array(d_phi, d_offsets);
 
-  filter_out_segments_fancy_iterator_zipped(d_pt, d_eta, d_phi, d_offsets, d_mask);
+  auto [d_selected_pt, d_selected_eta, d_selected_phi, d_new_offsets] =
+    filter_out_segments_fancy_iterator_zipped(d_pt, d_eta, d_phi, d_offsets, d_mask);
 
   std::cout << "After filtering:" << std::endl;
-  print_array(d_pt, d_offsets);
-  print_array(d_eta, d_offsets);
-  print_array(d_phi, d_offsets);
+  print_array(d_selected_pt, d_new_offsets);
+  print_array(d_selected_eta, d_new_offsets);
+  print_array(d_selected_phi, d_new_offsets);
 #else
   // Retrieve axis parameters
   const auto elements       = static_cast<std::size_t>(state.get_int64("Elements{io}"));

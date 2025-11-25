@@ -64,13 +64,19 @@ struct adjust_offsets_zipped_op
 };
 
 template <typename T, typename PredicateOp>
-static void segmented_filter_zipped(
-  thrust::device_vector<T>& d_pt,
-  thrust::device_vector<T>& d_eta,
-  thrust::device_vector<T>& d_phi,
-  thrust::device_vector<int>& d_offsets,
-  PredicateOp pred)
+static std::
+  tuple<thrust::device_vector<T>, thrust::device_vector<T>, thrust::device_vector<T>, thrust::device_vector<int>>
+  segmented_filter_zipped(
+    const thrust::device_vector<T>& d_pt,
+    const thrust::device_vector<T>& d_eta,
+    const thrust::device_vector<T>& d_phi,
+    const thrust::device_vector<int>& d_offsets,
+    PredicateOp pred)
 {
+  thrust::device_vector<T> d_selected_pt(d_pt.size(), thrust::no_init);
+  thrust::device_vector<T> d_selected_eta(d_eta.size(), thrust::no_init);
+  thrust::device_vector<T> d_selected_phi(d_phi.size(), thrust::no_init);
+
   const auto num_segments = d_offsets.size() - 1;
 
   thrust::device_vector<int> d_num_selected_out(1, thrust::no_init);
@@ -78,9 +84,9 @@ static void segmented_filter_zipped(
 
   // Write directly to d_values
   auto output_iter = cuda::make_transform_output_iterator(
-    cuda::make_zip_iterator(thrust::raw_pointer_cast(d_pt.data()),
-                            thrust::raw_pointer_cast(d_eta.data()),
-                            thrust::raw_pointer_cast(d_phi.data())),
+    cuda::make_zip_iterator(thrust::raw_pointer_cast(d_selected_pt.data()),
+                            thrust::raw_pointer_cast(d_selected_eta.data()),
+                            thrust::raw_pointer_cast(d_selected_phi.data())),
     [pt  = thrust::raw_pointer_cast(d_pt.data()),
      eta = thrust::raw_pointer_cast(d_eta.data()),
      phi = thrust::raw_pointer_cast(d_phi.data())] __device__(int idx) {
@@ -109,7 +115,7 @@ static void segmented_filter_zipped(
   if (error != cudaSuccess)
   {
     std::cerr << "Error during temp storage size calculation: " << cudaGetErrorString(error) << std::endl;
-    return;
+    return {};
   }
 
   thrust::device_vector<uint8_t> d_temp_storage(temp_storage_bytes, thrust::no_init);
@@ -126,14 +132,14 @@ static void segmented_filter_zipped(
   if (error != cudaSuccess)
   {
     std::cerr << "Error during DeviceSelect::If: " << cudaGetErrorString(error) << std::endl;
-    return;
+    return {};
   }
 
   int num_selected = thrust::host_vector<int>(d_num_selected_out)[0];
 
-  d_pt.resize(num_selected);
-  d_eta.resize(num_selected);
-  d_phi.resize(num_selected);
+  d_selected_pt.resize(num_selected);
+  d_selected_eta.resize(num_selected);
+  d_selected_phi.resize(num_selected);
 
   adjust_offsets_zipped_op adjust_op{
     thrust::raw_pointer_cast(d_num_removed_per_segment.data()),
@@ -156,7 +162,7 @@ static void segmented_filter_zipped(
   {
     std::cerr
       << "Error during temp storage size calculation for ExclusiveScan: " << cudaGetErrorString(error) << std::endl;
-    return;
+    return {};
   }
 
   d_temp_storage.resize(temp_storage_bytes);
@@ -173,8 +179,8 @@ static void segmented_filter_zipped(
   if (error != cudaSuccess)
   {
     std::cerr << "Error during ExclusiveScan: " << cudaGetErrorString(error) << std::endl;
-    return;
+    return {};
   }
 
-  d_offsets.swap(d_new_offsets);
+  return {d_selected_pt, d_selected_eta, d_selected_phi, d_new_offsets};
 }
