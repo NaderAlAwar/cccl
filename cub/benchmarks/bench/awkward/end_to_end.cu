@@ -215,7 +215,7 @@ static void physics_analysis(
 template <typename T>
 static void physics_analysis(nvbench::state& state, nvbench::type_list<T>)
 {
-  bool check_correctness = false;
+  bool check_correctness = true;
   thrust::device_vector<T> d_electron_pts;
   thrust::device_vector<T> d_electron_etas;
   thrust::device_vector<T> d_electron_phis;
@@ -231,8 +231,11 @@ static void physics_analysis(nvbench::state& state, nvbench::type_list<T>)
   {
     try
     {
+      const auto power_of_10   = static_cast<int>(state.get_int64("10Power{io}"));
+      const std::string suffix = "_" + std::to_string(power_of_10);
+
       const auto build_path = [&](const std::string& name) {
-        return repo_root / (name + ".npy");
+        return repo_root / (name + suffix + ".npy");
       };
 
       auto electron_pts_host     = load_npy_vector<T>(build_path("electron_pts"));
@@ -344,6 +347,28 @@ static void physics_analysis(nvbench::state& state, nvbench::type_list<T>)
   thrust::device_vector<uint8_t> d_temp_storage(5000000, thrust::no_init);
 
   state.exec(nvbench::exec_tag::sync, [&](nvbench::launch&) {
+    // Reset array sizes before each iteration since the functions resize them
+    d_temp_electron_pts.resize(d_electron_pts.size());
+    d_temp_electron_etas.resize(d_electron_etas.size());
+    d_temp_electron_phis.resize(d_electron_phis.size());
+    d_temp_muon_pts.resize(d_muons_pts.size());
+    d_temp_muon_etas.resize(d_muons_etas.size());
+    d_temp_muon_phis.resize(d_muons_phis.size());
+    d_temp_electron_offsets.resize(d_electron_offsets.size());
+    d_temp_muon_offsets.resize(d_muon_offsets.size());
+    d_temp2_electron_pts.resize(d_electron_pts.size());
+    d_temp2_electron_etas.resize(d_electron_etas.size());
+    d_temp2_electron_phis.resize(d_electron_phis.size());
+    d_temp2_muon_pts.resize(d_muons_pts.size());
+    d_temp2_muon_etas.resize(d_muons_etas.size());
+    d_temp2_muon_phis.resize(d_muons_phis.size());
+    d_masses_electrons.resize(d_electron_pts.size());
+    d_masses_muons.resize(d_muons_pts.size());
+    d_electron_segment_mask.resize(d_electron_offsets.size() - 1);
+    d_muon_segment_mask.resize(d_muon_offsets.size() - 1);
+    d_temp_electron_num_removed_per_segment.assign(d_electron_offsets.size() - 1, 0);
+    d_temp_muon_num_removed_per_segment.assign(d_muon_offsets.size() - 1, 0);
+
     physics_analysis(
       d_electron_pts,
       d_electron_etas,
@@ -382,8 +407,11 @@ static void physics_analysis(nvbench::state& state, nvbench::type_list<T>)
 
   if (check_correctness)
   {
+    const auto power_of_10   = static_cast<int>(state.get_int64("10Power{io}"));
+    const std::string suffix = "_" + std::to_string(power_of_10);
+
     const auto build_output_path = [&](const std::string& name) {
-      return repo_root / (name + "_cpp.npy");
+      return repo_root / (name + suffix + "_cpp.npy");
     };
     const auto masses_electrons_host = copy_device_to_host(d_masses_electrons);
     const auto masses_muons_host     = copy_device_to_host(d_masses_muons);
@@ -394,9 +422,15 @@ static void physics_analysis(nvbench::state& state, nvbench::type_list<T>)
 }
 
 // using current_data_types = nvbench::type_list<float, double>;
-using current_data_types = nvbench::type_list<float>;
+
+// NVBENCH_BENCH_TYPES(physics_analysis, NVBENCH_TYPE_AXES(current_data_types))
+//   .set_name("physics_analysis")
+//   .set_type_axes_names({"T{ct}"})
+//   .add_int64_power_of_two_axis("Events{io}", nvbench::range(12, 24, 4));
+
+using current_data_types = nvbench::type_list<double>;
 
 NVBENCH_BENCH_TYPES(physics_analysis, NVBENCH_TYPE_AXES(current_data_types))
   .set_name("physics_analysis")
   .set_type_axes_names({"T{ct}"})
-  .add_int64_power_of_two_axis("Events{io}", nvbench::range(12, 24, 4));
+  .add_int64_axis("10Power{io}", nvbench::range(4, 7, 1));
