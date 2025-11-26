@@ -5,10 +5,11 @@
 #include <thrust/device_vector.h>
 
 template <typename T>
-static thrust::device_vector<T> invariant_mass_transform(
+static void invariant_mass_transform(
   const thrust::device_vector<T>& d_pt,
   const thrust::device_vector<T>& d_eta,
   const thrust::device_vector<T>& d_phi,
+  thrust::device_vector<T>& d_output,
   int segment_size)
 {
   // Right now this implementation is hardcoded to assume stride == 2.
@@ -27,7 +28,6 @@ static thrust::device_vector<T> invariant_mass_transform(
   auto input_iter = cuda::std::make_tuple(first_electron_iter, second_electron_iter);
 
   const auto num_elements = d_pt.size() / 2;
-  thrust::device_vector<T> d_output(num_elements, thrust::no_init);
   auto op =
     [] __device__(const cuda::std::tuple<T, T, T>& first_electron, const cuda::std::tuple<T, T, T>& second_electron) {
       auto [pt1, eta1, phi1] = first_electron;
@@ -41,8 +41,8 @@ static thrust::device_vector<T> invariant_mass_transform(
   if (error != cudaSuccess)
   {
     std::cerr << "Error during segmented reduce: " << cudaGetErrorString(error) << std::endl;
-    return {};
+    return;
   }
 
-  return d_output;
+  d_output.resize(num_elements);
 }

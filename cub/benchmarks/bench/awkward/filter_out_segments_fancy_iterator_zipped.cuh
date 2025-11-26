@@ -13,14 +13,14 @@ static void filter_out_segments_fancy_iterator_zipped(
   thrust::device_vector<T>& d_eta,
   thrust::device_vector<T>& d_phi,
   thrust::device_vector<int>& d_offsets,
+  thrust::device_vector<T>& d_selected_pt,
+  thrust::device_vector<T>& d_selected_eta,
+  thrust::device_vector<T>& d_selected_phi,
+  thrust::device_vector<int>& d_selected_segment_ids,
+  thrust::device_vector<int>& d_num_selected_out,
+  thrust::device_vector<uint8_t>& d_temp_storage,
   const thrust::device_vector<bool>& d_mask)
 {
-  thrust::device_vector<T> d_selected_pt(d_pt.size(), thrust::no_init);
-  thrust::device_vector<T> d_selected_eta(d_eta.size(), thrust::no_init);
-  thrust::device_vector<T> d_selected_phi(d_phi.size(), thrust::no_init);
-
-  thrust::device_vector<int> d_selected_segment_ids(d_pt.size(), thrust::no_init);
-  thrust::device_vector<int> d_num_selected_out(1, thrust::no_init);
   auto select_op =
     [d_mask = thrust::raw_pointer_cast(d_mask.data())] __device__(const cuda::std::tuple<T, T, T, int>& t) -> bool {
     int segment_id = cuda::std::get<3>(t);
@@ -55,7 +55,7 @@ static void filter_out_segments_fancy_iterator_zipped(
     return;
   }
 
-  thrust::device_vector<uint8_t> d_temp_storage(temp_storage_bytes, thrust::no_init);
+  // thrust::device_vector<uint8_t> d_temp_storage(temp_storage_bytes, thrust::no_init);
 
   error = cub::DeviceSelect::If(
     thrust::raw_pointer_cast(d_temp_storage.data()),
@@ -102,7 +102,7 @@ static void filter_out_segments_fancy_iterator_zipped(
     return;
   }
 
-  d_temp_storage.resize(temp_storage_bytes, thrust::no_init);
+  // d_temp_storage.resize(temp_storage_bytes, thrust::no_init);
 
   error = cub::DeviceSelect::If(
     thrust::raw_pointer_cast(d_temp_storage.data()),
@@ -122,11 +122,8 @@ static void filter_out_segments_fancy_iterator_zipped(
   int new_num_segments = d_num_segments_out[0];
 
   d_selected_pt.resize(num_selected);
-  d_pt.swap(d_selected_pt);
   d_selected_eta.resize(num_selected);
-  d_eta.swap(d_selected_eta);
   d_selected_phi.resize(num_selected);
-  d_phi.swap(d_selected_phi);
 
   d_offsets.resize(new_num_segments + 1);
   d_offsets[new_num_segments] = num_selected;

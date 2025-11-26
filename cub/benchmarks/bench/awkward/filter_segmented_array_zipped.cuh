@@ -73,6 +73,7 @@ static void segmented_filter_zipped(
   thrust::device_vector<T>& d_selected_eta,
   thrust::device_vector<T>& d_selected_phi,
   thrust::device_vector<int>& d_new_offsets,
+  thrust::device_vector<uint8_t>& d_temp_storage,
   PredicateOp pred)
 {
   const auto num_segments = d_offsets.size() - 1;
@@ -116,7 +117,7 @@ static void segmented_filter_zipped(
     return;
   }
 
-  thrust::device_vector<uint8_t> d_temp_storage(temp_storage_bytes, thrust::no_init);
+  // thrust::device_vector<uint8_t> d_temp_storage(temp_storage_bytes, thrust::no_init);
 
   error = cub::DeviceSelect::If(
     thrust::raw_pointer_cast(d_temp_storage.data()),
@@ -163,7 +164,7 @@ static void segmented_filter_zipped(
     return;
   }
 
-  d_temp_storage.resize(temp_storage_bytes);
+  // d_temp_storage.resize(temp_storage_bytes);
 
   error = cub::DeviceScan::ExclusiveScan(
     thrust::raw_pointer_cast(d_temp_storage.data()),

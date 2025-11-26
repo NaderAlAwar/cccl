@@ -60,7 +60,7 @@ void write_npy_vector(const std::vector<T>& host, const fs::path& file_path)
 } // namespace
 
 template <typename T>
-static std::tuple<thrust::device_vector<T>, thrust::device_vector<T>> physics_analysis(
+static void physics_analysis(
   const thrust::device_vector<T>& d_electron_pts,
   const thrust::device_vector<T>& d_electron_etas,
   const thrust::device_vector<T>& d_electron_phis,
@@ -78,7 +78,20 @@ static std::tuple<thrust::device_vector<T>, thrust::device_vector<T>> physics_an
   thrust::device_vector<int>& d_temp_electron_offsets,
   thrust::device_vector<int>& d_temp_muon_offsets,
   thrust::device_vector<bool>& d_electron_segment_mask,
-  thrust::device_vector<bool>& d_muon_segment_mask)
+  thrust::device_vector<bool>& d_muon_segment_mask,
+  thrust::device_vector<T>& d_temp2_electron_pts,
+  thrust::device_vector<T>& d_temp2_electron_etas,
+  thrust::device_vector<T>& d_temp2_electron_phis,
+  thrust::device_vector<T>& d_temp2_muon_pts,
+  thrust::device_vector<T>& d_temp2_muon_etas,
+  thrust::device_vector<T>& d_temp2_muon_phis,
+  thrust::device_vector<int>& d_temp2_electron_segment_ids,
+  thrust::device_vector<int>& d_temp2_muon_segment_ids,
+  thrust::device_vector<int>& d_temp2_electron_num_selected_out,
+  thrust::device_vector<int>& d_temp2_muon_num_selected_out,
+  thrust::device_vector<T>& d_masses_electrons,
+  thrust::device_vector<T>& d_masses_muons,
+  thrust::device_vector<uint8_t>& d_temp_storage)
 {
   auto cond_electron = [] __device__(const cuda::std::tuple<T, T, T>& x) {
     return cuda::std::get<0>(x) > 40.0;
@@ -98,6 +111,7 @@ static std::tuple<thrust::device_vector<T>, thrust::device_vector<T>> physics_an
     d_temp_electron_etas,
     d_temp_electron_phis,
     d_temp_electron_offsets,
+    d_temp_storage,
     cond_electron);
   segmented_filter_zipped(
     d_muon_pts,
@@ -108,6 +122,7 @@ static std::tuple<thrust::device_vector<T>, thrust::device_vector<T>> physics_an
     d_temp_muon_etas,
     d_temp_muon_phis,
     d_temp_muon_offsets,
+    d_temp_storage,
     cond_muon);
   // segmented_filter_upper_bound_zipped(d_electron_pts, d_electron_etas, d_electron_phis, d_electron_offsets,
   // d_temp_electron_pts, d_temp_electron_etas, d_temp_electron_phis, d_temp_electron_offsets, cond_electron);
@@ -130,7 +145,7 @@ static std::tuple<thrust::device_vector<T>, thrust::device_vector<T>> physics_an
   if (error != cudaSuccess)
   {
     std::cerr << "Error during electron segment length calculation: " << cudaGetErrorString(error) << std::endl;
-    return {};
+    return;
   }
 
   error = cub::DeviceTransform::Transform(
@@ -144,15 +159,35 @@ static std::tuple<thrust::device_vector<T>, thrust::device_vector<T>> physics_an
   if (error != cudaSuccess)
   {
     std::cerr << "Error during muon segment length calculation: " << cudaGetErrorString(error) << std::endl;
-    return {};
+    return;
   }
 
   // The fancy iterator version seems to perform better. Uncommenting out the copy_if and rle_scan versions yields the
   // same result with different performance.
   filter_out_segments_fancy_iterator_zipped(
-    d_temp_electron_pts, d_temp_electron_etas, d_temp_electron_phis, d_temp_electron_offsets, d_electron_segment_mask);
+    d_temp_electron_pts,
+    d_temp_electron_etas,
+    d_temp_electron_phis,
+    d_temp_electron_offsets,
+    d_temp2_electron_pts,
+    d_temp2_electron_etas,
+    d_temp2_electron_phis,
+    d_temp2_electron_segment_ids,
+    d_temp2_electron_num_selected_out,
+    d_temp_storage,
+    d_electron_segment_mask);
   filter_out_segments_fancy_iterator_zipped(
-    d_temp_muon_pts, d_temp_muon_etas, d_temp_muon_phis, d_temp_muon_offsets, d_muon_segment_mask);
+    d_temp_muon_pts,
+    d_temp_muon_etas,
+    d_temp_muon_phis,
+    d_temp_muon_offsets,
+    d_temp2_muon_pts,
+    d_temp2_muon_etas,
+    d_temp2_muon_phis,
+    d_temp2_muon_segment_ids,
+    d_temp2_muon_num_selected_out,
+    d_temp_storage,
+    d_muon_segment_mask);
   // filter_out_segments_copy_if_zipped(d_temp_electron_pts, d_temp_electron_etas, d_temp_electron_phis,
   // d_temp_electron_offsets, d_electron_segment_mask); filter_out_segments_copy_if_zipped(d_temp_muon_pts,
   // d_temp_muon_etas, d_temp_muon_phis, d_temp_muon_offsets, d_muon_segment_mask);
@@ -160,22 +195,21 @@ static std::tuple<thrust::device_vector<T>, thrust::device_vector<T>> physics_an
   // d_temp_electron_offsets, d_electron_segment_mask); filter_out_segments_rle_scan_zipped(d_temp_muon_pts,
   // d_temp_muon_etas, d_temp_muon_phis, d_temp_muon_offsets, d_muon_segment_mask);
 
-  // The transform version seems to perform better. Uncommenting out the segmented reduce version yields the same result
-  // with different performance.
-  auto masses_electrons =
-    invariant_mass_transform(d_temp_electron_pts, d_temp_electron_etas, d_temp_electron_phis, segment_size);
-  auto masses_muons = invariant_mass_transform(d_temp_muon_pts, d_temp_muon_etas, d_temp_muon_phis, segment_size);
-  // auto masses_electrons = invariant_mass_segmented_reduce(d_temp_electron_pts, d_temp_electron_etas,
-  // d_temp_electron_phis, segment_size); auto masses_muons     = invariant_mass_segmented_reduce(d_temp_muon_pts,
-  // d_temp_muon_etas, d_temp_muon_phis, segment_size);
-
-  return {masses_electrons, masses_muons};
+  // // The transform version seems to perform better. Uncommenting out the segmented reduce version yields the same
+  // result
+  // // with different performance.
+  invariant_mass_transform(
+    d_temp2_electron_pts, d_temp2_electron_etas, d_temp2_electron_phis, d_masses_electrons, segment_size);
+  invariant_mass_transform(d_temp2_muon_pts, d_temp2_muon_etas, d_temp2_muon_phis, d_masses_muons, segment_size);
+  // // auto masses_electrons = invariant_mass_segmented_reduce(d_temp_electron_pts, d_temp_electron_etas,
+  // // d_temp_electron_phis, segment_size); auto masses_muons     = invariant_mass_segmented_reduce(d_temp_muon_pts,
+  // // d_temp_muon_etas, d_temp_muon_phis, segment_size);
 }
 
 template <typename T>
 static void physics_analysis(nvbench::state& state, nvbench::type_list<T>)
 {
-  bool check_correctness = false;
+  bool check_correctness = true;
   thrust::device_vector<T> d_electron_pts;
   thrust::device_vector<T> d_electron_etas;
   thrust::device_vector<T> d_electron_phis;
@@ -184,9 +218,6 @@ static void physics_analysis(nvbench::state& state, nvbench::type_list<T>)
   thrust::device_vector<T> d_muons_phis;
   thrust::device_vector<int> d_electron_offsets;
   thrust::device_vector<int> d_muon_offsets;
-
-  thrust::device_vector<T> masses_electrons;
-  thrust::device_vector<T> masses_muons;
 
   fs::path repo_root{"/home/coder/cccl"};
 
@@ -235,6 +266,9 @@ static void physics_analysis(nvbench::state& state, nvbench::type_list<T>)
       d_muons_phis.assign(muons_phis_host.begin(), muons_phis_host.end());
       d_electron_offsets.assign(electron_offsets_host.begin(), electron_offsets_host.end());
       d_muon_offsets.assign(muon_offsets_host.begin(), muon_offsets_host.end());
+
+      // Warm up CUDA context to ensure device code is loaded
+      cudaFree(nullptr);
     }
     catch (const std::exception& ex)
     {
@@ -285,9 +319,24 @@ static void physics_analysis(nvbench::state& state, nvbench::type_list<T>)
   thrust::device_vector<int> d_temp_muon_offsets(d_muon_offsets.size(), thrust::no_init);
   thrust::device_vector<bool> d_electron_segment_mask(d_electron_offsets.size() - 1, thrust::no_init);
   thrust::device_vector<bool> d_muon_segment_mask(d_muon_offsets.size() - 1, thrust::no_init);
+  thrust::device_vector<T> d_masses_electrons(d_electron_pts.size(), thrust::no_init);
+  thrust::device_vector<T> d_masses_muons(d_muons_pts.size(), thrust::no_init);
+  thrust::device_vector<T> d_temp2_electron_pts(d_electron_pts.size(), thrust::no_init);
+  thrust::device_vector<T> d_temp2_electron_etas(d_electron_etas.size(), thrust::no_init);
+  thrust::device_vector<T> d_temp2_electron_phis(d_electron_phis.size(), thrust::no_init);
+  thrust::device_vector<T> d_temp2_muon_pts(d_muons_pts.size(), thrust::no_init);
+  thrust::device_vector<T> d_temp2_muon_etas(d_muons_etas.size(), thrust::no_init);
+  thrust::device_vector<T> d_temp2_muon_phis(d_muons_phis.size(), thrust::no_init);
+  thrust::device_vector<int> d_temp2_electron_segment_ids(d_electron_pts.size(), thrust::no_init);
+  thrust::device_vector<int> d_temp2_muon_segment_ids(d_muons_pts.size(), thrust::no_init);
+  thrust::device_vector<int> d_temp2_electron_num_selected_out(1, thrust::no_init);
+  thrust::device_vector<int> d_temp2_muon_num_selected_out(1, thrust::no_init);
+  // Rounded this value up from 4135679. Found it by printing the
+  // temp_storage_bytes value from a previous run.
+  thrust::device_vector<uint8_t> d_temp_storage(5000000, thrust::no_init);
 
   state.exec(nvbench::exec_tag::sync, [&](nvbench::launch&) {
-    auto [masses_e, masses_m] = physics_analysis(
+    physics_analysis(
       d_electron_pts,
       d_electron_etas,
       d_electron_phis,
@@ -305,9 +354,20 @@ static void physics_analysis(nvbench::state& state, nvbench::type_list<T>)
       d_temp_electron_offsets,
       d_temp_muon_offsets,
       d_electron_segment_mask,
-      d_muon_segment_mask);
-    masses_electrons = std::move(masses_e);
-    masses_muons     = std::move(masses_m);
+      d_muon_segment_mask,
+      d_temp2_electron_pts,
+      d_temp2_electron_etas,
+      d_temp2_electron_phis,
+      d_temp2_muon_pts,
+      d_temp2_muon_etas,
+      d_temp2_muon_phis,
+      d_temp2_electron_segment_ids,
+      d_temp2_muon_segment_ids,
+      d_temp2_electron_num_selected_out,
+      d_temp2_muon_num_selected_out,
+      d_masses_electrons,
+      d_masses_muons,
+      d_temp_storage);
   });
 
   if (check_correctness)
@@ -315,15 +375,16 @@ static void physics_analysis(nvbench::state& state, nvbench::type_list<T>)
     const auto build_output_path = [&](const std::string& name) {
       return repo_root / (name + "_cpp.npy");
     };
-    const auto masses_electrons_host = copy_device_to_host(masses_electrons);
-    const auto masses_muons_host     = copy_device_to_host(masses_muons);
+    const auto masses_electrons_host = copy_device_to_host(d_masses_electrons);
+    const auto masses_muons_host     = copy_device_to_host(d_masses_muons);
 
     write_npy_vector(masses_electrons_host, build_output_path("masses_electrons"));
     write_npy_vector(masses_muons_host, build_output_path("masses_muons"));
   }
 }
 
-using current_data_types = nvbench::type_list<float, double>;
+// using current_data_types = nvbench::type_list<float, double>;
+using current_data_types = nvbench::type_list<float>;
 
 NVBENCH_BENCH_TYPES(physics_analysis, NVBENCH_TYPE_AXES(current_data_types))
   .set_name("physics_analysis")
