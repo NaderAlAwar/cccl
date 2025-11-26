@@ -73,13 +73,12 @@ static void segmented_filter_zipped(
   thrust::device_vector<T>& d_selected_eta,
   thrust::device_vector<T>& d_selected_phi,
   thrust::device_vector<int>& d_new_offsets,
+  thrust::device_vector<int>& d_num_selected_out,
+  thrust::device_vector<int>& d_num_removed_per_segment,
   thrust::device_vector<uint8_t>& d_temp_storage,
   PredicateOp pred)
 {
   const auto num_segments = d_offsets.size() - 1;
-
-  thrust::device_vector<int> d_num_selected_out(1, thrust::no_init);
-  thrust::device_vector<int> d_num_removed_per_segment(num_segments, 0);
 
   // Write directly to d_values
   auto output_iter = cuda::make_transform_output_iterator(

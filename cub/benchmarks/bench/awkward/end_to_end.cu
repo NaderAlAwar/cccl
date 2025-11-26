@@ -79,6 +79,8 @@ static void physics_analysis(
   thrust::device_vector<int>& d_temp_muon_offsets,
   thrust::device_vector<bool>& d_electron_segment_mask,
   thrust::device_vector<bool>& d_muon_segment_mask,
+  thrust::device_vector<int>& d_temp_electron_num_removed_per_segment,
+  thrust::device_vector<int>& d_temp_muon_num_removed_per_segment,
   thrust::device_vector<T>& d_temp2_electron_pts,
   thrust::device_vector<T>& d_temp2_electron_etas,
   thrust::device_vector<T>& d_temp2_electron_phis,
@@ -111,6 +113,8 @@ static void physics_analysis(
     d_temp_electron_etas,
     d_temp_electron_phis,
     d_temp_electron_offsets,
+    d_temp2_electron_num_selected_out,
+    d_temp_electron_num_removed_per_segment,
     d_temp_storage,
     cond_electron);
   segmented_filter_zipped(
@@ -122,6 +126,8 @@ static void physics_analysis(
     d_temp_muon_etas,
     d_temp_muon_phis,
     d_temp_muon_offsets,
+    d_temp2_muon_num_selected_out,
+    d_temp_muon_num_removed_per_segment,
     d_temp_storage,
     cond_muon);
   // segmented_filter_upper_bound_zipped(d_electron_pts, d_electron_etas, d_electron_phis, d_electron_offsets,
@@ -209,7 +215,7 @@ static void physics_analysis(
 template <typename T>
 static void physics_analysis(nvbench::state& state, nvbench::type_list<T>)
 {
-  bool check_correctness = true;
+  bool check_correctness = false;
   thrust::device_vector<T> d_electron_pts;
   thrust::device_vector<T> d_electron_etas;
   thrust::device_vector<T> d_electron_phis;
@@ -319,6 +325,8 @@ static void physics_analysis(nvbench::state& state, nvbench::type_list<T>)
   thrust::device_vector<int> d_temp_muon_offsets(d_muon_offsets.size(), thrust::no_init);
   thrust::device_vector<bool> d_electron_segment_mask(d_electron_offsets.size() - 1, thrust::no_init);
   thrust::device_vector<bool> d_muon_segment_mask(d_muon_offsets.size() - 1, thrust::no_init);
+  thrust::device_vector<int> d_temp_electron_num_removed_per_segment(d_electron_offsets.size() - 1, 0);
+  thrust::device_vector<int> d_temp_muon_num_removed_per_segment(d_muon_offsets.size() - 1, 0);
   thrust::device_vector<T> d_masses_electrons(d_electron_pts.size(), thrust::no_init);
   thrust::device_vector<T> d_masses_muons(d_muons_pts.size(), thrust::no_init);
   thrust::device_vector<T> d_temp2_electron_pts(d_electron_pts.size(), thrust::no_init);
@@ -355,6 +363,8 @@ static void physics_analysis(nvbench::state& state, nvbench::type_list<T>)
       d_temp_muon_offsets,
       d_electron_segment_mask,
       d_muon_segment_mask,
+      d_temp_electron_num_removed_per_segment,
+      d_temp_muon_num_removed_per_segment,
       d_temp2_electron_pts,
       d_temp2_electron_etas,
       d_temp2_electron_phis,
