@@ -130,10 +130,32 @@ static void physics_analysis(
     d_temp_muon_num_removed_per_segment,
     d_temp_storage,
     cond_muon);
-  // segmented_filter_upper_bound_zipped(d_electron_pts, d_electron_etas, d_electron_phis, d_electron_offsets,
-  // d_temp_electron_pts, d_temp_electron_etas, d_temp_electron_phis, d_temp_electron_offsets, cond_electron);
-  // segmented_filter_upper_bound_zipped(d_muon_pts, d_muon_etas, d_muon_phis, d_muon_offsets, d_temp_muon_pts,
-  // d_temp_muon_etas, d_temp_muon_phis, d_temp_muon_offsets, cond_muon);
+  // segmented_filter_upper_bound_zipped(
+  //   d_electron_pts,
+  //   d_electron_etas,
+  //   d_electron_phis,
+  //   d_electron_offsets,
+  //   d_temp_electron_pts,
+  //   d_temp_electron_etas,
+  //   d_temp_electron_phis,
+  //   d_temp_electron_offsets,
+  //   d_temp2_electron_num_selected_out,
+  //   d_temp_electron_num_removed_per_segment,
+  //   d_temp_storage,
+  //   cond_electron);
+  // segmented_filter_upper_bound_zipped(
+  //   d_muon_pts,
+  //   d_muon_etas,
+  //   d_muon_phis,
+  //   d_muon_offsets,
+  //   d_temp_muon_pts,
+  //   d_temp_muon_etas,
+  //   d_temp_muon_phis,
+  //   d_temp_muon_offsets,
+  //   d_temp2_muon_num_selected_out,
+  //   d_temp_muon_num_removed_per_segment,
+  //   d_temp_storage,
+  //   cond_muon);
 
   const auto num_electron_segments = d_temp_electron_offsets.size() - 1;
   const auto num_muon_segments     = d_temp_muon_offsets.size() - 1;

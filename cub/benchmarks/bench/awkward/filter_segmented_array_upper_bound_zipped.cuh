@@ -5,29 +5,31 @@
 #include <thrust/execution_policy.h>
 
 template <typename T, typename PredicateOp>
-static std::
-  tuple<thrust::device_vector<T>, thrust::device_vector<T>, thrust::device_vector<T>, thrust::device_vector<int>>
-  segmented_filter_upper_bound_zipped(
-    const thrust::device_vector<T>& d_pt,
-    const thrust::device_vector<T>& d_eta,
-    const thrust::device_vector<T>& d_phi,
-    const thrust::device_vector<int>& d_offsets,
-    PredicateOp pred)
+static void segmented_filter_upper_bound_zipped(
+  const thrust::device_vector<T>& d_pt,
+  const thrust::device_vector<T>& d_eta,
+  const thrust::device_vector<T>& d_phi,
+  const thrust::device_vector<int>& d_offsets,
+  thrust::device_vector<T>& d_selected_pt,
+  thrust::device_vector<T>& d_selected_eta,
+  thrust::device_vector<T>& d_selected_phi,
+  thrust::device_vector<int>& d_new_offsets,
+  thrust::device_vector<int>& d_num_selected_out,
+  thrust::device_vector<int>& d_num_removed_per_segment,
+  thrust::device_vector<uint8_t>& d_temp_storage,
+  PredicateOp pred)
 {
-  thrust::device_vector<int> d_new_offsets = d_offsets;
-  thrust::device_vector<T> d_selected_pt(d_pt.size(), thrust::no_init);
-  thrust::device_vector<T> d_selected_eta(d_eta.size(), thrust::no_init);
-  thrust::device_vector<T> d_selected_phi(d_phi.size(), thrust::no_init);
+  (void) d_num_removed_per_segment; // unused in this implementation
+
   thrust::device_vector<int> d_selected_segment_ids(d_pt.size(), thrust::no_init);
-  thrust::device_vector<int> d_num_selected_out(1, thrust::no_init);
 
   auto num_values = d_pt.size();
 
   thrust::device_vector<int> d_segment_ids(num_values, thrust::no_init);
   thrust::upper_bound(
     thrust::device,
-    d_new_offsets.begin(),
-    d_new_offsets.end(),
+    d_offsets.begin(),
+    d_offsets.end(),
     cuda::counting_iterator{0},
     cuda::counting_iterator{static_cast<int>(num_values)},
     cuda::make_transform_output_iterator(d_segment_ids.begin(), [] __device__(int value) {
@@ -61,10 +63,11 @@ static std::
   if (error != cudaSuccess)
   {
     std::cerr << "Error during temporary storage size calculation: " << cudaGetErrorString(error) << std::endl;
-    return {};
+    return;
   }
 
-  thrust::device_vector<uint8_t> d_temp_storage(temp_storage_bytes, thrust::no_init);
+  // thrust::device_vector<uint8_t> d_temp_storage(temp_storage_bytes, thrust::no_init);
+
   error = cub::DeviceSelect::If(
     thrust::raw_pointer_cast(d_temp_storage.data()),
     temp_storage_bytes,
@@ -77,7 +80,7 @@ static std::
   if (error != cudaSuccess)
   {
     std::cerr << "Error during selection: " << cudaGetErrorString(error) << std::endl;
-    return {};
+    return;
   }
 
   int num_selected = d_num_selected_out[0];
@@ -93,8 +96,6 @@ static std::
     d_selected_segment_ids.begin(),
     d_selected_segment_ids.end(),
     cuda::counting_iterator{0},
-    cuda::counting_iterator{static_cast<int>(d_new_offsets.size())},
+    cuda::counting_iterator{static_cast<int>(d_offsets.size())},
     d_new_offsets.begin());
-
-  return {d_selected_pt, d_selected_eta, d_selected_phi, d_new_offsets};
 }
