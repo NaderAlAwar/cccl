@@ -326,6 +326,15 @@ struct tuning_vec<1200, StoreSize>
   static constexpr int items_per_thread = 8;
 };
 
+// manually tuned triad on L4
+template <int StoreSize, int... LoadSizes>
+struct tuning_vec<890, StoreSize, LoadSizes...>
+{
+  static constexpr int block_threads    = 256;
+  static constexpr int vec_size         = ::cuda::std::max(8 / StoreSize, 1); // 64-bit instructions
+  static constexpr int items_per_thread = 8;
+};
+
 template <bool RequiresStableAddress,
           bool DenseOutput,
           typename RandomAccessIteratorTupleIn,
@@ -375,17 +384,17 @@ struct policy_hub<RequiresStableAddress,
     static constexpr auto algorithm = fallback_to_prefetch ? Algorithm::prefetch : Algorithm::vectorized;
   };
 
-  struct policy800 : ChainedPolicy<800, policy800, policy300>
+  template <int BlockThreads, int PtxVersion>
+  struct async_copy_policy_base
   {
-  private:
-    static constexpr int block_threads = 256;
-
   public:
-    static constexpr int min_bif = arch_to_min_bytes_in_flight(800);
-    using prefetch_policy        = prefetch_policy_t<block_threads>;
-    using vectorized_policy      = vectorized_policy_t<
-           tuning_vec<800, size_of<it_value_t<RandomAccessIteratorOut>>, sizeof(it_value_t<RandomAccessIteratorsIn>)...>>;
-    using async_policy = async_copy_policy_t<block_threads, ldgsts_size_and_align>;
+    static constexpr int min_bif = arch_to_min_bytes_in_flight(PtxVersion);
+    using prefetch_policy        = prefetch_policy_t<BlockThreads>;
+    using vectorized_policy =
+      vectorized_policy_t<tuning_vec<PtxVersion,
+                                     size_of<it_value_t<RandomAccessIteratorOut>>,
+                                     sizeof(it_value_t<RandomAccessIteratorsIn>)...>>;
+    using async_policy = async_copy_policy_t<BlockThreads, ldgsts_size_and_align>;
 
   private:
     // We cannot use the architecture-specific amount of SMEM here instead of max_smem_per_block, because this is not
@@ -394,10 +403,18 @@ struct policy_hub<RequiresStableAddress,
     static constexpr bool exhaust_smem =
       memcpy_async_dyn_smem_for_tile_size(
         make_sizes_alignments<RandomAccessIteratorsIn...>(),
-        block_threads* async_policy::min_items_per_thread,
+        BlockThreads* async_policy::min_items_per_thread,
         ldgsts_size_and_align)
       > int{max_smem_per_block};
-    static constexpr bool fallback_to_vectorized = exhaust_smem || no_input_streams || !can_memcpy_all_inputs;
+
+    // on Hopper, the vectorized kernel performs better for 1 and 2 byte values
+    static constexpr bool use_vector_kernel_on_ampere_or_ada =
+      ((size_of<it_value_t<RandomAccessIteratorsIn>> < 4) && ...) && sizeof...(RandomAccessIteratorsIn) > 1
+      && size_of<it_value_t<RandomAccessIteratorOut>> < 4;
+
+    static constexpr bool fallback_to_vectorized =
+      exhaust_smem || no_input_streams || !can_memcpy_all_inputs
+      || (PtxVersion >= 800 && use_vector_kernel_on_ampere_or_ada);
 
   public:
     static constexpr auto algorithm =
@@ -406,6 +423,16 @@ struct policy_hub<RequiresStableAddress,
         ? Algorithm::vectorized
         : Algorithm::memcpy_async;
   };
+
+  struct policy800
+      : async_copy_policy_base<256, 800>
+      , ChainedPolicy<800, policy800, policy300>
+  {};
+
+  struct policy890
+      : async_copy_policy_base<256, 890>
+      , ChainedPolicy<890, policy890, policy800>
+  {};
 
   template <int AsyncBlockSize, int PtxVersion>
   struct bulk_copy_policy_base
@@ -461,7 +488,7 @@ struct policy_hub<RequiresStableAddress,
 
   struct policy900
       : bulk_copy_policy_base<256, 900>
-      , ChainedPolicy<900, policy900, policy800>
+      , ChainedPolicy<900, policy900, policy890>
   {};
 
   struct policy1000
