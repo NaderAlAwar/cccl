@@ -494,7 +494,7 @@ struct policy_hub<RequiresStableAddress,
     static constexpr bool enough_threads_for_peeling = AsyncBlockSize >= alignment; // head and tail bytes
     static constexpr bool fallback_to_vectorized =
       exhaust_smem || !tile_sizes_retain_alignment || !enough_threads_for_peeling || no_input_streams
-      || !can_memcpy_all_inputs || (PtxVersion == 900 && use_vector_kernel_on_hopper);
+      || !can_memcpy_all_inputs || (PtxVersion >= 900 && use_vector_kernel_on_hopper);
 
   public:
     static constexpr auto algorithm =
