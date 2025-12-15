@@ -330,9 +330,9 @@ struct tuning_vec<1200, StoreSize>
 template <int StoreSize, int... LoadSizes>
 struct tuning_vec<890, StoreSize, LoadSizes...>
 {
-  static constexpr int block_threads    = 256;
-  static constexpr int vec_size         = ::cuda::std::max(8 / StoreSize, 1); // 64-bit instructions
-  static constexpr int items_per_thread = 8;
+  static constexpr int block_threads    = 1024;
+  static constexpr int vec_size         = 2;
+  static constexpr int items_per_thread = 4;
 };
 
 template <bool RequiresStableAddress,
