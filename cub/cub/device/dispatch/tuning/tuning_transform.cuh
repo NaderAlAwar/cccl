@@ -506,7 +506,7 @@ struct policy_hub<RequiresStableAddress,
 
   struct policy900
       : bulk_copy_policy_base<256, 900>
-      , ChainedPolicy<900, policy900, policy800>
+      , ChainedPolicy<900, policy900, policy890>
   {};
 
   struct policy1000
