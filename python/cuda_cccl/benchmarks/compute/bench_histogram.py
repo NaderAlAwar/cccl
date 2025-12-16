@@ -21,15 +21,39 @@ def as_cccl_Stream(cs: bench.CudaStream) -> CCCLStream:
     return CCCLStream(cs.addressof())
 
 
+def generate_build_data(input_size: int) -> torch.Tensor:
+    seed = 42
+    contention = 10
+    gen = torch.Generator(device="cuda")
+    gen.manual_seed(seed)
+
+    # Generate integer values between 0 and 256
+    data = torch.randint(
+        0, 256, (input_size,), device="cuda", dtype=torch.uint8, generator=gen
+    )
+
+    # make one value appear quite often, increasing the chance for atomic contention
+    evil_value = torch.randint(
+        0, 256, (), device="cuda", dtype=torch.uint8, generator=gen
+    )
+    evil_loc = torch.rand(
+        (input_size,), device="cuda", dtype=torch.float32, generator=gen
+    ) < (contention / 100.0)
+    data[evil_loc] = evil_value
+
+    return data.contiguous()
+
+
 def histogram(state: bench.State) -> None:
     input_size = 10485760
     num_output_levels = np.array([257], dtype=np.int32)
     lower_level = np.array([0], dtype=np.int32)
     upper_level = np.array([256], dtype=np.int32)
-    build_data = torch.randint(0, 256, (input_size,), dtype=torch.uint8, device="cuda")
     build_histogram = torch.zeros(
         (num_output_levels[0] - 1,), dtype=torch.uint64, device="cuda"
     )
+
+    build_data = generate_build_data(input_size)
 
     histogrammer = cuda.compute.make_histogram_even(
         build_data,
