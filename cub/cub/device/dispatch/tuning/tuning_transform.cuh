@@ -387,8 +387,7 @@ struct policy_hub<RequiresStableAddress,
     (::cuda::is_power_of_two(sizeof(it_value_t<RandomAccessIteratorsIn>)) && ...)
     && ::cuda::is_power_of_two(size_of<it_value_t<RandomAccessIteratorOut>>);
 
-  static constexpr bool fallback_to_prefetch =
-    RequiresStableAddress || !can_memcpy_contiguous_inputs || !all_value_types_have_power_of_two_size || !DenseOutput;
+  static constexpr bool fallback_to_prefetch = RequiresStableAddress || !can_memcpy_contiguous_inputs || !DenseOutput;
 
   // TODO(bgruber): consider a separate kernel for just filling
 
@@ -398,8 +397,9 @@ struct policy_hub<RequiresStableAddress,
     using prefetch_policy        = prefetch_policy_t<256>;
     using vectorized_policy      = vectorized_policy_t<
            tuning_vec<500, size_of<it_value_t<RandomAccessIteratorOut>>, sizeof(it_value_t<RandomAccessIteratorsIn>)...>>;
-    using async_policy              = async_copy_policy_t<256, 16>; // dummy policy, never used
-    static constexpr auto algorithm = fallback_to_prefetch ? Algorithm::prefetch : Algorithm::vectorized;
+    using async_policy = async_copy_policy_t<256, 16>; // dummy policy, never used
+    static constexpr auto algorithm =
+      (fallback_to_prefetch || !all_value_types_have_power_of_two_size) ? Algorithm::prefetch : Algorithm::vectorized;
   };
 
   template <int BlockThreads, int PtxVersion>
@@ -438,7 +438,7 @@ struct policy_hub<RequiresStableAddress,
     static constexpr auto algorithm =
       fallback_to_prefetch ? Algorithm::prefetch
       : fallback_to_vectorized
-        ? Algorithm::vectorized
+        ? (all_value_types_have_power_of_two_size ? Algorithm::vectorized : Algorithm::prefetch)
         : Algorithm::memcpy_async;
   };
 
@@ -500,7 +500,7 @@ struct policy_hub<RequiresStableAddress,
     static constexpr auto algorithm =
       fallback_to_prefetch ? Algorithm::prefetch
       : fallback_to_vectorized
-        ? Algorithm::vectorized
+        ? (all_value_types_have_power_of_two_size ? Algorithm::vectorized : Algorithm::prefetch)
         : Algorithm::ublkcp;
   };
 
