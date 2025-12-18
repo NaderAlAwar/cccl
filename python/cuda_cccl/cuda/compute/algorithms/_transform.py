@@ -69,7 +69,6 @@ class _UnaryTransform:
             self.op_cccl,
             stream_handle,
         )
-        return None
 
 
 class _BinaryTransform:
@@ -136,7 +135,6 @@ class _BinaryTransform:
             self.op_cccl,
             stream_handle,
         )
-        return None
 
 
 def _make_unary_transform_cache_key(
