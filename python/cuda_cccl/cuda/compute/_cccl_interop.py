@@ -259,27 +259,36 @@ def get_value_type(d_in: IteratorBase | DeviceArrayLike | GpuStruct | np.ndarray
     return numba.from_dtype(dtype)
 
 
-def set_cccl_pointer_state_array(cccl_it: Iterator, input_it):
-    """Fast path for pointer-kind iterators (device arrays)."""
-    ptr = get_data_pointer(input_it)
-    ptr_obj = make_pointer_object(ptr, input_it)
-    cccl_it.state = ptr_obj
+def create_array_state_setter(cccl_it: Iterator):
+    """Create a state setter for arrays that reuses a single Pointer."""
+    ptr_obj = Pointer(0)
+
+    def setter(cccl_it: Iterator, input_it):
+        ptr = get_data_pointer(input_it)
+        ptr_obj.update(ptr, input_it)  # Update in place
+        cccl_it.state = ptr_obj  # Must reassign to copy ptr to iter_data.state
+
+    return setter
 
 
-def set_cccl_pointer_state_iterator(cccl_it: Iterator, input_it):
-    """Fast path for iterator-kind iterators (custom iterators)."""
-    state_ = input_it.state
-    if isinstance(state_, (IteratorState, Pointer)):
-        cccl_it.state = state_
-    else:
-        cccl_it.state = make_pointer_object(state_, input_it)
+def create_iterator_state_setter(cccl_it: Iterator):
+    """Create a state setter for iterator inputs."""
+
+    def setter(cccl_it: Iterator, input_it):
+        state_ = input_it.state
+        if isinstance(state_, (IteratorState, Pointer)):
+            cccl_it.state = state_
+        else:
+            cccl_it.state = make_pointer_object(state_, input_it)
+
+    return setter
 
 
 def get_state_setter(cccl_it: Iterator):
     """Returns the appropriate state setter function for the iterator kind."""
     if cccl_it.is_kind_pointer():
-        return set_cccl_pointer_state_array
-    return set_cccl_pointer_state_iterator
+        return create_array_state_setter(cccl_it)
+    return create_iterator_state_setter(cccl_it)
 
 
 @functools.lru_cache()

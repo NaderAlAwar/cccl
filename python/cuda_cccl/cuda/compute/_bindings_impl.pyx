@@ -451,6 +451,11 @@ cdef class Pointer(StateBase):
             )
         self.set_state(ptr, ref)
 
+    def update(self, size_t ptr, object owner):
+        """Update pointer value and reference in place."""
+        self.ptr = <void*>ptr
+        self.ref = owner
+
 
 def make_pointer_object(ptr, owner):
     cdef Pointer res = Pointer(0)
