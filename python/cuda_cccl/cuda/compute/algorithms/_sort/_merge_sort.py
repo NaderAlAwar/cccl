@@ -10,7 +10,7 @@ import numba
 from ... import _bindings
 from ... import _cccl_interop as cccl
 from ..._caching import cache_with_key
-from ..._cccl_interop import call_build, set_cccl_iterator_state
+from ..._cccl_interop import call_build, get_state_setter
 from ..._utils import protocols
 from ..._utils.protocols import (
     get_data_pointer,
@@ -70,6 +70,10 @@ class _MergeSort:
         "op_adapter",
         "op_cccl",
         "build_result",
+        "_set_in_keys_state",
+        "_set_in_items_state",
+        "_set_out_keys_state",
+        "_set_out_items_state",
     ]
 
     def __init__(
@@ -89,6 +93,16 @@ class _MergeSort:
         self.d_out_keys_cccl = cccl.to_cccl_output_iter(d_out_keys)
         self.d_out_items_cccl = cccl.to_cccl_output_iter(d_out_items)
         self.op_adapter = op
+
+        # Cache the appropriate setter functions
+        self._set_in_keys_state = get_state_setter(self.d_in_keys_cccl)
+        self._set_in_items_state = (
+            get_state_setter(self.d_in_items_cccl) if present_in_values else None
+        )
+        self._set_out_keys_state = get_state_setter(self.d_out_keys_cccl)
+        self._set_out_items_state = (
+            get_state_setter(self.d_out_items_cccl) if present_out_values else None
+        )
 
         # Compile the op - merge_sort expects int8 return (comparison)
         value_type = cccl.get_value_type(d_in_keys)
@@ -113,16 +127,12 @@ class _MergeSort:
         num_items: int,
         stream=None,
     ):
-        present_in_values = d_in_items is not None
-        present_out_values = d_out_items is not None
-        assert present_in_values == present_out_values
-
-        set_cccl_iterator_state(self.d_in_keys_cccl, d_in_keys)
-        if present_in_values:
-            set_cccl_iterator_state(self.d_in_items_cccl, d_in_items)
-        set_cccl_iterator_state(self.d_out_keys_cccl, d_out_keys)
-        if present_out_values:
-            set_cccl_iterator_state(self.d_out_items_cccl, d_out_items)
+        self._set_in_keys_state(self.d_in_keys_cccl, d_in_keys)
+        if self._set_in_items_state is not None:
+            self._set_in_items_state(self.d_in_items_cccl, d_in_items)
+        self._set_out_keys_state(self.d_out_keys_cccl, d_out_keys)
+        if self._set_out_items_state is not None:
+            self._set_out_items_state(self.d_out_items_cccl, d_out_items)
 
         stream_handle = validate_and_get_stream(stream)
         if temp_storage is None:

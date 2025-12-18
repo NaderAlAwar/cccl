@@ -10,7 +10,7 @@ import numba
 from .. import _bindings
 from .. import _cccl_interop as cccl
 from .._caching import cache_with_key
-from .._cccl_interop import call_build, set_cccl_iterator_state
+from .._cccl_interop import call_build, get_state_setter
 from .._utils import protocols
 from .._utils.protocols import (
     get_data_pointer,
@@ -72,6 +72,11 @@ class _UniqueByKey:
         "d_out_num_selected_cccl",
         "op",
         "op_cccl",
+        "_set_in_keys_state",
+        "_set_in_items_state",
+        "_set_out_keys_state",
+        "_set_out_items_state",
+        "_set_num_selected_state",
     ]
 
     def __init__(
@@ -88,6 +93,13 @@ class _UniqueByKey:
         self.d_out_keys_cccl = cccl.to_cccl_output_iter(d_out_keys)
         self.d_out_items_cccl = cccl.to_cccl_output_iter(d_out_items)
         self.d_out_num_selected_cccl = cccl.to_cccl_output_iter(d_out_num_selected)
+
+        # Cache the appropriate setter functions
+        self._set_in_keys_state = get_state_setter(self.d_in_keys_cccl)
+        self._set_in_items_state = get_state_setter(self.d_in_items_cccl)
+        self._set_out_keys_state = get_state_setter(self.d_out_keys_cccl)
+        self._set_out_items_state = get_state_setter(self.d_out_items_cccl)
+        self._set_num_selected_state = get_state_setter(self.d_out_num_selected_cccl)
 
         # Compile the op - unique_by_key expects bool return (comparison)
         value_type = cccl.get_value_type(d_in_keys)
@@ -114,11 +126,11 @@ class _UniqueByKey:
         num_items: int,
         stream=None,
     ):
-        set_cccl_iterator_state(self.d_in_keys_cccl, d_in_keys)
-        set_cccl_iterator_state(self.d_in_items_cccl, d_in_items)
-        set_cccl_iterator_state(self.d_out_keys_cccl, d_out_keys)
-        set_cccl_iterator_state(self.d_out_items_cccl, d_out_items)
-        set_cccl_iterator_state(self.d_out_num_selected_cccl, d_out_num_selected)
+        self._set_in_keys_state(self.d_in_keys_cccl, d_in_keys)
+        self._set_in_items_state(self.d_in_items_cccl, d_in_items)
+        self._set_out_keys_state(self.d_out_keys_cccl, d_out_keys)
+        self._set_out_items_state(self.d_out_items_cccl, d_out_items)
+        self._set_num_selected_state(self.d_out_num_selected_cccl, d_out_num_selected)
 
         stream_handle = validate_and_get_stream(stream)
         if temp_storage is None:

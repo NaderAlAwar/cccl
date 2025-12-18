@@ -10,7 +10,7 @@ import numba
 from .. import _bindings
 from .. import _cccl_interop as cccl
 from .._caching import cache_with_key
-from .._cccl_interop import call_build, set_cccl_iterator_state
+from .._cccl_interop import call_build, get_state_setter
 from .._utils import protocols
 from .._utils.temp_storage_buffer import TempStorageBuffer
 from ..iterators._iterators import IteratorBase
@@ -74,6 +74,11 @@ class _ThreeWayPartition:
         "select_second_part_op",
         "select_first_part_op_cccl",
         "select_second_part_op_cccl",
+        "_set_in_state",
+        "_set_first_out_state",
+        "_set_second_out_state",
+        "_set_unselected_state",
+        "_set_num_selected_state",
     ]
 
     def __init__(
@@ -91,6 +96,13 @@ class _ThreeWayPartition:
         self.d_second_part_out_cccl = cccl.to_cccl_output_iter(d_second_part_out)
         self.d_unselected_out_cccl = cccl.to_cccl_output_iter(d_unselected_out)
         self.d_num_selected_out_cccl = cccl.to_cccl_output_iter(d_num_selected_out)
+
+        # Cache the appropriate setter functions
+        self._set_in_state = get_state_setter(self.d_in_cccl)
+        self._set_first_out_state = get_state_setter(self.d_first_part_out_cccl)
+        self._set_second_out_state = get_state_setter(self.d_second_part_out_cccl)
+        self._set_unselected_state = get_state_setter(self.d_unselected_out_cccl)
+        self._set_num_selected_state = get_state_setter(self.d_num_selected_out_cccl)
 
         # Compile ops - partition predicates return uint8 (boolean)
         value_type = cccl.get_value_type(d_in)
@@ -123,11 +135,11 @@ class _ThreeWayPartition:
         num_items: int,
         stream=None,
     ):
-        set_cccl_iterator_state(self.d_in_cccl, d_in)
-        set_cccl_iterator_state(self.d_first_part_out_cccl, d_first_part_out)
-        set_cccl_iterator_state(self.d_second_part_out_cccl, d_second_part_out)
-        set_cccl_iterator_state(self.d_unselected_out_cccl, d_unselected_out)
-        set_cccl_iterator_state(self.d_num_selected_out_cccl, d_num_selected_out)
+        self._set_in_state(self.d_in_cccl, d_in)
+        self._set_first_out_state(self.d_first_part_out_cccl, d_first_part_out)
+        self._set_second_out_state(self.d_second_part_out_cccl, d_second_part_out)
+        self._set_unselected_state(self.d_unselected_out_cccl, d_unselected_out)
+        self._set_num_selected_state(self.d_num_selected_out_cccl, d_num_selected_out)
 
         stream_handle = protocols.validate_and_get_stream(stream)
 

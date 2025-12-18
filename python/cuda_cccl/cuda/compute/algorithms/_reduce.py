@@ -12,8 +12,8 @@ from .. import _cccl_interop as cccl
 from .._caching import cache_with_key
 from .._cccl_interop import (
     call_build,
+    get_state_setter,
     get_value_type,
-    set_cccl_iterator_state,
     to_cccl_value_state,
 )
 from .._utils import protocols
@@ -34,6 +34,8 @@ class _Reduce:
         "op_cccl",
         "build_result",
         "device_reduce_fn",
+        "_set_in_state",
+        "_set_out_state",
     ]
 
     # TODO: constructor shouldn't require concrete `d_in`, `d_out`:
@@ -48,6 +50,10 @@ class _Reduce:
         self.d_in_cccl = cccl.to_cccl_input_iter(d_in)
         self.d_out_cccl = cccl.to_cccl_output_iter(d_out)
         self.h_init_cccl = cccl.to_cccl_value(h_init)
+
+        # Cache the appropriate setter functions
+        self._set_in_state = get_state_setter(self.d_in_cccl)
+        self._set_out_state = get_state_setter(self.d_out_cccl)
 
         # Compile the op with value types
         value_type = get_value_type(h_init)
@@ -79,8 +85,8 @@ class _Reduce:
         h_init: np.ndarray | GpuStruct,
         stream=None,
     ):
-        set_cccl_iterator_state(self.d_in_cccl, d_in)
-        set_cccl_iterator_state(self.d_out_cccl, d_out)
+        self._set_in_state(self.d_in_cccl, d_in)
+        self._set_out_state(self.d_out_cccl, d_out)
 
         self.h_init_cccl.state = to_cccl_value_state(h_init)
 

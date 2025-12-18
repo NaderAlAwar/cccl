@@ -8,7 +8,7 @@ from typing import Callable
 from .. import _bindings
 from .. import _cccl_interop as cccl
 from .._caching import cache_with_key
-from .._cccl_interop import set_cccl_iterator_state
+from .._cccl_interop import get_state_setter
 from .._utils import protocols
 from ..iterators._iterators import IteratorBase
 from ..op import OpAdapter, OpKind, make_op_adapter
@@ -16,7 +16,15 @@ from ..typing import DeviceArrayLike
 
 
 class _UnaryTransform:
-    __slots__ = ["d_in_cccl", "d_out_cccl", "op", "op_cccl", "build_result"]
+    __slots__ = [
+        "d_in_cccl",
+        "d_out_cccl",
+        "op",
+        "op_cccl",
+        "build_result",
+        "_set_in_state",
+        "_set_out_state",
+    ]
 
     def __init__(
         self,
@@ -26,6 +34,10 @@ class _UnaryTransform:
     ):
         self.d_in_cccl = cccl.to_cccl_input_iter(d_in)
         self.d_out_cccl = cccl.to_cccl_output_iter(d_out)
+
+        # Cache the appropriate setter functions
+        self._set_in_state = get_state_setter(self.d_in_cccl)
+        self._set_out_state = get_state_setter(self.d_out_cccl)
 
         # Compile the op with input/output types
         in_type = cccl.get_value_type(d_in)
@@ -46,8 +58,8 @@ class _UnaryTransform:
         num_items: int,
         stream=None,
     ):
-        set_cccl_iterator_state(self.d_in_cccl, d_in)
-        set_cccl_iterator_state(self.d_out_cccl, d_out)
+        self._set_in_state(self.d_in_cccl, d_in)
+        self._set_out_state(self.d_out_cccl, d_out)
 
         stream_handle = protocols.validate_and_get_stream(stream)
         self.build_result.compute(
@@ -68,6 +80,9 @@ class _BinaryTransform:
         "op",
         "op_cccl",
         "build_result",
+        "_set_in1_state",
+        "_set_in2_state",
+        "_set_out_state",
     ]
 
     def __init__(
@@ -80,6 +95,11 @@ class _BinaryTransform:
         self.d_in1_cccl = cccl.to_cccl_input_iter(d_in1)
         self.d_in2_cccl = cccl.to_cccl_input_iter(d_in2)
         self.d_out_cccl = cccl.to_cccl_output_iter(d_out)
+
+        # Cache the appropriate setter functions
+        self._set_in1_state = get_state_setter(self.d_in1_cccl)
+        self._set_in2_state = get_state_setter(self.d_in2_cccl)
+        self._set_out_state = get_state_setter(self.d_out_cccl)
 
         # Compile the op with input/output types
         in1_type = cccl.get_value_type(d_in1)
@@ -103,9 +123,9 @@ class _BinaryTransform:
         num_items: int,
         stream=None,
     ):
-        set_cccl_iterator_state(self.d_in1_cccl, d_in1)
-        set_cccl_iterator_state(self.d_in2_cccl, d_in2)
-        set_cccl_iterator_state(self.d_out_cccl, d_out)
+        self._set_in1_state(self.d_in1_cccl, d_in1)
+        self._set_in2_state(self.d_in2_cccl, d_in2)
+        self._set_out_state(self.d_out_cccl, d_out)
 
         stream_handle = protocols.validate_and_get_stream(stream)
         self.build_result.compute(

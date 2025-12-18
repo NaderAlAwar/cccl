@@ -13,8 +13,8 @@ from .. import _cccl_interop as cccl
 from .._caching import cache_with_key
 from .._cccl_interop import (
     call_build,
+    get_state_setter,
     get_value_type,
-    set_cccl_iterator_state,
     to_cccl_value_state,
 )
 from .._utils import protocols
@@ -47,6 +47,9 @@ class _Scan:
         "op_cccl",
         "device_scan_fn",
         "init_kind",
+        "_set_in_state",
+        "_set_out_state",
+        "_set_init_state",
     ]
 
     # TODO: constructor shouldn't require concrete `d_in`, `d_out`:
@@ -61,6 +64,10 @@ class _Scan:
         self.d_in_cccl = cccl.to_cccl_input_iter(d_in)
         self.d_out_cccl = cccl.to_cccl_output_iter(d_out)
 
+        # Cache the appropriate setter functions
+        self._set_in_state = get_state_setter(self.d_in_cccl)
+        self._set_out_state = get_state_setter(self.d_out_cccl)
+
         self.init_kind = get_init_kind(init_value)
 
         self.init_value_cccl: _bindings.Iterator | _bindings.Value | None
@@ -68,6 +75,7 @@ class _Scan:
         match self.init_kind:
             case _bindings.InitKind.NO_INIT:
                 self.init_value_cccl = None
+                self._set_init_state = None
                 value_type = get_value_type(d_in)
                 init_value_type_info = self.d_in_cccl.value_type
 
@@ -75,6 +83,7 @@ class _Scan:
                 self.init_value_cccl = cccl.to_cccl_input_iter(
                     cast(DeviceArrayLike, init_value)
                 )
+                self._set_init_state = get_state_setter(self.init_value_cccl)
                 value_type = numba.from_dtype(
                     protocols.get_dtype(cast(DeviceArrayLike, init_value))
                 )
@@ -83,6 +92,7 @@ class _Scan:
             case _bindings.InitKind.VALUE_INIT:
                 init_value_typed = cast(np.ndarray | GpuStruct, init_value)
                 self.init_value_cccl = cccl.to_cccl_value(init_value_typed)
+                self._set_init_state = None
                 value_type = get_value_type(init_value_typed)
                 init_value_type_info = self.init_value_cccl.type
 
@@ -123,8 +133,8 @@ class _Scan:
         init_value: np.ndarray | DeviceArrayLike | GpuStruct | None,
         stream=None,
     ):
-        set_cccl_iterator_state(self.d_in_cccl, d_in)
-        set_cccl_iterator_state(self.d_out_cccl, d_out)
+        self._set_in_state(self.d_in_cccl, d_in)
+        self._set_out_state(self.d_out_cccl, d_out)
 
         match self.init_kind:
             case _bindings.InitKind.FUTURE_VALUE_INIT:
@@ -134,7 +144,9 @@ class _Scan:
                 # and we have to minimize the work we do prior to calling the
                 # kernel.
                 self.init_value_cccl = cast(_bindings.Iterator, self.init_value_cccl)
-                set_cccl_iterator_state(self.init_value_cccl, init_value)
+
+                # _set_init_state is a Callable, not None at this point.
+                cast(Callable, self._set_init_state)(self.init_value_cccl, init_value)
 
             case _bindings.InitKind.VALUE_INIT:
                 self.init_value_cccl = cast(_bindings.Value, self.init_value_cccl)

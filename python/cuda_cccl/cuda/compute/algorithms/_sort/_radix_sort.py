@@ -6,7 +6,7 @@
 from ... import _bindings
 from ... import _cccl_interop as cccl
 from ..._caching import cache_with_key
-from ..._cccl_interop import call_build, set_cccl_iterator_state
+from ..._cccl_interop import call_build, get_state_setter
 from ..._utils.protocols import (
     get_data_pointer,
     get_dtype,
@@ -54,6 +54,10 @@ class _RadixSort:
         "d_out_values_cccl",
         "decomposer_op",
         "build_result",
+        "_set_in_keys_state",
+        "_set_in_values_state",
+        "_set_out_keys_state",
+        "_set_out_values_state",
     ]
 
     def __init__(
@@ -72,6 +76,20 @@ class _RadixSort:
         self.d_out_keys_cccl = cccl.to_cccl_output_iter(d_out_keys_array)
         self.d_in_values_cccl = cccl.to_cccl_input_iter(d_in_values_array)
         self.d_out_values_cccl = cccl.to_cccl_output_iter(d_out_values_array)
+
+        # Cache the appropriate setter functions
+        self._set_in_keys_state = get_state_setter(self.d_in_keys_cccl)
+        self._set_in_values_state = (
+            get_state_setter(self.d_in_values_cccl)
+            if d_in_values_array is not None
+            else None
+        )
+        self._set_out_keys_state = get_state_setter(self.d_out_keys_cccl)
+        self._set_out_values_state = (
+            get_state_setter(self.d_out_values_cccl)
+            if d_out_values_array is not None
+            else None
+        )
 
         # TODO: decomposer op is not supported for now
         self.decomposer_op = cccl.Op(
@@ -110,12 +128,12 @@ class _RadixSort:
             _get_arrays(d_in_keys, d_out_keys, d_in_values, d_out_values)
         )
 
-        set_cccl_iterator_state(self.d_in_keys_cccl, d_in_keys_array)
-        if d_in_values_array is not None:
-            set_cccl_iterator_state(self.d_in_values_cccl, d_in_values_array)
-        set_cccl_iterator_state(self.d_out_keys_cccl, d_out_keys_array)
-        if d_out_values_array is not None:
-            set_cccl_iterator_state(self.d_out_values_cccl, d_out_values_array)
+        self._set_in_keys_state(self.d_in_keys_cccl, d_in_keys_array)
+        if self._set_in_values_state is not None:
+            self._set_in_values_state(self.d_in_values_cccl, d_in_values_array)
+        self._set_out_keys_state(self.d_out_keys_cccl, d_out_keys_array)
+        if self._set_out_values_state is not None:
+            self._set_out_values_state(self.d_out_values_cccl, d_out_values_array)
 
         is_overwrite_okay = isinstance(d_in_keys, DoubleBuffer)
 

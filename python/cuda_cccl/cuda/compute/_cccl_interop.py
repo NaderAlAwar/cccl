@@ -259,6 +259,29 @@ def get_value_type(d_in: IteratorBase | DeviceArrayLike | GpuStruct | np.ndarray
     return numba.from_dtype(dtype)
 
 
+def set_cccl_pointer_state_array(cccl_it: Iterator, input_it):
+    """Fast path for pointer-kind iterators (device arrays)."""
+    ptr = get_data_pointer(input_it)
+    ptr_obj = make_pointer_object(ptr, input_it)
+    cccl_it.state = ptr_obj
+
+
+def set_cccl_pointer_state_iterator(cccl_it: Iterator, input_it):
+    """Fast path for iterator-kind iterators (custom iterators)."""
+    state_ = input_it.state
+    if isinstance(state_, (IteratorState, Pointer)):
+        cccl_it.state = state_
+    else:
+        cccl_it.state = make_pointer_object(state_, input_it)
+
+
+def get_state_setter(cccl_it: Iterator):
+    """Returns the appropriate state setter function for the iterator kind."""
+    if cccl_it.is_kind_pointer():
+        return set_cccl_pointer_state_array
+    return set_cccl_pointer_state_iterator
+
+
 def set_cccl_iterator_state(cccl_it: Iterator, input_it):
     if cccl_it.is_kind_pointer():
         ptr = get_data_pointer(input_it)

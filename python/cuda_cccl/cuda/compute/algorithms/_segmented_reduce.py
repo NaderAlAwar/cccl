@@ -7,8 +7,8 @@ from .. import _cccl_interop as cccl
 from .._caching import cache_with_key
 from .._cccl_interop import (
     call_build,
+    get_state_setter,
     get_value_type,
-    set_cccl_iterator_state,
     to_cccl_value_state,
 )
 from .._utils import protocols
@@ -32,6 +32,10 @@ class _SegmentedReduce:
         "h_init_cccl",
         "op",
         "op_cccl",
+        "_set_in_state",
+        "_set_out_state",
+        "_set_start_offsets_state",
+        "_set_end_offsets_state",
     ]
 
     def __init__(
@@ -47,6 +51,12 @@ class _SegmentedReduce:
         self.d_out_cccl = cccl.to_cccl_output_iter(d_out)
         self.start_offsets_in_cccl = cccl.to_cccl_input_iter(start_offsets_in)
         self.end_offsets_in_cccl = cccl.to_cccl_input_iter(end_offsets_in)
+
+        # Cache the appropriate setter functions
+        self._set_in_state = get_state_setter(self.d_in_cccl)
+        self._set_out_state = get_state_setter(self.d_out_cccl)
+        self._set_start_offsets_state = get_state_setter(self.start_offsets_in_cccl)
+        self._set_end_offsets_state = get_state_setter(self.end_offsets_in_cccl)
 
         # set host advance functions
         cccl.cccl_iterator_set_host_advance(self.d_out_cccl, d_out)
@@ -95,10 +105,10 @@ class _SegmentedReduce:
         h_init,
         stream=None,
     ):
-        set_cccl_iterator_state(self.d_in_cccl, d_in)
-        set_cccl_iterator_state(self.d_out_cccl, d_out)
-        set_cccl_iterator_state(self.start_offsets_in_cccl, start_offsets_in)
-        set_cccl_iterator_state(self.end_offsets_in_cccl, end_offsets_in)
+        self._set_in_state(self.d_in_cccl, d_in)
+        self._set_out_state(self.d_out_cccl, d_out)
+        self._set_start_offsets_state(self.start_offsets_in_cccl, start_offsets_in)
+        self._set_end_offsets_state(self.end_offsets_in_cccl, end_offsets_in)
         self.h_init_cccl.state = to_cccl_value_state(h_init)
 
         stream_handle = validate_and_get_stream(stream)
