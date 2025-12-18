@@ -344,6 +344,15 @@ struct tuning_vec<890, StoreSize, LoadSize0, LoadSizes...>
   static constexpr int items_per_thread = 2;
 };
 
+// manually tuned triad on H100
+template <int StoreSize, int LoadSize0, int... LoadSizes>
+struct tuning_vec<900, StoreSize, LoadSize0, LoadSizes...>
+{
+  static constexpr int block_threads    = 128;
+  static constexpr int vec_size         = 4;
+  static constexpr int items_per_thread = 4;
+};
+
 // manually tuned triad on B200
 template <int StoreSize, int LoadSize0, int... LoadSizes>
 struct tuning_vec<1000, StoreSize, LoadSize0, LoadSizes...>
