@@ -282,19 +282,6 @@ def get_state_setter(cccl_it: Iterator):
     return set_cccl_pointer_state_iterator
 
 
-def set_cccl_iterator_state(cccl_it: Iterator, input_it):
-    if cccl_it.is_kind_pointer():
-        ptr = get_data_pointer(input_it)
-        ptr_obj = make_pointer_object(ptr, input_it)
-        cccl_it.state = ptr_obj
-    else:
-        state_ = input_it.state
-        if isinstance(state_, (IteratorState, Pointer)):
-            cccl_it.state = state_
-        else:
-            cccl_it.state = make_pointer_object(state_, input_it)
-
-
 @functools.lru_cache()
 def get_includes() -> List[str]:
     def as_option(p):
