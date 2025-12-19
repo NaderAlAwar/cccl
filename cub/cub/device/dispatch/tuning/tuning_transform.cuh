@@ -439,13 +439,15 @@ struct policy_hub<RequiresStableAddress,
       ((size_of<it_value_t<RandomAccessIteratorsIn>> < 4) && ...) && sizeof...(RandomAccessIteratorsIn) > 1
       && size_of<it_value_t<RandomAccessIteratorOut>> < 4;
 
+    static constexpr bool fallback_to_prefetch_ada = PtxVersion == 890;
+
     static constexpr bool fallback_to_vectorized =
       exhaust_smem || no_input_streams || !can_memcpy_all_inputs
       || (PtxVersion >= 800 && use_vector_kernel_on_ampere_or_ada);
 
   public:
     static constexpr auto algorithm =
-      fallback_to_prefetch ? Algorithm::prefetch
+      (fallback_to_prefetch || fallback_to_prefetch_ada) ? Algorithm::prefetch
       : fallback_to_vectorized
         ? (all_value_types_have_power_of_two_size ? Algorithm::vectorized : Algorithm::prefetch)
         : Algorithm::memcpy_async;
