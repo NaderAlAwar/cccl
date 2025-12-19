@@ -261,7 +261,7 @@ def get_value_type(d_in: IteratorBase | DeviceArrayLike | GpuStruct | np.ndarray
 
 def create_array_state_setter(cccl_it: Iterator):
     """Create a state setter for arrays that reuses a single Pointer."""
-    ptr_obj = Pointer(0)
+    ptr_obj = make_pointer_object(0, None)
 
     def setter(cccl_it: Iterator, input_it):
         ptr = get_data_pointer(input_it)
