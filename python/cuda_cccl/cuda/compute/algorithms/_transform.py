@@ -39,25 +39,25 @@ class _UnaryTransform:
             self.op_cccl,
         )
 
+        set_cccl_iterator_state(self.d_in_cccl, d_in)
+        set_cccl_iterator_state(self.d_out_cccl, d_out)
+
     def __call__(
         self,
         d_in,
         d_out,
         num_items: int,
-        stream=None,
     ):
-        set_cccl_iterator_state(self.d_in_cccl, d_in)
-        set_cccl_iterator_state(self.d_out_cccl, d_out)
+        self.d_in_cccl.state = d_in.data_ptr()
+        self.d_out_cccl.state = d_out.data_ptr()
 
-        stream_handle = protocols.validate_and_get_stream(stream)
         self.build_result.compute(
             self.d_in_cccl,
             self.d_out_cccl,
             num_items,
             self.op_cccl,
-            stream_handle,
+            None,
         )
-        return None
 
 
 class _BinaryTransform:
@@ -95,28 +95,23 @@ class _BinaryTransform:
             self.op_cccl,
         )
 
-    def __call__(
-        self,
-        d_in1,
-        d_in2,
-        d_out,
-        num_items: int,
-        stream=None,
-    ):
         set_cccl_iterator_state(self.d_in1_cccl, d_in1)
         set_cccl_iterator_state(self.d_in2_cccl, d_in2)
         set_cccl_iterator_state(self.d_out_cccl, d_out)
 
-        stream_handle = protocols.validate_and_get_stream(stream)
+    def __call__(self, d_in1, d_in2, d_out, num_items: int):
+        self.d_in1_cccl.state = d_in1.data_ptr()
+        self.d_in2_cccl.state = d_in2.data_ptr()
+        self.d_out_cccl.state = d_out.data_ptr()
+
         self.build_result.compute(
             self.d_in1_cccl,
             self.d_in2_cccl,
             self.d_out_cccl,
             num_items,
             self.op_cccl,
-            stream_handle,
+            None,
         )
-        return None
 
 
 def _make_unary_transform_cache_key(
