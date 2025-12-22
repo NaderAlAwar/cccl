@@ -102,7 +102,7 @@ class _BinaryTransform:
     def __call__(self, d_in1, d_in2, d_out, num_items: int):
         self.d_in1_cccl.state = d_in1.data_ptr()
         self.d_in2_cccl.state = d_in2.data_ptr()
-        self.d_out_cccl.state = d_out.data_ptr()
+        # self.d_out_cccl.state = d_out.data_ptr()
 
         self.build_result.compute(
             self.d_in1_cccl,
