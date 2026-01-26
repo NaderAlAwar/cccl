@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 import cupy as cp
+import numba.cuda
 import numpy as np
 import nvtx
 from cuda.compute import (
@@ -290,6 +291,116 @@ def segmented_select(
     )
 
     # Step 5: Set the final offset to the total count
+    d_out_segments[-1] = total_selected
+    return total_selected
+
+
+_segmented_select_stateful_offsets = None
+_segmented_select_stateful_removed = None
+_segmented_select_stateful_num_segments = None
+_segmented_select_stateful_cond = None
+
+
+@numba.cuda.jit(device=True)
+def _segmented_select_stateful_find_segment_id(offsets, num_segments, value):
+    left = 0
+    right = num_segments + 1
+    while left < right:
+        mid = (left + right) // 2
+        if offsets[mid] < value:
+            left = mid + 1
+        else:
+            right = mid
+    return left - 1
+
+
+def _segmented_select_stateful_predicate(pair):
+    value = pair[0]
+    index = pair[1]
+    keep = _segmented_select_stateful_cond(value)
+    if not keep:
+        num_segments = _segmented_select_stateful_num_segments[0]
+        seg_id = _segmented_select_stateful_find_segment_id(
+            _segmented_select_stateful_offsets, num_segments, index + 1
+        )
+        numba.cuda.atomic.add(_segmented_select_stateful_removed, seg_id, 1)
+    return keep
+
+
+@nvtx.annotate("segmented_select_stateful")
+def segmented_select_stateful(
+    d_in_data,
+    d_in_segments,
+    d_out_data,
+    d_out_segments,
+    cond,
+    num_items: int,
+    stream=None,
+) -> int:
+    """
+    Select data within segments independently using a stateful predicate.
+
+    This version mirrors the stateful approach in the C++ benchmark by
+    tracking per-segment removals inside the predicate, then rebuilding
+    output offsets from the original segment sizes and removed counts.
+    """
+    global _segmented_select_stateful_offsets
+    global _segmented_select_stateful_removed
+    global _segmented_select_stateful_num_segments
+    global _segmented_select_stateful_cond
+
+    num_segments = len(d_in_segments) - 1
+
+    _segmented_select_stateful_cond = numba.cuda.jit(cond)
+
+    if _segmented_select_stateful_num_segments is None:
+        _segmented_select_stateful_num_segments = cp.zeros(1, dtype=np.int32)
+
+    if (
+        _segmented_select_stateful_offsets is None
+        or _segmented_select_stateful_offsets.size < num_segments + 1
+        or _segmented_select_stateful_offsets.dtype != d_in_segments.dtype
+    ):
+        _segmented_select_stateful_offsets = cp.empty(
+            num_segments + 1, dtype=d_in_segments.dtype
+        )
+    if (
+        _segmented_select_stateful_removed is None
+        or _segmented_select_stateful_removed.size < num_segments
+    ):
+        _segmented_select_stateful_removed = cp.empty(num_segments, dtype=np.int64)
+
+    _segmented_select_stateful_num_segments[0] = num_segments
+    _segmented_select_stateful_offsets[: num_segments + 1] = d_in_segments
+    _segmented_select_stateful_removed[:num_segments].fill(0)
+
+    data_and_indices_in = ZipIterator(d_in_data, CountingIterator(np.int32(0)))
+    d_num_selected = cp.zeros(1, dtype=cp.uint64)
+    select(
+        data_and_indices_in,
+        d_out_data,
+        d_num_selected,
+        _segmented_select_stateful_predicate,
+        num_items,
+        stream,
+    )
+
+    total_selected = int(d_num_selected[0])
+
+    segment_sizes = d_in_segments[1:] - d_in_segments[:-1]
+    new_segment_sizes = (
+        segment_sizes - _segmented_select_stateful_removed[:num_segments]
+    )
+
+    exclusive_scan(
+        new_segment_sizes,
+        d_out_segments[:-1],
+        OpKind.PLUS,
+        np.array(0, dtype=np.int64),
+        num_segments,
+        stream,
+    )
+
     d_out_segments[-1] = total_selected
     return total_selected
 

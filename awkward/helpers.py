@@ -3,7 +3,7 @@ import numpy as np
 import nvtx
 from _segment_algorithms import (
     segment_sizes,
-    segmented_select,
+    segmented_select_stateful,
     select_segments,
     transform_segments,
 )
@@ -381,7 +381,8 @@ def filter_lists(array, cond):
     it_out, meta_out = awkward_to_cccl_iterator(out_array)
     out_segments = meta_out["offsets"]
     num_items = meta["count"]
-    segmented_select(it, in_segments, it_out, out_segments, cond, num_items)
+    segmented_select_stateful(it, in_segments, it_out, out_segments, cond, num_items)
+    # segmented_select(it, in_segments, it_out, out_segments, cond, num_items)
     return reconstruct_with_offsets(out_array, out_segments)
 
 
