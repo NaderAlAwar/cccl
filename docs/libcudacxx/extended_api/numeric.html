@@ -59,7 +59,7 @@
     <link rel="index" title="Index" href="../../genindex.html" />
     <link rel="search" title="Search" href="../../search.html" />
     <link rel="next" title="cuda::add_overflow" href="numeric/add_overflow.html" />
-    <link rel="prev" title="cuda::is_floating_point" href="type_traits/is_floating_point.html" />
+    <link rel="prev" title="Vector Tuple Protocol" href="vector_tuple_protocol.html" />
 
 
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
@@ -326,6 +326,7 @@
 <li class="toctree-l4"><a class="reference internal" href="functional.html">Functional</a></li>
 <li class="toctree-l4"><a class="reference internal" href="iterators.html">Fancy Iterators</a></li>
 <li class="toctree-l4"><a class="reference internal" href="type_traits.html">Type traits</a></li>
+<li class="toctree-l4"><a class="reference internal" href="vector_tuple_protocol.html">Vector Tuple Protocol</a></li>
 <li class="toctree-l4 current active"><a class="current reference internal" href="#">Numeric</a></li>
 <li class="toctree-l4"><a class="reference internal" href="memory.html">Memory</a></li>
 <li class="toctree-l4"><a class="reference internal" href="memory_resource.html">Memory Resources</a></li>
@@ -417,7 +418,6 @@
 <li class="toctree-l4"><a class="reference internal" href="../../cub/developer/warp_level.html">Warp-level</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../cub/developer/block_scope.html">Block-scope</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../cub/developer/device_scope.html">Device-scope</a></li>
-<li class="toctree-l4"><a class="reference internal" href="../../cub/developer/visibility.html">Symbol Visibility</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../cub/developer/nvtx.html">NVTX</a></li>
 </ul>
 </details></li>
@@ -1422,6 +1422,12 @@
 <li class="toctree-l3"><a class="reference internal" href="../../cccl/development/macro.html">CCCL Internal Macros</a></li>
 <li class="toctree-l3"><a class="reference internal" href="../../cccl/development/testing.html">CCCL Testing Utilities</a></li>
 <li class="toctree-l3"><a class="reference internal" href="../../cccl/development/build_and_bisect_tools.html">Build and Bisect Utilities</a></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="../../cccl/development/visibility.html">Symbol Visibility</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../cccl/development/visibility/host_stub_visibility.html">Host Stub Visibility Issue</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../cccl/development/visibility/device_kernel_visibility.html">Device Kernel Visibility Issue</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../cccl/development/visibility/different_architectures.html">Linking TUs compiled with different architectures</a></li>
+</ul>
+</details></li>
 </ul>
 </details></li>
 <li class="toctree-l2 has-children"><a class="reference internal" href="../../cccl/contributing.html">Contributing to the CUDA Core Compute Libraries</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
@@ -1563,12 +1569,12 @@
                   
 <div class="prev-next-area">
     <a class="left-prev"
-       href="type_traits/is_floating_point.html"
+       href="vector_tuple_protocol.html"
        title="previous page">
       <i class="fa-solid fa-angle-left"></i>
       <div class="prev-next-info">
         <p class="prev-next-subtitle">previous</p>
-        <p class="prev-next-title"><code class="docutils literal notranslate"><span class="pre">cuda::is_floating_point</span></code></p>
+        <p class="prev-next-title">Vector Tuple Protocol</p>
       </div>
     </a>
     <a class="right-next"

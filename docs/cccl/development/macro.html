@@ -330,6 +330,7 @@
 <li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/extended_api/functional.html">Functional</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/extended_api/iterators.html">Fancy Iterators</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/extended_api/type_traits.html">Type traits</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/extended_api/vector_tuple_protocol.html">Vector Tuple Protocol</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/extended_api/numeric.html">Numeric</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/extended_api/memory.html">Memory</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../libcudacxx/extended_api/memory_resource.html">Memory Resources</a></li>
@@ -421,7 +422,6 @@
 <li class="toctree-l4"><a class="reference internal" href="../../cub/developer/warp_level.html">Warp-level</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../cub/developer/block_scope.html">Block-scope</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../cub/developer/device_scope.html">Device-scope</a></li>
-<li class="toctree-l4"><a class="reference internal" href="../../cub/developer/visibility.html">Symbol Visibility</a></li>
 <li class="toctree-l4"><a class="reference internal" href="../../cub/developer/nvtx.html">NVTX</a></li>
 </ul>
 </details></li>
@@ -1426,6 +1426,12 @@
 <li class="toctree-l3 current active"><a class="current reference internal" href="#">CCCL Internal Macros</a></li>
 <li class="toctree-l3"><a class="reference internal" href="testing.html">CCCL Testing Utilities</a></li>
 <li class="toctree-l3"><a class="reference internal" href="build_and_bisect_tools.html">Build and Bisect Utilities</a></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="visibility.html">Symbol Visibility</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="visibility/host_stub_visibility.html">Host Stub Visibility Issue</a></li>
+<li class="toctree-l4"><a class="reference internal" href="visibility/device_kernel_visibility.html">Device Kernel Visibility Issue</a></li>
+<li class="toctree-l4"><a class="reference internal" href="visibility/different_architectures.html">Linking TUs compiled with different architectures</a></li>
+</ul>
+</details></li>
 </ul>
 </details></li>
 <li class="toctree-l2 has-children"><a class="reference internal" href="../contributing.html">Contributing to the CUDA Core Compute Libraries</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
@@ -1956,19 +1962,19 @@ file. Use <code class="docutils literal notranslate"><span class="pre">_CCCL_CUD
 <div class="pst-scrollable-table-container"><table class="table">
 <tbody>
 <tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">_CCCL_TRY</span></code></p></td>
-<td><p>Replacement for the <code class="docutils literal notranslate"><span class="pre">try</span></code> keyword</p></td>
+<td><p>Replacement for the <code class="docutils literal notranslate"><span class="pre">try</span></code> keyword.</p></td>
 </tr>
 <tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">_CCCL_CATCH</span> <span class="pre">(X)</span></code></p></td>
-<td><p>Replacement for the <code class="docutils literal notranslate"><span class="pre">catch</span> <span class="pre">(/*X*/)</span></code> statement</p></td>
+<td><p>Replacement for the <code class="docutils literal notranslate"><span class="pre">catch</span> <span class="pre">(/*X*/)</span></code> statement.</p></td>
 </tr>
 <tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">_CCCL_CATCH_ALL</span></code></p></td>
-<td><p>Replacement for the <code class="docutils literal notranslate"><span class="pre">catch</span> <span class="pre">(...)</span></code> statement</p></td>
+<td><p>Replacement for the <code class="docutils literal notranslate"><span class="pre">catch</span> <span class="pre">(...)</span></code> statement.</p></td>
 </tr>
-<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">_CCCL_THROW</span></code></p></td>
-<td><p>Replacement for the <code class="docutils literal notranslate"><span class="pre">throw</span> <span class="pre">/*arg*/</span></code> expression</p></td>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">_CCCL_THROW(X,</span> <span class="pre">...)</span></code></p></td>
+<td><p>Replacement for the <code class="docutils literal notranslate"><span class="pre">throw</span> <span class="pre">X(...)</span></code> expression. <code class="docutils literal notranslate"><span class="pre">X</span></code> must be fully qualified type, without the leading <code class="docutils literal notranslate"><span class="pre">::</span></code>.</p></td>
 </tr>
 <tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">_CCCL_RETHROW</span></code></p></td>
-<td><p>Replacement for the plain <code class="docutils literal notranslate"><span class="pre">throw</span></code> expression</p></td>
+<td><p>Replacement for the plain <code class="docutils literal notranslate"><span class="pre">throw</span></code> expression.</p></td>
 </tr>
 </tbody>
 </table>
@@ -1985,12 +1991,12 @@ file. Use <code class="docutils literal notranslate"><span class="pre">_CCCL_CUD
 <span class="w">    </span><span class="p">{</span>
 <span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="n">ptr</span><span class="p">;</span>
 <span class="w">    </span><span class="p">}</span>
-<span class="w">    </span><span class="n">_CCCL_THROW</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="n">bad_alloc</span><span class="p">{});</span><span class="w"> </span><span class="c1">// on device calls cuda::std::terminate()</span>
+<span class="w">    </span><span class="n">_CCCL_THROW</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="n">bad_alloc</span><span class="p">);</span><span class="w"> </span><span class="c1">// on device calls cuda::std::terminate()</span>
 <span class="p">}</span>
 
 <span class="n">__host__</span><span class="w"> </span><span class="n">__device__</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="n">do_something</span><span class="p">(</span><span class="kt">int</span><span class="o">*</span><span class="w"> </span><span class="n">buff</span><span class="p">)</span>
 <span class="p">{</span>
-<span class="w">    </span><span class="n">_CCCL_THROW</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="n">runtime_error</span><span class="p">{</span><span class="s">&quot;Something went wrong&quot;</span><span class="p">});</span><span class="w"> </span><span class="c1">// on device calls cuda::std::terminate()</span>
+<span class="w">    </span><span class="n">_CCCL_THROW</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="n">runtime_error</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;Something went wrong&quot;</span><span class="p">);</span><span class="w"> </span><span class="c1">// on device calls cuda::std::terminate()</span>
 <span class="p">}</span>
 
 <span class="n">__host__</span><span class="w"> </span><span class="n">__device__</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="n">fn</span><span class="p">(</span><span class="n">cuda</span><span class="o">::</span><span class="n">std</span><span class="o">::</span><span class="kt">size_t</span><span class="w"> </span><span class="n">n</span><span class="p">)</span>
