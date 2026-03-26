@@ -7,11 +7,13 @@
 #include <thrust/execution_policy.h>
 #include <thrust/host_vector.h>
 
+#include <tuple>
+
 template <typename T>
 static void filter_out_segments_fancy_iterator_zipped(
-  thrust::device_vector<T>& d_pt,
-  thrust::device_vector<T>& d_eta,
-  thrust::device_vector<T>& d_phi,
+  const thrust::device_vector<T>& d_pt,
+  const thrust::device_vector<T>& d_eta,
+  const thrust::device_vector<T>& d_phi,
   thrust::device_vector<int>& d_offsets,
   thrust::device_vector<T>& d_selected_pt,
   thrust::device_vector<T>& d_selected_eta,
@@ -26,6 +28,12 @@ static void filter_out_segments_fancy_iterator_zipped(
     int segment_id = cuda::std::get<3>(t);
     return d_mask[segment_id];
   };
+
+  d_selected_pt.resize(d_pt.size());
+  d_selected_eta.resize(d_eta.size());
+  d_selected_phi.resize(d_phi.size());
+  d_selected_segment_ids.resize(d_pt.size());
+  d_num_selected_out.resize(1);
 
   int num_segments = static_cast<int>(d_offsets.size() - 1);
 
@@ -55,7 +63,10 @@ static void filter_out_segments_fancy_iterator_zipped(
     return;
   }
 
-  // thrust::device_vector<uint8_t> d_temp_storage(temp_storage_bytes, thrust::no_init);
+  if (d_temp_storage.size() < temp_storage_bytes)
+  {
+    d_temp_storage.resize(temp_storage_bytes);
+  }
 
   error = cub::DeviceSelect::If(
     thrust::raw_pointer_cast(d_temp_storage.data()),
@@ -102,7 +113,10 @@ static void filter_out_segments_fancy_iterator_zipped(
     return;
   }
 
-  // d_temp_storage.resize(temp_storage_bytes, thrust::no_init);
+  if (d_temp_storage.size() < temp_storage_bytes)
+  {
+    d_temp_storage.resize(temp_storage_bytes);
+  }
 
   error = cub::DeviceSelect::If(
     thrust::raw_pointer_cast(d_temp_storage.data()),
@@ -127,4 +141,38 @@ static void filter_out_segments_fancy_iterator_zipped(
 
   d_offsets.resize(new_num_segments + 1);
   d_offsets[new_num_segments] = num_selected;
+}
+
+template <typename T>
+static std::
+  tuple<thrust::device_vector<T>, thrust::device_vector<T>, thrust::device_vector<T>, thrust::device_vector<int>>
+  filter_out_segments_fancy_iterator_zipped(
+    const thrust::device_vector<T>& d_pt,
+    const thrust::device_vector<T>& d_eta,
+    const thrust::device_vector<T>& d_phi,
+    const thrust::device_vector<int>& d_offsets,
+    const thrust::device_vector<bool>& d_mask)
+{
+  thrust::device_vector<T> d_selected_pt;
+  thrust::device_vector<T> d_selected_eta;
+  thrust::device_vector<T> d_selected_phi;
+  thrust::device_vector<int> d_new_offsets = d_offsets;
+  thrust::device_vector<int> d_selected_segment_ids;
+  thrust::device_vector<int> d_num_selected_out;
+  thrust::device_vector<uint8_t> d_temp_storage;
+
+  filter_out_segments_fancy_iterator_zipped(
+    d_pt,
+    d_eta,
+    d_phi,
+    d_new_offsets,
+    d_selected_pt,
+    d_selected_eta,
+    d_selected_phi,
+    d_selected_segment_ids,
+    d_num_selected_out,
+    d_temp_storage,
+    d_mask);
+
+  return {std::move(d_selected_pt), std::move(d_selected_eta), std::move(d_selected_phi), std::move(d_new_offsets)};
 }

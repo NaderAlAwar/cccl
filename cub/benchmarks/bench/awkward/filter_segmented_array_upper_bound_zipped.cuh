@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cub/device/device_select.cuh>
+
 #include <thrust/binary_search.h>
 #include <thrust/device_vector.h>
 #include <thrust/execution_policy.h>
@@ -20,6 +22,12 @@ static void segmented_filter_upper_bound_zipped(
   PredicateOp pred)
 {
   (void) d_num_removed_per_segment; // unused in this implementation
+
+  d_selected_pt.resize(d_pt.size());
+  d_selected_eta.resize(d_eta.size());
+  d_selected_phi.resize(d_phi.size());
+  d_new_offsets.resize(d_offsets.size());
+  d_num_selected_out.resize(1);
 
   thrust::device_vector<int> d_selected_segment_ids(d_pt.size(), thrust::no_init);
 
@@ -66,7 +74,10 @@ static void segmented_filter_upper_bound_zipped(
     return;
   }
 
-  // thrust::device_vector<uint8_t> d_temp_storage(temp_storage_bytes, thrust::no_init);
+  if (d_temp_storage.size() < temp_storage_bytes)
+  {
+    d_temp_storage.resize(temp_storage_bytes);
+  }
 
   error = cub::DeviceSelect::If(
     thrust::raw_pointer_cast(d_temp_storage.data()),
