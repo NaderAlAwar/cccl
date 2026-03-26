@@ -383,13 +383,14 @@ class DeviceUniqueByKeyBuildResult:
     ) -> int: ...
 
 # ----------------
-# DeviceSelectIf
+# DeviceSelect
 # ----------------
 
-class DeviceSelectIfBuildResult:
+class DeviceSelectBuildResult:
     def __init__(
         self,
         d_in: Iterator,
+        d_flags: Iterator | None,
         d_selected_out: Iterator,
         d_num_selected_out: Iterator,
         select_op: Op,
@@ -400,6 +401,7 @@ class DeviceSelectIfBuildResult:
         temp_storage_ptr: int | None,
         temp_storage_nbytes: int,
         d_in: Iterator,
+        d_flags: Iterator | None,
         d_selected_out: Iterator,
         d_num_selected_out: Iterator,
         select_op: Op,
@@ -407,28 +409,8 @@ class DeviceSelectIfBuildResult:
         stream,
     ) -> int: ...
 
-class DeviceSelectFlaggedIfBuildResult:
-    def __init__(
-        self,
-        d_in: Iterator,
-        d_flags: Iterator,
-        d_selected_out: Iterator,
-        d_num_selected_out: Iterator,
-        select_op: Op,
-        info: CommonData,
-    ): ...
-    def compute(
-        self,
-        temp_storage_ptr: int | None,
-        temp_storage_nbytes: int,
-        d_in: Iterator,
-        d_flags: Iterator,
-        d_selected_out: Iterator,
-        d_num_selected_out: Iterator,
-        select_op: Op,
-        num_items: int,
-        stream,
-    ) -> int: ...
+DeviceSelectIfBuildResult = DeviceSelectBuildResult
+DeviceSelectFlaggedIfBuildResult = DeviceSelectBuildResult
 
 # -----------------
 # DeviceRadixSort

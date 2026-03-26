@@ -255,21 +255,21 @@ def test_select_flagged_object_api(dtype):
     temp_storage_bytes = selector(
         None,
         d_in,
-        d_flags,
         d_out,
         d_num_selected,
         odd_flag,
         num_items,
+        d_flags,
     )
     d_temp_storage = cp.empty(temp_storage_bytes, dtype=np.uint8)
     selector(
         d_temp_storage,
         d_in,
-        d_flags,
         d_out,
         d_num_selected,
         odd_flag,
         num_items,
+        d_flags,
     )
 
     num_selected = int(d_num_selected[0].get())

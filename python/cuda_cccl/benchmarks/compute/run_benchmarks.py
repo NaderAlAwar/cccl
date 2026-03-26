@@ -68,6 +68,7 @@ SUPPORTED_BENCHMARKS = [
     "scan/exclusive/custom",
     "histogram/even",
     "select/if",
+    "select/flagged",
     "select/unique_by_key",
     "radix_sort/keys",
     "radix_sort/pairs",

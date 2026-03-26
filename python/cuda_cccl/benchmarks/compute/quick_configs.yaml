@@ -73,6 +73,11 @@ select/if:
   "Elements{io}": 16
   "Entropy": "1.000"
 
+select/flagged:
+  "T{ct}": "I32"
+  "Elements{io}": 16
+  "Entropy": "1.000"
+
 select/unique_by_key:
   "KeyT{ct}": "I32"
   "ValueT{ct}": "I32"
