@@ -19,6 +19,7 @@
 #include "filter_out_segments_copy_if_zipped.cuh"
 #include "filter_out_segments_fancy_iterator_zipped.cuh"
 #include "filter_out_segments_rle_scan_zipped.cuh"
+#include "filter_segmented_array_lower_bound_only_zipped.cuh"
 #include "filter_segmented_array_upper_bound_fancy_iterator_zipped.cuh"
 #include "filter_segmented_array_upper_bound_zipped.cuh"
 #include "filter_segmented_array_zipped.cuh"
@@ -171,6 +172,32 @@ static void physics_analysis(
   //   d_temp_storage,
   //   cond_electron);
   // segmented_filter_upper_bound_fancy_iterator_zipped(
+  //   d_muon_pts,
+  //   d_muon_etas,
+  //   d_muon_phis,
+  //   d_muon_offsets,
+  //   d_temp_muon_pts,
+  //   d_temp_muon_etas,
+  //   d_temp_muon_phis,
+  //   d_temp_muon_offsets,
+  //   d_temp2_muon_num_selected_out,
+  //   d_temp_muon_num_removed_per_segment,
+  //   d_temp_storage,
+  //   cond_muon);
+  // segmented_filter_lower_bound_only_zipped(
+  //   d_electron_pts,
+  //   d_electron_etas,
+  //   d_electron_phis,
+  //   d_electron_offsets,
+  //   d_temp_electron_pts,
+  //   d_temp_electron_etas,
+  //   d_temp_electron_phis,
+  //   d_temp_electron_offsets,
+  //   d_temp2_electron_num_selected_out,
+  //   d_temp_electron_num_removed_per_segment,
+  //   d_temp_storage,
+  //   cond_electron);
+  // segmented_filter_lower_bound_only_zipped(
   //   d_muon_pts,
   //   d_muon_etas,
   //   d_muon_phis,

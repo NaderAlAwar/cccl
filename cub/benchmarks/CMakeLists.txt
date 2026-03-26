@@ -80,6 +80,10 @@ function(add_bench target_name bench_name bench_src)
       cccl.nvbench_helper
       nvbench::main
   )
+  target_include_directories(
+    ${bench_target}
+    PRIVATE "${CMAKE_SOURCE_DIR}" "${CMAKE_SOURCE_DIR}/libnpy/include"
+  )
 endfunction()
 
 function(add_bench_dir bench_dir)
