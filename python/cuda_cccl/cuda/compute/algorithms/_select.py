@@ -5,30 +5,111 @@
 
 from __future__ import annotations
 
-from functools import cache
-
+from .. import _bindings, types
+from .. import _cccl_interop as cccl
 from .._caching import cache_with_registered_key_functions
-from .._cpp_compile import compile_cpp_to_ltoir
+from .._cccl_interop import call_build, set_cccl_iterator_state
+from .._utils import protocols
 from .._utils.temp_storage_buffer import TempStorageBuffer
-from ..iterators import DiscardIterator
-from ..op import OpAdapter, RawOp, make_op_adapter
+from ..op import OpAdapter, make_op_adapter
 from ..typing import DeviceArrayLike, IteratorT, Operator
-from ._three_way_partition import make_three_way_partition
 
 
-@cache
-def _always_false_op():
-    source = """
-extern "C" __device__ void always_false(void*, void* result) {{
-    *static_cast<bool*>(result) = false;
-}}
-"""
-    ltoir = compile_cpp_to_ltoir(source)
-    return RawOp(ltoir=ltoir, name="always_false")
+def _get_temp_storage_state(temp_storage):
+    if temp_storage is None:
+        return 0, 0
+    return temp_storage.nbytes, protocols.get_data_pointer(temp_storage)
 
 
-class _Select:
-    __slots__ = ["partitioner", "discard_second", "discard_unselected", "false_op"]
+class _SelectBase:
+    __slots__ = [
+        "build_result",
+        "d_in_cccl",
+        "d_flags_cccl",
+        "d_out_cccl",
+        "d_num_selected_out_cccl",
+        "cond_cccl",
+    ]
+
+    build_result_type = None
+
+    def __init__(
+        self,
+        d_in: DeviceArrayLike | IteratorT,
+        d_out: DeviceArrayLike | IteratorT,
+        d_num_selected_out: DeviceArrayLike,
+        cond: OpAdapter,
+        d_flags: DeviceArrayLike | IteratorT | None = None,
+    ):
+        self.d_in_cccl = cccl.to_cccl_input_iter(d_in)
+        self.d_flags_cccl = (
+            cccl.to_cccl_input_iter(d_flags) if d_flags is not None else None
+        )
+        self.d_out_cccl = cccl.to_cccl_output_iter(d_out)
+        self.d_num_selected_out_cccl = cccl.to_cccl_output_iter(d_num_selected_out)
+
+        value_type = cccl.get_value_type(d_flags if d_flags is not None else d_in)
+        self.cond_cccl = cond.compile((value_type,), types.uint8)
+
+        build_args = [self.d_in_cccl]
+        if self.d_flags_cccl is not None:
+            build_args.append(self.d_flags_cccl)
+        build_args.extend(
+            [self.d_out_cccl, self.d_num_selected_out_cccl, self.cond_cccl]
+        )
+
+        self.build_result = call_build(self.build_result_type, *build_args)
+
+    def _call_impl(
+        self,
+        temp_storage,
+        d_in,
+        d_out,
+        d_num_selected_out,
+        cond,
+        num_items: int,
+        stream=None,
+        d_flags=None,
+    ):
+        set_cccl_iterator_state(self.d_in_cccl, d_in)
+        if self.d_flags_cccl is not None:
+            set_cccl_iterator_state(self.d_flags_cccl, d_flags)
+        set_cccl_iterator_state(self.d_out_cccl, d_out)
+        set_cccl_iterator_state(self.d_num_selected_out_cccl, d_num_selected_out)
+
+        cond_adapter = make_op_adapter(cond)
+        self.cond_cccl.state = cond_adapter.get_state()
+
+        stream_handle = protocols.validate_and_get_stream(stream)
+        temp_storage_bytes, d_temp_storage = _get_temp_storage_state(temp_storage)
+
+        if self.d_flags_cccl is None:
+            return self.build_result.compute(
+                d_temp_storage,
+                temp_storage_bytes,
+                self.d_in_cccl,
+                self.d_out_cccl,
+                self.d_num_selected_out_cccl,
+                self.cond_cccl,
+                num_items,
+                stream_handle,
+            )
+
+        return self.build_result.compute(
+            d_temp_storage,
+            temp_storage_bytes,
+            self.d_in_cccl,
+            self.d_flags_cccl,
+            self.d_out_cccl,
+            self.d_num_selected_out_cccl,
+            self.cond_cccl,
+            num_items,
+            stream_handle,
+        )
+
+
+class _Select(_SelectBase):
+    build_result_type = _bindings.DeviceSelectIfBuildResult
 
     def __init__(
         self,
@@ -37,24 +118,7 @@ class _Select:
         d_num_selected_out: DeviceArrayLike,
         cond: OpAdapter,
     ):
-        # Create discard iterators for unused outputs, using d_out as reference
-        # to match the input/output type
-        self.discard_second = DiscardIterator(d_out)
-        self.discard_unselected = DiscardIterator(d_out)
-
-        # Create adapter for the always-false second predicate
-        self.false_op = _always_false_op()
-
-        # Use three_way_partition internally
-        self.partitioner = make_three_way_partition(
-            d_in,
-            d_out,  # first_part_out - this is where selected items go
-            self.discard_second,  # second_part_out - discarded
-            self.discard_unselected,  # unselected_out - discarded
-            d_num_selected_out,
-            cond,  # select_first_part_op - user's select condition
-            self.false_op,  # select_second_part_op - always false
-        )
+        super().__init__(d_in, d_out, d_num_selected_out, cond)
 
     def __call__(
         self,
@@ -66,18 +130,57 @@ class _Select:
         num_items: int,
         stream=None,
     ):
-        return self.partitioner(
+        return self._call_impl(
             temp_storage,
             d_in,
             d_out,
-            self.discard_second,
-            self.discard_unselected,
             d_num_selected_out,
-            make_op_adapter(cond),
-            self.false_op,
+            cond,
             num_items,
             stream,
         )
+
+
+class _SelectFlagged(_SelectBase):
+    build_result_type = _bindings.DeviceSelectFlaggedIfBuildResult
+
+    def __init__(
+        self,
+        d_in: DeviceArrayLike | IteratorT,
+        d_flags: DeviceArrayLike | IteratorT,
+        d_out: DeviceArrayLike | IteratorT,
+        d_num_selected_out: DeviceArrayLike,
+        cond: OpAdapter,
+    ):
+        super().__init__(d_in, d_out, d_num_selected_out, cond, d_flags=d_flags)
+
+    def __call__(
+        self,
+        temp_storage,
+        d_in,
+        d_flags,
+        d_out,
+        d_num_selected_out,
+        cond,
+        num_items: int,
+        stream=None,
+    ):
+        return self._call_impl(
+            temp_storage,
+            d_in,
+            d_out,
+            d_num_selected_out,
+            cond,
+            num_items,
+            stream,
+            d_flags=d_flags,
+        )
+
+
+def _run_select(selector, temp_storage_args):
+    tmp_storage_bytes = selector(None, *temp_storage_args)
+    tmp_storage = TempStorageBuffer(tmp_storage_bytes, temp_storage_args[-1])
+    selector(tmp_storage, *temp_storage_args)
 
 
 @cache_with_registered_key_functions
@@ -90,33 +193,29 @@ def make_select(
     """
     Create a select object that can be called to select elements matching a condition.
 
-    This is the object-oriented API that allows explicit control over temporary
-    storage allocation. For simpler usage, consider using :func:`select`.
-
     Example:
-        Below, ``make_select`` is used to create a select object that can be reused.
-
         .. literalinclude:: ../../python/cuda_cccl/tests/compute/examples/select/select_object.py
             :language: python
             :start-after: # example-begin
-
-    Args:
-        d_in: Device array or iterator containing the input sequence of data items.
-        d_out: Device array or iterator to store the selected output items.
-        d_num_selected_out: Device array to store the number of items that passed the selection.
-            The count is stored in ``d_num_selected_out[0]``.
-        cond: Selection condition (predicate).
-            The signature is ``(T) -> uint8``, where ``T`` is the input data type.
-            Returns 1 (selected) or 0 (not selected).
-
-    Returns:
-        A callable object that performs the selection operation.
     """
     cond_adapter = make_op_adapter(cond)
-    # Note: _Select internally calls make_three_way_partition which will
-    # normalize the cond. But we've already normalized it, so the Op
-    # will be passed through make_op unchanged.
     return _Select(d_in, d_out, d_num_selected_out, cond_adapter)
+
+
+@cache_with_registered_key_functions
+def make_select_flagged(
+    d_in: DeviceArrayLike | IteratorT,
+    d_flags: DeviceArrayLike | IteratorT,
+    d_out: DeviceArrayLike | IteratorT,
+    d_num_selected_out: DeviceArrayLike,
+    cond: Operator,
+):
+    """
+    Create a select_flagged object that can be called to select elements whose
+    corresponding flags satisfy a condition.
+    """
+    cond_adapter = make_op_adapter(cond)
+    return _SelectFlagged(d_in, d_flags, d_out, d_num_selected_out, cond_adapter)
 
 
 def select(
@@ -128,62 +227,37 @@ def select(
     stream=None,
 ):
     """
-    Performs device-wide selection of elements based on a condition.
-
-    Given an input sequence, this function selects all elements for which the condition
-    function ``cond`` returns true (non-zero) and writes them to the output in a
-    compacted form. The number of selected elements is written to ``d_num_selected_out[0]``.
-
-    This function automatically handles temporary storage allocation and execution.
-
-    The ``cond`` function can reference device arrays as globals or closures - they will
-    be automatically captured as state arrays, enabling stateful operations like counting.
-
-    Example:
-        Below, ``select`` is used to select even numbers from an input array:
-
-        .. literalinclude:: ../../python/cuda_cccl/tests/compute/examples/select/select_basic.py
-            :language: python
-            :start-after: # example-begin
-
-        You can also use iterators for more complex selection patterns:
-
-        .. literalinclude:: ../../python/cuda_cccl/tests/compute/examples/select/select_with_iterator.py
-            :language: python
-            :start-after: # example-begin
-
-    Args:
-        d_in: Device array or iterator containing the input sequence of data items.
-        d_out: Device array or iterator to store the selected output items.
-        d_num_selected_out: Device array to store the number of items that passed the selection.
-            The count is stored in ``d_num_selected_out[0]``.
-        cond: Selection condition (predicate).
-            The signature is ``(T) -> uint8``, where ``T`` is the input data type.
-            Returns 1 (selected) or 0 (not selected).
-            Can reference device arrays as globals/closures - they will be automatically captured.
-        num_items: Number of items in the input sequence.
-        stream: CUDA stream to use for the operation (optional).
+    Select all input elements for which ``cond`` evaluates to true.
     """
-    # Create adapter to support stateful ops
     cond_adapter = make_op_adapter(cond)
     selector = make_select(d_in, d_out, d_num_selected_out, cond_adapter)
-
-    tmp_storage_bytes = selector(
-        None,
-        d_in,
-        d_out,
-        d_num_selected_out,
-        cond_adapter,
-        num_items,
-        stream,
+    _run_select(
+        selector,
+        (d_in, d_out, d_num_selected_out, cond_adapter, num_items, stream),
     )
-    tmp_storage = TempStorageBuffer(tmp_storage_bytes, stream)
-    selector(
-        tmp_storage,
+
+
+def select_flagged(
+    d_in: DeviceArrayLike | IteratorT,
+    d_flags: DeviceArrayLike | IteratorT,
+    d_out: DeviceArrayLike | IteratorT,
+    d_num_selected_out: DeviceArrayLike,
+    cond: Operator,
+    num_items: int,
+    stream=None,
+):
+    """
+    Select input elements whose corresponding flags satisfy ``cond``.
+    """
+    cond_adapter = make_op_adapter(cond)
+    selector = make_select_flagged(
         d_in,
+        d_flags,
         d_out,
         d_num_selected_out,
         cond_adapter,
-        num_items,
-        stream,
+    )
+    _run_select(
+        selector,
+        (d_in, d_flags, d_out, d_num_selected_out, cond_adapter, num_items, stream),
     )

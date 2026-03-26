@@ -20,7 +20,9 @@ from ._scan import make_inclusive_scan as make_inclusive_scan
 from ._segmented_reduce import make_segmented_reduce as make_segmented_reduce
 from ._segmented_reduce import segmented_reduce
 from ._select import make_select as make_select
+from ._select import make_select_flagged as make_select_flagged
 from ._select import select as select
+from ._select import select_flagged as select_flagged
 from ._sort import DoubleBuffer, SortOrder
 from ._sort import make_merge_sort as make_merge_sort
 from ._sort import make_radix_sort as make_radix_sort
@@ -67,6 +69,8 @@ __all__ = [
     "make_three_way_partition",
     "select",
     "make_select",
+    "select_flagged",
+    "make_select_flagged",
     "DoubleBuffer",
     "SortOrder",
 ]

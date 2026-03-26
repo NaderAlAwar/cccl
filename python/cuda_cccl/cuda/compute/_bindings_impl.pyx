@@ -1760,6 +1760,248 @@ cdef class DeviceUniqueByKeyBuildResult:
             self.build_data.cubin_size
         )
 
+
+# ----------------
+# DeviceSelectIf
+# ----------------
+
+cdef extern from "cccl/c/select_if.h":
+    cdef struct cccl_device_select_if_build_result_t 'cccl_device_select_if_build_result_t':
+        const char* cubin
+        size_t cubin_size
+
+    cdef CUresult cccl_device_select_if_build(
+        cccl_device_select_if_build_result_t *build_ptr,
+        cccl_iterator_t d_in,
+        cccl_iterator_t d_selected_out,
+        cccl_iterator_t d_num_selected_out,
+        cccl_op_t select_op,
+        int, int, const char *, const char *, const char *, const char *
+    ) nogil
+
+    cdef CUresult cccl_device_select_if(
+        cccl_device_select_if_build_result_t build,
+        void *d_temp_storage,
+        size_t *d_temp_storage_bytes,
+        cccl_iterator_t d_in,
+        cccl_iterator_t d_selected_out,
+        cccl_iterator_t d_num_selected_out,
+        cccl_op_t select_op,
+        size_t num_items,
+        CUstream stream
+    ) nogil
+
+    cdef CUresult cccl_device_select_if_cleanup(
+        cccl_device_select_if_build_result_t *build_ptr,
+    ) nogil
+
+    cdef CUresult cccl_device_select_flagged_if_build(
+        cccl_device_select_if_build_result_t *build_ptr,
+        cccl_iterator_t d_in,
+        cccl_iterator_t d_flags,
+        cccl_iterator_t d_selected_out,
+        cccl_iterator_t d_num_selected_out,
+        cccl_op_t select_op,
+        int, int, const char *, const char *, const char *, const char *
+    ) nogil
+
+    cdef CUresult cccl_device_select_flagged_if(
+        cccl_device_select_if_build_result_t build,
+        void *d_temp_storage,
+        size_t *d_temp_storage_bytes,
+        cccl_iterator_t d_in,
+        cccl_iterator_t d_flags,
+        cccl_iterator_t d_selected_out,
+        cccl_iterator_t d_num_selected_out,
+        cccl_op_t select_op,
+        size_t num_items,
+        CUstream stream
+    ) nogil
+
+    cdef CUresult cccl_device_select_flagged_if_cleanup(
+        cccl_device_select_if_build_result_t *build_ptr,
+    ) nogil
+
+
+cdef class DeviceSelectIfBuildResult:
+    cdef cccl_device_select_if_build_result_t build_data
+
+    def __cinit__(
+        DeviceSelectIfBuildResult self,
+        Iterator d_in,
+        Iterator d_selected_out,
+        Iterator d_num_selected_out,
+        Op select_op,
+        CommonData common_data
+    ):
+        cdef CUresult status = -1
+        cdef int cc_major = common_data.get_cc_major()
+        cdef int cc_minor = common_data.get_cc_minor()
+        cdef const char *cub_path = common_data.cub_path_get_c_str()
+        cdef const char *thrust_path = common_data.thrust_path_get_c_str()
+        cdef const char *libcudacxx_path = common_data.libcudacxx_path_get_c_str()
+        cdef const char *ctk_path = common_data.ctk_path_get_c_str()
+
+        memset(&self.build_data, 0, sizeof(cccl_device_select_if_build_result_t))
+        with nogil:
+            status = cccl_device_select_if_build(
+                &self.build_data,
+                d_in.iter_data,
+                d_selected_out.iter_data,
+                d_num_selected_out.iter_data,
+                select_op.op_data,
+                cc_major,
+                cc_minor,
+                cub_path,
+                thrust_path,
+                libcudacxx_path,
+                ctk_path,
+            )
+        if status != 0:
+            raise RuntimeError(
+                f"Failed building select_if, error code: {status}"
+            )
+
+    def __dealloc__(DeviceSelectIfBuildResult self):
+        cdef CUresult status = -1
+        with nogil:
+            status = cccl_device_select_if_cleanup(&self.build_data)
+        if (status != 0):
+            print(f"Return code {status} encountered during select_if result cleanup")
+
+    cpdef size_t compute(
+        DeviceSelectIfBuildResult self,
+        temp_storage_ptr,
+        temp_storage_bytes,
+        Iterator d_in,
+        Iterator d_selected_out,
+        Iterator d_num_selected_out,
+        Op select_op,
+        size_t num_items,
+        stream
+    ):
+        cdef CUresult status = -1
+        cdef void *storage_ptr = (<void *><uintptr_t>temp_storage_ptr) if temp_storage_ptr else NULL
+        cdef size_t storage_sz = <size_t>temp_storage_bytes
+        cdef CUstream c_stream = <CUstream><uintptr_t>(stream) if stream else NULL
+
+        with nogil:
+            status = cccl_device_select_if(
+                self.build_data,
+                storage_ptr,
+                &storage_sz,
+                d_in.iter_data,
+                d_selected_out.iter_data,
+                d_num_selected_out.iter_data,
+                select_op.op_data,
+                <uint64_t>num_items,
+                c_stream
+            )
+
+        if status != 0:
+            raise RuntimeError(
+                f"Failed executing select_if, error code: {status}"
+            )
+        return storage_sz
+
+    def _get_cubin(self):
+        return PyBytes_FromStringAndSize(
+            <const char*>self.build_data.cubin,
+            self.build_data.cubin_size
+        )
+
+
+cdef class DeviceSelectFlaggedIfBuildResult:
+    cdef cccl_device_select_if_build_result_t build_data
+
+    def __cinit__(
+        DeviceSelectFlaggedIfBuildResult self,
+        Iterator d_in,
+        Iterator d_flags,
+        Iterator d_selected_out,
+        Iterator d_num_selected_out,
+        Op select_op,
+        CommonData common_data
+    ):
+        cdef CUresult status = -1
+        cdef int cc_major = common_data.get_cc_major()
+        cdef int cc_minor = common_data.get_cc_minor()
+        cdef const char *cub_path = common_data.cub_path_get_c_str()
+        cdef const char *thrust_path = common_data.thrust_path_get_c_str()
+        cdef const char *libcudacxx_path = common_data.libcudacxx_path_get_c_str()
+        cdef const char *ctk_path = common_data.ctk_path_get_c_str()
+
+        memset(&self.build_data, 0, sizeof(cccl_device_select_if_build_result_t))
+        with nogil:
+            status = cccl_device_select_flagged_if_build(
+                &self.build_data,
+                d_in.iter_data,
+                d_flags.iter_data,
+                d_selected_out.iter_data,
+                d_num_selected_out.iter_data,
+                select_op.op_data,
+                cc_major,
+                cc_minor,
+                cub_path,
+                thrust_path,
+                libcudacxx_path,
+                ctk_path,
+            )
+        if status != 0:
+            raise RuntimeError(
+                f"Failed building select_flagged_if, error code: {status}"
+            )
+
+    def __dealloc__(DeviceSelectFlaggedIfBuildResult self):
+        cdef CUresult status = -1
+        with nogil:
+            status = cccl_device_select_flagged_if_cleanup(&self.build_data)
+        if (status != 0):
+            print(f"Return code {status} encountered during select_flagged_if result cleanup")
+
+    cpdef size_t compute(
+        DeviceSelectFlaggedIfBuildResult self,
+        temp_storage_ptr,
+        temp_storage_bytes,
+        Iterator d_in,
+        Iterator d_flags,
+        Iterator d_selected_out,
+        Iterator d_num_selected_out,
+        Op select_op,
+        size_t num_items,
+        stream
+    ):
+        cdef CUresult status = -1
+        cdef void *storage_ptr = (<void *><uintptr_t>temp_storage_ptr) if temp_storage_ptr else NULL
+        cdef size_t storage_sz = <size_t>temp_storage_bytes
+        cdef CUstream c_stream = <CUstream><uintptr_t>(stream) if stream else NULL
+
+        with nogil:
+            status = cccl_device_select_flagged_if(
+                self.build_data,
+                storage_ptr,
+                &storage_sz,
+                d_in.iter_data,
+                d_flags.iter_data,
+                d_selected_out.iter_data,
+                d_num_selected_out.iter_data,
+                select_op.op_data,
+                <uint64_t>num_items,
+                c_stream
+            )
+
+        if status != 0:
+            raise RuntimeError(
+                f"Failed executing select_flagged_if, error code: {status}"
+            )
+        return storage_sz
+
+    def _get_cubin(self):
+        return PyBytes_FromStringAndSize(
+            <const char*>self.build_data.cubin,
+            self.build_data.cubin_size
+        )
+
 # -----------------
 # DeviceRadixSort
 # -----------------

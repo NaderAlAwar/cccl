@@ -59,6 +59,12 @@ def _host_select(h_in: np.ndarray, cond):
     return selected, np.int64(selected.size)
 
 
+def _host_select_flagged(h_in: np.ndarray, h_flags: np.ndarray, cond):
+    mask = np.vectorize(cond, otypes=[np.uint8])(h_flags).astype(bool)
+    selected = h_in[mask]
+    return selected, np.int64(selected.size)
+
+
 @pytest.mark.parametrize("dtype,num_items", select_params)
 def test_select_basic(dtype, num_items):
     h_in = random_array(num_items, dtype, max_value=100)
@@ -191,6 +197,121 @@ def test_select_empty():
     num_selected = int(d_num_selected[0].get())
 
     assert num_selected == 0
+
+
+@pytest.mark.parametrize("dtype,num_items", select_params)
+def test_select_flagged_basic(dtype, num_items):
+    h_in = random_array(num_items, dtype, max_value=100)
+    h_flags = random_array(num_items, np.int32, max_value=100)
+
+    def below_50(flag):
+        return flag < 50
+
+    d_in = cp.asarray(h_in)
+    d_flags = cp.asarray(h_flags)
+    d_out = cp.empty_like(d_in)
+    d_num_selected = cp.empty(2, dtype=np.uint64)
+
+    cuda.compute.select_flagged(
+        d_in,
+        d_flags,
+        d_out,
+        d_num_selected,
+        below_50,
+        num_items,
+    )
+
+    num_selected = int(d_num_selected[0].get())
+    got = d_out.get()[:num_selected]
+
+    expected, expected_count = _host_select_flagged(h_in, h_flags, below_50)
+
+    assert num_selected == expected_count
+    assert np.array_equal(got, expected)
+
+
+@pytest.mark.parametrize("dtype", [np.int32, np.float32])
+def test_select_flagged_object_api(dtype):
+    num_items = 10_000
+    h_in = random_array(num_items, dtype, max_value=100)
+    h_flags = random_array(num_items, np.int32, max_value=100)
+
+    def odd_flag(flag):
+        return flag % 2 == 1
+
+    d_in = cp.asarray(h_in)
+    d_flags = cp.asarray(h_flags)
+    d_out = cp.empty_like(d_in)
+    d_num_selected = cp.empty(2, dtype=np.uint64)
+
+    selector = cuda.compute.make_select_flagged(
+        d_in,
+        d_flags,
+        d_out,
+        d_num_selected,
+        odd_flag,
+    )
+
+    temp_storage_bytes = selector(
+        None,
+        d_in,
+        d_flags,
+        d_out,
+        d_num_selected,
+        odd_flag,
+        num_items,
+    )
+    d_temp_storage = cp.empty(temp_storage_bytes, dtype=np.uint8)
+    selector(
+        d_temp_storage,
+        d_in,
+        d_flags,
+        d_out,
+        d_num_selected,
+        odd_flag,
+        num_items,
+    )
+
+    num_selected = int(d_num_selected[0].get())
+    got = d_out.get()[:num_selected]
+
+    expected, expected_count = _host_select_flagged(h_in, h_flags, odd_flag)
+
+    assert num_selected == expected_count
+    assert np.array_equal(got, expected)
+
+
+@pytest.mark.parametrize("dtype", [np.int32, np.float32])
+def test_select_flagged_with_flag_iterator(dtype):
+    num_items = 10_000
+    h_in = random_array(num_items, dtype, max_value=100)
+    h_flags = random_array(num_items, np.int32, max_value=100)
+
+    def multiple_of_3(flag):
+        return flag % 3 == 0
+
+    d_in = cp.asarray(h_in)
+    d_flags = cp.asarray(h_flags)
+    d_flags_iter = CacheModifiedInputIterator(d_flags, modifier="stream")
+    d_out = cp.empty_like(d_in)
+    d_num_selected = cp.empty(2, dtype=np.uint64)
+
+    cuda.compute.select_flagged(
+        d_in,
+        d_flags_iter,
+        d_out,
+        d_num_selected,
+        multiple_of_3,
+        num_items,
+    )
+
+    num_selected = int(d_num_selected[0].get())
+    got = d_out.get()[:num_selected]
+
+    expected, expected_count = _host_select_flagged(h_in, h_flags, multiple_of_3)
+
+    assert num_selected == expected_count
+    assert np.array_equal(got, expected)
 
 
 @pytest.mark.parametrize("dtype", DTYPE_LIST)
@@ -423,6 +544,79 @@ def test_select_with_zip_iterator(monkeypatch):
     expected_count = np.sum(h_sums < 70)
 
     assert num_selected == expected_count
+
+
+def test_select_with_stream(cuda_stream):
+    num_items = 4_096
+    h_in = random_array(num_items, np.int32, max_value=100)
+
+    d_in = cp.asarray(h_in)
+    d_out = cp.empty_like(d_in)
+    d_num_selected = cp.empty(1, dtype=np.uint64)
+
+    def below_50(x):
+        return x < 50
+
+    cp_stream = cp.cuda.ExternalStream(cuda_stream.ptr)
+    with cp_stream:
+        d_out.fill(-1)
+
+    cuda.compute.select(
+        d_in,
+        d_out,
+        d_num_selected,
+        below_50,
+        num_items,
+        stream=cuda_stream,
+    )
+
+    with cp_stream:
+        cp.cuda.runtime.deviceSynchronize()
+
+    num_selected = int(d_num_selected[0].get())
+    got = d_out.get()[:num_selected]
+    expected, expected_count = _host_select(h_in, below_50)
+
+    assert num_selected == expected_count
+    assert np.array_equal(got, expected)
+
+
+def test_select_flagged_with_stream(cuda_stream):
+    num_items = 4_096
+    h_in = random_array(num_items, np.int32, max_value=100)
+    h_flags = random_array(num_items, np.int32, max_value=100)
+
+    d_in = cp.asarray(h_in)
+    d_flags = cp.asarray(h_flags)
+    d_out = cp.empty_like(d_in)
+    d_num_selected = cp.empty(1, dtype=np.uint64)
+
+    def below_25(flag):
+        return flag < 25
+
+    cp_stream = cp.cuda.ExternalStream(cuda_stream.ptr)
+    with cp_stream:
+        d_out.fill(-1)
+
+    cuda.compute.select_flagged(
+        d_in,
+        d_flags,
+        d_out,
+        d_num_selected,
+        below_25,
+        num_items,
+        stream=cuda_stream,
+    )
+
+    with cp_stream:
+        cp.cuda.runtime.deviceSynchronize()
+
+    num_selected = int(d_num_selected[0].get())
+    got = d_out.get()[:num_selected]
+    expected, expected_count = _host_select_flagged(h_in, h_flags, below_25)
+
+    assert num_selected == expected_count
+    assert np.array_equal(got, expected)
 
 
 def test_select_stateful_threshold():

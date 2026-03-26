@@ -382,6 +382,54 @@ class DeviceUniqueByKeyBuildResult:
         stream,
     ) -> int: ...
 
+# ----------------
+# DeviceSelectIf
+# ----------------
+
+class DeviceSelectIfBuildResult:
+    def __init__(
+        self,
+        d_in: Iterator,
+        d_selected_out: Iterator,
+        d_num_selected_out: Iterator,
+        select_op: Op,
+        info: CommonData,
+    ): ...
+    def compute(
+        self,
+        temp_storage_ptr: int | None,
+        temp_storage_nbytes: int,
+        d_in: Iterator,
+        d_selected_out: Iterator,
+        d_num_selected_out: Iterator,
+        select_op: Op,
+        num_items: int,
+        stream,
+    ) -> int: ...
+
+class DeviceSelectFlaggedIfBuildResult:
+    def __init__(
+        self,
+        d_in: Iterator,
+        d_flags: Iterator,
+        d_selected_out: Iterator,
+        d_num_selected_out: Iterator,
+        select_op: Op,
+        info: CommonData,
+    ): ...
+    def compute(
+        self,
+        temp_storage_ptr: int | None,
+        temp_storage_nbytes: int,
+        d_in: Iterator,
+        d_flags: Iterator,
+        d_selected_out: Iterator,
+        d_num_selected_out: Iterator,
+        select_op: Op,
+        num_items: int,
+        stream,
+    ) -> int: ...
+
 # -----------------
 # DeviceRadixSort
 # -----------------
