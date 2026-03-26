@@ -23,9 +23,15 @@ static void segmented_filter_lower_bound_only_zipped(
 {
   (void) d_num_removed_per_segment; // unused in this implementation
 
+  d_selected_pt.resize(d_pt.size());
+  d_selected_eta.resize(d_eta.size());
+  d_selected_phi.resize(d_phi.size());
+  d_new_offsets.resize(d_offsets.size());
+  d_num_selected_out.resize(1);
+
   auto num_values = d_pt.size();
 
-  thrust::device_vector<int> d_selected_indices(d_pt.size(), thrust::no_init);
+  thrust::device_vector<int> d_selected_indices(num_values, thrust::no_init);
 
   // Create zipped input and output iterators
   auto input_values_iter = cuda::make_zip_iterator(
@@ -57,7 +63,10 @@ static void segmented_filter_lower_bound_only_zipped(
     return;
   }
 
-  // thrust::device_vector<uint8_t> d_temp_storage(temp_storage_bytes, thrust::no_init);
+  if (d_temp_storage.size() < temp_storage_bytes)
+  {
+    d_temp_storage.resize(temp_storage_bytes);
+  }
 
   error = cub::DeviceSelect::If(
     thrust::raw_pointer_cast(d_temp_storage.data()),
