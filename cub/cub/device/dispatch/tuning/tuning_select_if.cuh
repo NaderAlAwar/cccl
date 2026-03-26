@@ -1466,6 +1466,45 @@ constexpr distinct_partitions is_distinct_partitions()
   return DistinctPartitions ? distinct_partitions::yes : distinct_partitions::no;
 }
 
+template <typename PolicyT, typename = void>
+struct SelectIfPolicyWrapper : PolicyT
+{
+  _CCCL_HOST_DEVICE SelectIfPolicyWrapper(PolicyT base)
+      : PolicyT(base)
+  {}
+};
+
+template <typename StaticPolicyT>
+struct SelectIfPolicyWrapper<StaticPolicyT,
+                             ::cuda::std::void_t<decltype(StaticPolicyT::SelectIfPolicyT::LOAD_MODIFIER)>>
+    : StaticPolicyT
+{
+  _CCCL_HOST_DEVICE SelectIfPolicyWrapper(StaticPolicyT base)
+      : StaticPolicyT(base)
+  {}
+
+  _CCCL_HOST_DEVICE static constexpr auto SelectIf()
+  {
+    return cub::detail::MakePolicyWrapper(typename StaticPolicyT::SelectIfPolicyT());
+  }
+
+#if defined(CUB_ENABLE_POLICY_PTX_JSON)
+  _CCCL_DEVICE static constexpr auto EncodedPolicy()
+  {
+    using namespace ptx_json;
+    return object<key<"SelectIfPolicyT">() = SelectIf().EncodedPolicy(),
+                  key<"DelayConstructor">() =
+                    StaticPolicyT::SelectIfPolicyT::detail::delay_constructor_t::EncodedConstructor()>();
+  }
+#endif
+};
+
+template <typename PolicyT>
+_CCCL_HOST_DEVICE SelectIfPolicyWrapper<PolicyT> MakeSelectIfPolicyWrapper(PolicyT policy)
+{
+  return SelectIfPolicyWrapper<PolicyT>{policy};
+}
+
 template <class InputT, class FlagT, class OffsetT, bool DistinctPartitions, SelectImpl Impl>
 struct policy_hub
 {

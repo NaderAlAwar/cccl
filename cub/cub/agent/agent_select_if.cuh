@@ -29,6 +29,10 @@
 #include <cub/iterator/cache_modified_input_iterator.cuh>
 #include <cub/util_type.cuh>
 
+#if defined(CUB_DEFINE_RUNTIME_POLICIES) || defined(CUB_ENABLE_POLICY_PTX_JSON)
+#  include <cub/agent/agent_unique_by_key.cuh> // for UniqueByKeyAgentPolicy
+#endif
+
 #include <cuda/std/__functional/operations.h>
 #include <cuda/std/__type_traits/conditional.h>
 #include <cuda/std/__type_traits/enable_if.h>
@@ -94,6 +98,20 @@ struct AgentSelectIfPolicy
     using delay_constructor_t = DelayConstructorT;
   };
 };
+
+#if defined(CUB_DEFINE_RUNTIME_POLICIES) || defined(CUB_ENABLE_POLICY_PTX_JSON)
+namespace detail
+{
+CUB_DETAIL_POLICY_WRAPPER_DEFINE(
+  SelectIfAgentPolicy,
+  (UniqueByKeyAgentPolicy),
+  (BLOCK_THREADS, BlockThreads, int),
+  (ITEMS_PER_THREAD, ItemsPerThread, int),
+  (LOAD_ALGORITHM, LoadAlgorithm, cub::BlockLoadAlgorithm),
+  (LOAD_MODIFIER, LoadModifier, cub::CacheLoadModifier),
+  (SCAN_ALGORITHM, ScanAlgorithm, cub::BlockScanAlgorithm))
+} // namespace detail
+#endif // defined(CUB_DEFINE_RUNTIME_POLICIES) || defined(CUB_ENABLE_POLICY_PTX_JSON)
 
 /******************************************************************************
  * Thread block abstractions
