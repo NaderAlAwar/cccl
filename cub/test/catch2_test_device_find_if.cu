@@ -6,6 +6,7 @@
 #include <cub/device/device_find.cuh>
 
 #include <thrust/detail/raw_pointer_cast.h>
+#include <thrust/tabulate.h>
 
 #include <cuda/iterator>
 
@@ -95,7 +96,7 @@ C2H_TEST("Device find_if works", "[device][find_if]", value_types, offset_types)
   }
   auto d_in_it = thrust::raw_pointer_cast(in_items.data());
 
-  using predice_t = thrust::detail::equal_to_value<input_t>;
+  using predice_t = cuda::equal_to_value<input_t>;
   input_t val_to_find{};
 
   // Generate test cases for both "found" and "not found" scenarios
@@ -181,7 +182,7 @@ C2H_TEST("Device find_if works with non primitive iterator", "[device][find_if]"
   auto c_it = cuda::make_counting_iterator(input_t{0});
   {
     c2h::device_vector<offset_t> out_result(1, thrust::no_init);
-    auto predicate = thrust::detail::equal_to_value<input_t>{val_to_find};
+    auto predicate = cuda::equal_to_value<input_t>{val_to_find};
     find_if(c_it, thrust::raw_pointer_cast(out_result.data()), predicate, num_items);
     REQUIRE(expected_if_found == out_result[0]);
   }
@@ -189,16 +190,84 @@ C2H_TEST("Device find_if works with non primitive iterator", "[device][find_if]"
   { // transform_iterator of counting_iterator input and thrust device_ptr output
     auto t_it = cuda::make_transform_iterator(c_it, ::cuda::std::negate{});
     c2h::device_vector<offset_t> out_result(1, thrust::no_init);
-    auto predicate = thrust::detail::equal_to_value<input_t>{-val_to_find};
+    auto predicate = cuda::equal_to_value<input_t>{-val_to_find};
     find_if(t_it, out_result.data(), predicate, num_items);
     REQUIRE(expected_if_found == out_result[0]);
   }
 
   { // counting_iterator input and transform_output_iterator output
     c2h::device_vector<offset_t> out_result(1, thrust::no_init);
-    auto predicate = thrust::detail::equal_to_value<input_t>{val_to_find};
+    auto predicate = cuda::equal_to_value<input_t>{val_to_find};
     auto out_it    = cuda::make_transform_output_iterator(out_result.begin(), ::cuda::std::negate{});
     find_if(c_it, out_it, predicate, num_items);
     REQUIRE(-expected_if_found == out_result[0]);
   }
+}
+
+struct NotDefaultConstructible
+{
+  int value_;
+
+  __host__ __device__ constexpr explicit NotDefaultConstructible(int value)
+      : value_(value)
+  {}
+
+  __host__ __device__ friend constexpr bool
+  operator==(const NotDefaultConstructible& lhs, const NotDefaultConstructible& rhs)
+  {
+    return lhs.value_ == rhs.value_;
+  }
+  __host__ __device__ friend constexpr bool
+  operator!=(const NotDefaultConstructible& lhs, const NotDefaultConstructible& rhs)
+  {
+    return lhs.value_ != rhs.value_;
+  }
+
+  __host__ __device__ constexpr operator int() const noexcept
+  {
+    return value_;
+  }
+};
+
+struct index_to_value
+{
+  __host__ __device__ NotDefaultConstructible operator()(int i)
+  {
+    return NotDefaultConstructible{static_cast<int>(i)};
+  }
+};
+
+static_assert(!cuda::std::is_default_constructible_v<NotDefaultConstructible>,
+              "NotDefaultConstructible should not be default constructible");
+
+C2H_TEST("Device find_if works with non default constructible types", "[device][find_if]")
+{
+  using input_t  = NotDefaultConstructible;
+  using offset_t = int;
+
+  constexpr offset_t min_items = 1;
+  constexpr offset_t max_items = 10'000; // 10k items for reasonable test time
+
+  // Generate the input sizes to test for
+  const offset_t num_items = GENERATE_COPY(
+    take(1, random(min_items, max_items)),
+    values({
+      min_items,
+      max_items,
+    }));
+  const auto val_to_find = static_cast<int>(num_items - 1);
+
+  CAPTURE(num_items, val_to_find);
+
+  // raw device iterator to some device vector so that vectorized path is taken
+  c2h::device_vector<input_t> d_vec(num_items, NotDefaultConstructible(0));
+
+  // fill with arbitrary values dont use c2h gen because NotDefaultConstructible is not default constructible
+  thrust::tabulate(c2h::device_policy, d_vec.begin(), d_vec.end(), index_to_value{});
+
+  auto it = thrust::raw_pointer_cast(d_vec.data());
+  c2h::device_vector<offset_t> out_result(1, thrust::no_init);
+  auto predicate = cuda::equal_to_value<NotDefaultConstructible>{NotDefaultConstructible{val_to_find}};
+  find_if(it, thrust::raw_pointer_cast(out_result.data()), predicate, num_items);
+  REQUIRE(val_to_find == out_result[0]);
 }

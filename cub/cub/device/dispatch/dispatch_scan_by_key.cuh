@@ -36,6 +36,10 @@
 #include <cuda/std/__type_traits/is_same.h>
 #include <cuda/std/__type_traits/is_unsigned.h>
 
+_CCCL_DIAG_PUSH
+_CCCL_DIAG_SUPPRESS_GCC("-Wattributes") // __visibility__ attribute ignored
+_CCCL_DIAG_SUPPRESS_NVHPC(attribute_requires_external_linkage)
+
 CUB_NAMESPACE_BEGIN
 
 /******************************************************************************
@@ -161,9 +165,8 @@ CUB_DETAIL_KERNEL_ATTRIBUTES void DeviceScanByKeyInitKernel(
   // Initialize tile status
   tile_state.InitializeStatus(num_tiles);
 
-  const unsigned tid      = threadIdx.x + blockDim.x * blockIdx.x;
+  const int tid           = blockDim.x * blockIdx.x + threadIdx.x;
   const OffsetT tile_base = static_cast<OffsetT>(tid) * items_per_tile;
-
   if (tid > 0 && tid < num_tiles)
   {
     d_keys_prev_in[tid] = d_keys_in[tile_base - 1];
@@ -383,11 +386,9 @@ struct DispatchScanByKey
 #endif // CUB_DEBUG_LOG
 
     // Invoke init_kernel to initialize tile descriptors
-    THRUST_NS_QUALIFIER::cuda_cub::detail::triple_chevron(init_grid_size, INIT_KERNEL_THREADS, 0, stream)
-      .doit(init_kernel, tile_state, d_keys_in, d_keys_prev_in, static_cast<OffsetT>(tile_size), num_tiles);
-
-    // Check for failure to launch
-    if (const auto error = CubDebug(cudaPeekAtLastError()))
+    if (const auto error = CubDebug(
+          THRUST_NS_QUALIFIER::cuda_cub::detail::triple_chevron(init_grid_size, INIT_KERNEL_THREADS, 0, stream)
+            .doit(init_kernel, tile_state, d_keys_in, d_keys_prev_in, static_cast<OffsetT>(tile_size), num_tiles)))
     {
       return error;
     }
@@ -421,21 +422,19 @@ struct DispatchScanByKey
 #endif // CUB_DEBUG_LOG
 
       // Invoke scan_kernel
-      THRUST_NS_QUALIFIER::cuda_cub::detail::triple_chevron(scan_grid_size, Policy::BLOCK_THREADS, 0, stream)
-        .doit(scan_kernel,
-              d_keys_in,
-              d_keys_prev_in,
-              d_values_in,
-              d_values_out,
-              tile_state,
-              start_tile,
-              equality_op,
-              scan_op,
-              init_value,
-              num_items);
-
-      // Check for failure to launch
-      if (const auto error = CubDebug(cudaPeekAtLastError()))
+      if (const auto error = CubDebug(
+            THRUST_NS_QUALIFIER::cuda_cub::detail::triple_chevron(scan_grid_size, Policy::BLOCK_THREADS, 0, stream)
+              .doit(scan_kernel,
+                    d_keys_in,
+                    d_keys_prev_in,
+                    d_values_in,
+                    d_values_out,
+                    tile_state,
+                    start_tile,
+                    equality_op,
+                    scan_op,
+                    init_value,
+                    num_items)))
       {
         return error;
       }
@@ -543,3 +542,5 @@ struct DispatchScanByKey
 };
 
 CUB_NAMESPACE_END
+
+_CCCL_DIAG_POP

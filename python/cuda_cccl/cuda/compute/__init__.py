@@ -2,6 +2,8 @@
 #
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+from __future__ import annotations
+
 from ._bindings import _BINDINGS_AVAILABLE  # type: ignore[attr-defined]
 
 if not _BINDINGS_AVAILABLE:
@@ -21,10 +23,12 @@ else:
         exclusive_scan,
         histogram_even,
         inclusive_scan,
+        lower_bound,
         make_binary_transform,
         make_exclusive_scan,
         make_histogram_even,
         make_inclusive_scan,
+        make_lower_bound,
         make_merge_sort,
         make_radix_sort,
         make_reduce_into,
@@ -34,6 +38,7 @@ else:
         make_three_way_partition,
         make_unary_transform,
         make_unique_by_key,
+        make_upper_bound,
         merge_sort,
         radix_sort,
         reduce_into,
@@ -43,6 +48,7 @@ else:
         three_way_partition,
         unary_transform,
         unique_by_key,
+        upper_bound,
     )
     from .determinism import Determinism
     from .iterators import (
@@ -52,6 +58,7 @@ else:
         DiscardIterator,
         PermutationIterator,
         ReverseIterator,
+        ShuffleIterator,
         TransformIterator,
         TransformOutputIterator,
         ZipIterator,
@@ -72,11 +79,13 @@ else:
         "gpu_struct",
         "histogram_even",
         "inclusive_scan",
+        "lower_bound",
         "make_binary_transform",
         "make_exclusive_scan",
         "make_select",
         "make_histogram_even",
         "make_inclusive_scan",
+        "make_lower_bound",
         "make_merge_sort",
         "make_radix_sort",
         "make_reduce_into",
@@ -85,6 +94,7 @@ else:
         "make_three_way_partition",
         "make_unary_transform",
         "make_unique_by_key",
+        "make_upper_bound",
         "merge_sort",
         "OpKind",
         "Determinism",
@@ -92,6 +102,7 @@ else:
         "radix_sort",
         "reduce_into",
         "ReverseIterator",
+        "ShuffleIterator",
         "segmented_reduce",
         "segmented_sort",
         "select",
@@ -101,5 +112,6 @@ else:
         "three_way_partition",
         "unary_transform",
         "unique_by_key",
+        "upper_bound",
         "ZipIterator",
     ]

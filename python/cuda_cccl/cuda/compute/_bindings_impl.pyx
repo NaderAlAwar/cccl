@@ -1,3 +1,8 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. ALL RIGHTS RESERVED.
+#
+#
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
 # distutils: language = c++
 # cython: language_level=3
 # cython: linetrace=True
@@ -8,6 +13,7 @@
 
 from libc.string cimport memset, memcpy
 from libc.stdint cimport uint8_t, uint32_t, uint64_t, int64_t, uintptr_t
+from libc.stdlib cimport malloc, free
 from cpython.bytes cimport PyBytes_FromStringAndSize
 
 from cpython.buffer cimport (
@@ -95,6 +101,9 @@ cdef extern from "cccl/c/types.h":
         size_t size
         size_t alignment
         void *state
+        const char** extra_ltoirs
+        size_t* extra_ltoir_sizes
+        size_t num_extra_ltoirs
 
     cdef struct cccl_value_t:
         cccl_type_info type
@@ -130,6 +139,10 @@ cdef extern from "cccl/c/types.h":
         RUN_TO_RUN "CCCL_RUN_TO_RUN"
         GPU_TO_GPU "CCCL_GPU_TO_GPU"
 
+    cpdef enum cccl_binary_search_mode_t:
+        LOWER_BOUND "CCCL_BINARY_SEARCH_LOWER_BOUND"
+        UPPER_BOUND "CCCL_BINARY_SEARCH_UPPER_BOUND"
+
 cdef void arg_type_check(
     str arg_name,
     object expected_type,
@@ -147,6 +160,7 @@ IteratorKind = cccl_iterator_kind_t
 SortOrder = cccl_sort_order_t
 InitKind = cccl_init_kind_t
 Determinism = cccl_determinism_t
+BinarySearchMode = cccl_binary_search_mode_t
 
 cdef void _validate_alignment(int alignment) except *:
     """
@@ -182,20 +196,26 @@ cdef class Op:
             State for the stateful operation.
         state_alignment (int, optional):
             Alignment of the state struct. Default: `1`.
+        extra_ltoirs (list of bytes, optional):
+            Additional LTOIR modules to link with this operation.
     """
     # need Python owner of memory used for operator name
     cdef bytes op_encoded_name
     cdef bytes code_bytes
     cdef bytes state_bytes
+    cdef list extra_ltoirs_list  # Python list to keep bytes alive
+    cdef const char** extra_ltoirs_ptrs
+    cdef size_t* extra_ltoir_sizes_arr
     cdef cccl_op_t op_data
 
 
-    cdef void _set_members(self, cccl_op_kind_t op_type, str name, bytes lto_ir, bytes state, int state_alignment):
+    cdef void _set_members(self, cccl_op_kind_t op_type, str name, bytes lto_ir, bytes state, int state_alignment, list extra_ltoirs):
         memset(&self.op_data, 0, sizeof(cccl_op_t))
         # Reference Python objects in the class to ensure lifetime
         self.op_encoded_name = name.encode("utf-8")
         self.code_bytes = lto_ir
         self.state_bytes = state
+        self.extra_ltoirs_list = extra_ltoirs if extra_ltoirs else []
         # set fields of op_data struct
         self.op_data.type = op_type
         self.op_data.name = <const char *>self.op_encoded_name
@@ -206,8 +226,27 @@ cdef class Op:
         self.op_data.alignment = state_alignment
         self.op_data.state = <void *><const char *>state
 
+        # Handle extra_ltoirs
+        cdef size_t num_extra = len(self.extra_ltoirs_list)
+        if num_extra > 0:
+            self.extra_ltoirs_ptrs = <const char**>malloc(num_extra * sizeof(const char*))
+            self.extra_ltoir_sizes_arr = <size_t*>malloc(num_extra * sizeof(size_t))
+            for i in range(num_extra):
+                ltoir_bytes = <bytes>self.extra_ltoirs_list[i]
+                self.extra_ltoirs_ptrs[i] = <const char*>ltoir_bytes
+                self.extra_ltoir_sizes_arr[i] = len(ltoir_bytes)
+            self.op_data.extra_ltoirs = self.extra_ltoirs_ptrs
+            self.op_data.extra_ltoir_sizes = self.extra_ltoir_sizes_arr
+            self.op_data.num_extra_ltoirs = num_extra
+        else:
+            self.extra_ltoirs_ptrs = NULL
+            self.extra_ltoir_sizes_arr = NULL
+            self.op_data.extra_ltoirs = NULL
+            self.op_data.extra_ltoir_sizes = NULL
+            self.op_data.num_extra_ltoirs = 0
 
-    def __cinit__(self, /, *, name = None, operator_type = None, ltoir = None, state = None, state_alignment = 1):
+
+    def __cinit__(self, /, *, name = None, operator_type = None, ltoir = None, state = None, state_alignment = 1, extra_ltoirs = None):
         if name is None and ltoir is None:
             name = ""
             ltoir = b""
@@ -215,10 +254,16 @@ cdef class Op:
             state = b""
         if operator_type is None:
             operator_type = OpKind.STATELESS
+        if extra_ltoirs is None:
+            extra_ltoirs = []
         arg_type_check(arg_name="name", expected_type=str, arg=name)
         arg_type_check(arg_name="ltoir", expected_type=bytes, arg=ltoir)
         arg_type_check(arg_name="state", expected_type=bytes, arg=state)
         arg_type_check(arg_name="state_alignment", expected_type=int, arg=state_alignment)
+        arg_type_check(arg_name="extra_ltoirs", expected_type=list, arg=extra_ltoirs)
+        for i, el in enumerate(extra_ltoirs):
+            if not isinstance(el, bytes):
+                raise TypeError(f"extra_ltoirs[{i}] must be bytes, got {type(el)}")
         if not isinstance(operator_type, OpKind):
             raise TypeError(
                 f"The operator_type argument should be an enumerator of operator kinds"
@@ -229,9 +274,17 @@ cdef class Op:
             <str> name,
             <bytes> ltoir,
             <bytes> state,
-            <int> state_alignment
+            <int> state_alignment,
+            <list> extra_ltoirs
         )
 
+    def __dealloc__(self):
+        if self.extra_ltoirs_ptrs != NULL:
+            free(self.extra_ltoirs_ptrs)
+            self.extra_ltoirs_ptrs = NULL
+        if self.extra_ltoir_sizes_arr != NULL:
+            free(self.extra_ltoir_sizes_arr)
+            self.extra_ltoir_sizes_arr = NULL
 
     cdef void set_state(self, bytes state):
         self.state_bytes = state
@@ -265,6 +318,10 @@ cdef class Op:
     @property
     def state_typenum(self):
         return self.op_data.type
+
+    @property
+    def extra_ltoirs(self):
+        return self.extra_ltoirs_list
 
     def as_bytes(self):
         "Debugging utility to view memory content of library struct"
@@ -921,7 +978,7 @@ cdef class DeviceReduceBuildResult:
         if (status != 0):
             print(f"Return code {status} encountered during reduce result cleanup")
 
-    cpdef int compute(
+    cpdef size_t compute(
         DeviceReduceBuildResult self,
         temp_storage_ptr,
         temp_storage_bytes,
@@ -955,7 +1012,7 @@ cdef class DeviceReduceBuildResult:
             )
         return storage_sz
 
-    cpdef int compute_nondeterministic(
+    cpdef size_t compute_nondeterministic(
         DeviceReduceBuildResult self,
         temp_storage_ptr,
         temp_storage_bytes,
@@ -1130,7 +1187,7 @@ cdef class DeviceScanBuildResult:
         if (status != 0):
             print(f"Return code {status} encountered during scan result cleanup")
 
-    cpdef int compute_inclusive(
+    cpdef size_t compute_inclusive(
         DeviceScanBuildResult self,
         temp_storage_ptr,
         temp_storage_bytes,
@@ -1164,7 +1221,7 @@ cdef class DeviceScanBuildResult:
             )
         return storage_sz
 
-    cpdef int compute_exclusive(
+    cpdef size_t compute_exclusive(
         DeviceScanBuildResult self,
         temp_storage_ptr,
         temp_storage_bytes,
@@ -1198,7 +1255,7 @@ cdef class DeviceScanBuildResult:
             )
         return storage_sz
 
-    cpdef int compute_inclusive_future_value(
+    cpdef size_t compute_inclusive_future_value(
         DeviceScanBuildResult self,
         temp_storage_ptr,
         temp_storage_bytes,
@@ -1232,7 +1289,7 @@ cdef class DeviceScanBuildResult:
             )
         return storage_sz
 
-    cpdef int compute_exclusive_future_value(
+    cpdef size_t compute_exclusive_future_value(
         DeviceScanBuildResult self,
         temp_storage_ptr,
         temp_storage_bytes,
@@ -1266,7 +1323,7 @@ cdef class DeviceScanBuildResult:
             )
         return storage_sz
 
-    cpdef int compute_inclusive_no_init(
+    cpdef size_t compute_inclusive_no_init(
         DeviceScanBuildResult self,
         temp_storage_ptr,
         temp_storage_bytes,
@@ -1395,7 +1452,7 @@ cdef class DeviceSegmentedReduceBuildResult:
         if (status != 0):
             print(f"Return code {status} encountered during segmented_reduce result cleanup")
 
-    cpdef int compute(
+    cpdef size_t compute(
         DeviceSegmentedReduceBuildResult self,
         temp_storage_ptr,
         temp_storage_bytes,
@@ -1525,7 +1582,7 @@ cdef class DeviceMergeSortBuildResult:
         if (status != 0):
             print(f"Return code {status} encountered during merge_sort result cleanup")
 
-    cpdef int compute(
+    cpdef size_t compute(
         DeviceMergeSortBuildResult self,
         temp_storage_ptr,
         temp_storage_bytes,
@@ -1658,7 +1715,7 @@ cdef class DeviceUniqueByKeyBuildResult:
         if (status != 0):
             print(f"Return code {status} encountered during unique_by_key result cleanup")
 
-    cpdef int compute(
+    cpdef size_t compute(
         DeviceUniqueByKeyBuildResult self,
         temp_storage_ptr,
         temp_storage_bytes,
@@ -2140,7 +2197,7 @@ cdef class DeviceHistogramBuildResult:
                 f"Failed building histogram, error code: {status}"
             )
 
-    cpdef int compute_even(
+    cpdef size_t compute_even(
         DeviceHistogramBuildResult self,
         temp_storage_ptr,
         temp_storage_bytes,
@@ -2180,6 +2237,127 @@ cdef class DeviceHistogramBuildResult:
             )
         return storage_sz
 
+
+    def _get_cubin(self):
+        return PyBytes_FromStringAndSize(
+            <const char*>self.build_data.cubin,
+            self.build_data.cubin_size
+        )
+
+
+# -------------------
+#   DeviceBinarySearch
+# -------------------
+cdef extern from "cccl/c/binary_search.h":
+    cdef struct cccl_device_binary_search_build_result_t 'cccl_device_binary_search_build_result_t':
+        int cc
+        void* cubin
+        size_t cubin_size
+        CUlibrary library
+        CUkernel kernel
+
+    cdef CUresult cccl_device_binary_search_build(
+        cccl_device_binary_search_build_result_t*,
+        cccl_binary_search_mode_t,
+        cccl_iterator_t,
+        cccl_iterator_t,
+        cccl_iterator_t,
+        cccl_op_t,
+        int, int, const char*, const char*, const char*, const char*
+    ) nogil
+
+    cdef CUresult cccl_device_binary_search(
+        cccl_device_binary_search_build_result_t,
+        cccl_iterator_t,
+        uint64_t,
+        cccl_iterator_t,
+        uint64_t,
+        cccl_iterator_t,
+        cccl_op_t,
+        CUstream
+    ) nogil
+
+    cdef CUresult cccl_device_binary_search_cleanup(
+        cccl_device_binary_search_build_result_t *build_ptr
+    ) nogil
+
+
+cdef class DeviceBinarySearchBuildResult:
+    cdef cccl_device_binary_search_build_result_t build_data
+
+    def __dealloc__(DeviceBinarySearchBuildResult self):
+        cdef CUresult status = -1
+        with nogil:
+            status = cccl_device_binary_search_cleanup(&self.build_data)
+        if (status != 0):
+            print(f"Return code {status} encountered during binary_search result cleanup")
+
+    def __cinit__(
+        DeviceBinarySearchBuildResult self,
+        cccl_binary_search_mode_t mode,
+        Iterator d_data,
+        Iterator d_values,
+        Iterator d_out,
+        Op op,
+        CommonData common_data
+    ):
+        cdef CUresult status = -1
+        cdef int cc_major = common_data.get_cc_major()
+        cdef int cc_minor = common_data.get_cc_minor()
+        cdef const char *cub_path = common_data.cub_path_get_c_str()
+        cdef const char *thrust_path = common_data.thrust_path_get_c_str()
+        cdef const char *libcudacxx_path = common_data.libcudacxx_path_get_c_str()
+        cdef const char *ctk_path = common_data.ctk_path_get_c_str()
+
+        memset(&self.build_data, 0, sizeof(cccl_device_binary_search_build_result_t))
+        with nogil:
+            status = cccl_device_binary_search_build(
+                &self.build_data,
+                mode,
+                d_data.iter_data,
+                d_values.iter_data,
+                d_out.iter_data,
+                op.op_data,
+                cc_major,
+                cc_minor,
+                cub_path,
+                thrust_path,
+                libcudacxx_path,
+                ctk_path,
+            )
+        if status != 0:
+            raise RuntimeError(
+                f"Failed building binary_search, error code: {status}"
+            )
+
+    cpdef void compute(
+        DeviceBinarySearchBuildResult self,
+        Iterator d_data,
+        size_t num_items,
+        Iterator d_values,
+        size_t num_values,
+        Iterator d_out,
+        Op op,
+        stream
+    ):
+        cdef CUresult status = -1
+        cdef CUstream c_stream = <CUstream><uintptr_t>(stream) if stream else NULL
+
+        with nogil:
+            status = cccl_device_binary_search(
+                self.build_data,
+                d_data.iter_data,
+                <uint64_t>num_items,
+                d_values.iter_data,
+                <uint64_t>num_values,
+                d_out.iter_data,
+                op.op_data,
+                c_stream
+            )
+        if status != 0:
+            raise RuntimeError(
+                f"Failed executing binary_search, error code: {status}"
+            )
 
     def _get_cubin(self):
         return PyBytes_FromStringAndSize(
@@ -2281,7 +2459,7 @@ cdef class DeviceThreeWayPartitionBuildResult:
                 f"Failed building three_way_partition, error code: {status}"
             )
 
-    cpdef int compute(
+    cpdef size_t compute(
         DeviceThreeWayPartitionBuildResult self,
         temp_storage_ptr,
         temp_storage_bytes,

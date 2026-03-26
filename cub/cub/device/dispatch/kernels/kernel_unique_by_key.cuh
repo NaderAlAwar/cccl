@@ -16,6 +16,10 @@
 #include <cub/agent/agent_unique_by_key.cuh>
 #include <cub/util_vsmem.cuh>
 
+_CCCL_DIAG_PUSH
+_CCCL_DIAG_SUPPRESS_GCC("-Wattributes") // __visibility__ attribute ignored
+_CCCL_DIAG_SUPPRESS_NVHPC(attribute_requires_external_linkage)
+
 CUB_NAMESPACE_BEGIN
 
 /******************************************************************************
@@ -173,3 +177,5 @@ __launch_bounds__(int(
 } // namespace detail::unique_by_key
 
 CUB_NAMESPACE_END
+
+_CCCL_DIAG_POP

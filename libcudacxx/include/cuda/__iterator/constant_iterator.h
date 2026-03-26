@@ -21,6 +21,7 @@
 #  pragma system_header
 #endif // no system header
 
+#include <cuda/__fwd/iterator.h>
 #include <cuda/std/__iterator/concepts.h>
 #include <cuda/std/__iterator/iterator_traits.h>
 #include <cuda/std/__ranges/compressed_movable_box.h>
@@ -59,7 +60,7 @@ _CCCL_BEGIN_NAMESPACE_CUDA
 //!
 //! // and so on...
 //! @endcode
-template <class _Tp, class _Index = ::cuda::std::ptrdiff_t>
+template <class _Tp, class _Index>
 class constant_iterator
 {
 private:
@@ -289,12 +290,14 @@ public:
 #endif // !_LIBCUDACXX_HAS_NO_SPACESHIP_OPERATOR()
 };
 
+#ifndef _CCCL_DOXYGEN_INVOKED
 template <class _Tp>
 _CCCL_HOST_DEVICE constant_iterator(_Tp) -> constant_iterator<_Tp, ::cuda::std::ptrdiff_t>;
 
 _CCCL_TEMPLATE(class _Tp, typename _Index)
 _CCCL_REQUIRES(::cuda::std::__integer_like<_Index>)
 _CCCL_HOST_DEVICE constant_iterator(_Tp, _Index) -> constant_iterator<_Tp, _Index>;
+#endif // _CCCL_DOXYGEN_INVOKED
 
 //! @brief Creates a @c constant_iterator from a value and an index
 //! @param __value The value to be stored

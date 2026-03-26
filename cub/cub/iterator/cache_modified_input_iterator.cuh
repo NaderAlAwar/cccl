@@ -78,6 +78,11 @@ CUB_NAMESPACE_BEGIN
  *
  * @tparam OffsetT
  *   The difference type of this iterator (Default: @p ptrdiff_t)
+ *
+ * @rst
+ * .. versionadded:: 2.2.0
+ *    First appears in CUDA Toolkit 12.3.
+ * @endrst
  */
 template <CacheLoadModifier MODIFIER, typename ValueType, typename OffsetT = ptrdiff_t>
 class CacheModifiedInputIterator
@@ -87,6 +92,8 @@ public:
 
   /// My own type
   using self_type = CacheModifiedInputIterator;
+
+  static constexpr CacheLoadModifier __modifier = MODIFIER;
 
   /// Type to express the result of subtracting one iterator from another
   using difference_type = OffsetT;
@@ -213,6 +220,12 @@ public:
 
 namespace detail
 {
+template <typename Iterator>
+inline constexpr bool is_CacheModifiedInputIterator = false;
+
+template <CacheLoadModifier MODIFIER, typename ValueType, typename OffsetT>
+inline constexpr bool is_CacheModifiedInputIterator<CacheModifiedInputIterator<MODIFIER, ValueType, OffsetT>> = true;
+
 template <CacheLoadModifier LoadModifier, typename Iterator>
 _CCCL_HOST_DEVICE _CCCL_FORCEINLINE auto try_make_cache_modified_iterator(Iterator it)
 {

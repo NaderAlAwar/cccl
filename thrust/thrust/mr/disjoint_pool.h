@@ -1,18 +1,5 @@
-/*
- *  Copyright 2018 NVIDIA Corporation
- *
- *  Licensed under the Apache License, Version 2.0 (the "License");
- *  you may not use this file except in compliance with the License.
- *  You may obtain a copy of the License at
- *
- *      http://www.apache.org/licenses/LICENSE-2.0
- *
- *  Unless required by applicable law or agreed to in writing, software
- *  distributed under the License is distributed on an "AS IS" BASIS,
- *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- *  See the License for the specific language governing permissions and
- *  limitations under the License.
- */
+// SPDX-FileCopyrightText: Copyright (c) 2018, NVIDIA Corporation. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
 
 /*! \file
  *  \brief A caching and pooling memory resource adaptor which uses separate upstream resources for memory allocation
@@ -42,10 +29,10 @@
 #include <thrust/mr/pool_options.h>
 
 #include <cuda/__cmath/ilog.h>
-#include <cuda/__cmath/pow2.h>
+#include <cuda/__memory/is_valid_alignment.h>
 #include <cuda/std/__algorithm/max.h>
 #include <cuda/std/__algorithm/min.h>
-#include <cuda/std/__cccl/algorithm_wrapper.h>
+#include <cuda/std/__host_stdlib/algorithm>
 #include <cuda/std/cassert>
 #include <cuda/std/cstdint>
 
@@ -371,7 +358,7 @@ public:
   [[nodiscard]] void_ptr do_allocate_impl(std::size_t bytes, std::size_t alignment)
   {
     bytes = (std::max) (bytes, m_options.smallest_block_size);
-    assert(::cuda::is_power_of_two(alignment));
+    assert(::cuda::__is_valid_alignment(alignment));
 
     // an oversized and/or overaligned allocation requested; needs to be allocated separately
     if (bytes > m_options.largest_block_size || alignment > m_options.alignment)
@@ -483,7 +470,7 @@ public:
   virtual void do_deallocate(void_ptr p, std::size_t n, std::size_t alignment = THRUST_MR_DEFAULT_ALIGNMENT) override
   {
     n = (std::max) (n, m_options.smallest_block_size);
-    assert(::cuda::is_power_of_two(alignment));
+    assert(::cuda::__is_valid_alignment(alignment));
 
     // verify that the pointer is at least as aligned as claimed
     assert(reinterpret_cast<::cuda::std::intmax_t>(detail::pointer_traits<void_ptr>::get(p)) % alignment == 0);

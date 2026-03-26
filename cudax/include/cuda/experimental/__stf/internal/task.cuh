@@ -118,6 +118,15 @@ private:
     // acquire the logical_data_untypeds accessed by the task
     event_list input_events;
 
+    // We make it mutable because presumably read-only access using this list
+    // may optimize it too
+    mutable event_list ready_prereqs;
+
+    auto& get_ready_prereqs() const
+    {
+      return ready_prereqs;
+    }
+
     // A string useful for debugging purpose
     mutable ::std::string symbol;
 
@@ -130,9 +139,10 @@ private:
     // Used to uniquely identify the task for mapping purposes
     reserved::mapping_id_t mapping_id;
 
-    // This is a pointer to a generic data structure used by "unset_place" to
-    // restore previous context
-    exec_place saved_place_ctx;
+    // RAII guard for the task's execution place activation.
+    // Created in acquire_deps, destroyed in release_deps.
+    // Empty (inactive) scope when not in use.
+    exec_place_scope saved_place_ctx;
 
     // Indicate the status of the task
     task::phase phase = task::phase::setup;
@@ -347,6 +357,16 @@ public:
     return pimpl->input_events;
   }
 
+  void set_ready_prereqs(event_list _ready_prereqs)
+  {
+    pimpl->ready_prereqs = mv(_ready_prereqs);
+  }
+
+  event_list& get_ready_prereqs() const
+  {
+    return pimpl->ready_prereqs;
+  }
+
   // Get the unique task identifier
   int get_unique_id() const
   {
@@ -372,6 +392,17 @@ public:
   bool is_capture_enabled() const
   {
     return pimpl->enable_capture;
+  }
+
+  // Get the base task - for consistency with unified_task, stream_task, graph_task
+  ::cuda::experimental::stf::task& get_base_task()
+  {
+    return *this;
+  }
+
+  const ::cuda::experimental::stf::task& get_base_task() const
+  {
+    return *this;
   }
 
   /**
@@ -422,6 +453,8 @@ void dep_allocate(
 {
   auto& inst = d.get_data_instance(instance_id);
 
+  _CCCL_ASSERT(dplace.is_resolved(), "dep_allocate requires a resolved data_place");
+
   /*
    * DATA LAZY ALLOCATION
    */
@@ -452,6 +485,7 @@ void dep_allocate(
         inst.allocated_size = s;
         inst.set_allocated(true);
         inst.reclaimable = true;
+        _CCCL_ASSERT(inst.get_dplace().is_resolved(), "instance dplace must be resolved after allocation");
         break;
       }
 

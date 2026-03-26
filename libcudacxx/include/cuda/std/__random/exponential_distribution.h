@@ -20,11 +20,11 @@
 #  pragma system_header
 #endif // no system header
 
+#include <cuda/std/__cmath/logarithms.h>
 #include <cuda/std/__limits/numeric_limits.h>
 #include <cuda/std/__random/generate_canonical.h>
 #include <cuda/std/__random/is_valid.h>
 #include <cuda/std/__random/uniform_real_distribution.h>
-#include <cuda/std/cmath>
 
 #if !_CCCL_COMPILER(NVRTC)
 #  include <iosfwd>
@@ -149,7 +149,7 @@ public:
     using ios_base                            = typename ostream_type::ios_base;
     const typename ios_base::fmtflags __flags = __os.flags();
     const _CharT __fill                       = __os.fill();
-    const ::std::streamsize __precision       = __os.precision();
+    const auto __precision                    = __os.precision();
     __os.flags(ios_base::dec | ios_base::left | ios_base::scientific);
     __os.precision(numeric_limits<result_type>::max_digits10);
     __os << __x.lambda();

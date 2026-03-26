@@ -1,18 +1,5 @@
-/*
- *  Copyright 2008-2013 NVIDIA Corporation
- *
- *  Licensed under the Apache License, Version 2.0 (the "License");
- *  you may not use this file except in compliance with the License.
- *  You may obtain a copy of the License at
- *
- *      http://www.apache.org/licenses/LICENSE-2.0
- *
- *  Unless required by applicable law or agreed to in writing, software
- *  distributed under the License is distributed on an "AS IS" BASIS,
- *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- *  See the License for the specific language governing permissions and
- *  limitations under the License.
- */
+// SPDX-FileCopyrightText: Copyright (c) 2008-2013, NVIDIA Corporation. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
 
 //! \file thrust/iterator/zip_iterator.h
 //! \brief An iterator which returns a tuple of the result of dereferencing a tuple of iterators when dereferenced
@@ -46,6 +33,7 @@
 #include <thrust/type_traits/integer_sequence.h>
 
 #include <cuda/std/__iterator/advance.h>
+#include <cuda/std/__iterator/distance.h>
 #include <cuda/std/__type_traits/conditional.h>
 #include <cuda/std/__type_traits/enable_if.h>
 #include <cuda/std/__type_traits/is_constructible.h>
@@ -306,7 +294,8 @@ private:
   inline _CCCL_HOST_DEVICE typename super_t::difference_type
   distance_to(const zip_iterator<OtherIteratorTuple>& other) const
   {
-    return ::cuda::std::get<0>(other.get_iterator_tuple()) - ::cuda::std::get<0>(get_iterator_tuple());
+    return ::cuda::std::distance(
+      ::cuda::std::get<0>(get_iterator_tuple()), ::cuda::std::get<0>(other.get_iterator_tuple()));
   }
 
   // The iterator tuple.
