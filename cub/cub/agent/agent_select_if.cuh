@@ -65,13 +65,20 @@ CUB_NAMESPACE_BEGIN
  * @tparam DelayConstructorT
  *   Implementation detail, do not specify directly, requirements on the
  *   content of this type are subject to breaking change.
+ *
+ * @tparam SparseItemLoadThreshold
+ *   Maximum number of selected items in a tile for which flagged selection may
+ *   defer input item loads and gather only the selected items. Ignored by
+ *   select modes that require the input item to determine selection and by
+ *   modes that retain rejected items.
  */
 template <int BlockThreads,
           int ItemsPerThread,
           BlockLoadAlgorithm LoadAlgorithm,
           CacheLoadModifier LoadModifier,
           BlockScanAlgorithm ScanAlgorithm,
-          typename DelayConstructorT = detail::fixed_delay_constructor_t<350, 450>>
+          typename DelayConstructorT  = detail::fixed_delay_constructor_t<350, 450>,
+          int SparseItemLoadThreshold = (BlockThreads * ItemsPerThread) / 8>
 struct AgentSelectIfPolicy
 {
   /// Threads per thread block
@@ -88,6 +95,9 @@ struct AgentSelectIfPolicy
 
   /// The BlockScan algorithm to use
   static constexpr BlockScanAlgorithm SCAN_ALGORITHM = ScanAlgorithm;
+
+  /// Max selected items per tile before falling back to bulk item loads.
+  static constexpr int SPARSE_ITEM_LOAD_THRESHOLD = SparseItemLoadThreshold;
 
   struct detail
   {
@@ -250,10 +260,11 @@ struct AgentSelectIf
     USE_STENCIL_WITH_OP
   };
 
-  static constexpr ::cuda::std::int32_t BLOCK_THREADS    = AgentSelectIfPolicyT::BLOCK_THREADS;
-  static constexpr ::cuda::std::int32_t ITEMS_PER_THREAD = AgentSelectIfPolicyT::ITEMS_PER_THREAD;
-  static constexpr ::cuda::std::int32_t TILE_ITEMS       = BLOCK_THREADS * ITEMS_PER_THREAD;
-  static constexpr bool TWO_PHASE_SCATTER                = (ITEMS_PER_THREAD > 1);
+  static constexpr ::cuda::std::int32_t BLOCK_THREADS              = AgentSelectIfPolicyT::BLOCK_THREADS;
+  static constexpr ::cuda::std::int32_t ITEMS_PER_THREAD           = AgentSelectIfPolicyT::ITEMS_PER_THREAD;
+  static constexpr ::cuda::std::int32_t TILE_ITEMS                 = BLOCK_THREADS * ITEMS_PER_THREAD;
+  static constexpr ::cuda::std::int32_t SPARSE_ITEM_LOAD_THRESHOLD = AgentSelectIfPolicyT::SPARSE_ITEM_LOAD_THRESHOLD;
+  static constexpr bool TWO_PHASE_SCATTER                          = (ITEMS_PER_THREAD > 1);
 
   static constexpr bool has_select_op       = (!::cuda::std::is_same_v<SelectOpT, NullType>);
   static constexpr bool has_flags_it        = (!::cuda::std::is_same_v<FlagT, NullType>);
@@ -263,6 +274,9 @@ struct AgentSelectIf
     : has_select_op     ? USE_SELECT_OP
     : has_flags_it      ? USE_SELECT_FLAGS
                         : USE_DISCONTINUITY;
+  static constexpr bool can_sparse_load_items =
+    (SelectionOpt == SelectImpl::Select)
+    && ((SELECT_METHOD == USE_SELECT_FLAGS) || (SELECT_METHOD == USE_STENCIL_WITH_OP));
 
   // Cache-modified Input iterator wrapper type (for applying cache modifier) for items
   // Wrap the native input pointer with CacheModifiedValuesInputIterator
@@ -395,6 +409,21 @@ struct AgentSelectIf
   //---------------------------------------------------------------------
   // Utility methods for initializing the selections
   //---------------------------------------------------------------------
+
+  template <bool IS_LAST_TILE>
+  _CCCL_DEVICE _CCCL_FORCEINLINE void
+  LoadItems(OffsetT tile_offset, int num_tile_items, InputT (&items)[ITEMS_PER_THREAD])
+  {
+    if constexpr (IS_LAST_TILE)
+    {
+      BlockLoadT(temp_storage.load_items)
+        .Load((d_in + streaming_context.input_offset()) + tile_offset, items, num_tile_items);
+    }
+    else
+    {
+      BlockLoadT(temp_storage.load_items).Load((d_in + streaming_context.input_offset()) + tile_offset, items);
+    }
+  }
 
   /**
    * Initialize selections (specialized for selection operator)
@@ -583,6 +612,43 @@ struct AgentSelectIf
   // Scatter utility methods
   //---------------------------------------------------------------------
 
+  template <bool IS_LAST_TILE>
+  _CCCL_DEVICE _CCCL_FORCEINLINE void ScatterSelectedItemsSparse(
+    OffsetT tile_offset,
+    OffsetT (&selection_flags)[ITEMS_PER_THREAD],
+    OffsetT (&selection_indices)[ITEMS_PER_THREAD],
+    int num_tile_items,
+    int num_tile_selections,
+    OffsetT num_selections_prefix)
+  {
+    const auto d_tile_in = (d_in + streaming_context.input_offset()) + tile_offset;
+
+    __syncthreads();
+
+    _CCCL_PRAGMA_UNROLL_FULL()
+    for (int ITEM = 0; ITEM < ITEMS_PER_THREAD; ++ITEM)
+    {
+      const OffsetT item_offset = static_cast<OffsetT>(threadIdx.x * ITEMS_PER_THREAD + ITEM);
+
+      if (selection_flags[ITEM] && (!IS_LAST_TILE || item_offset < num_tile_items))
+      {
+        const int local_scatter_offset = static_cast<int>(selection_indices[ITEM] - num_selections_prefix);
+        temp_storage.raw_exchange.Alias()[local_scatter_offset] = d_tile_in[item_offset];
+      }
+    }
+
+    __syncthreads();
+
+    _CCCL_PRAGMA_NOUNROLL()
+    for (int item = threadIdx.x; item < num_tile_selections; item += BLOCK_THREADS)
+    {
+      *((d_selected_out + streaming_context.num_previously_selected()) + (num_selections_prefix + item)) =
+        temp_storage.raw_exchange.Alias()[item];
+    }
+
+    __syncthreads();
+  }
+
   /**
    * Scatter flagged items to output offsets (specialized for direct scattering).
    */
@@ -698,6 +764,45 @@ struct AgentSelectIf
     {
       ScatterSelectedDirect<IS_LAST_TILE>(items, selection_flags, selection_indices, num_selections);
     }
+  }
+
+  template <bool IS_LAST_TILE>
+  _CCCL_DEVICE _CCCL_FORCEINLINE void ScatterItems(
+    OffsetT tile_offset,
+    InputT (&items)[ITEMS_PER_THREAD],
+    OffsetT (&selection_flags)[ITEMS_PER_THREAD],
+    OffsetT (&selection_indices)[ITEMS_PER_THREAD],
+    int num_tile_items,
+    int num_tile_selections,
+    OffsetT num_selections_prefix,
+    OffsetT num_rejected_prefix,
+    OffsetT num_selections)
+  {
+    if constexpr (can_sparse_load_items)
+    {
+      if (num_tile_selections <= SPARSE_ITEM_LOAD_THRESHOLD)
+      {
+        ScatterSelectedItemsSparse<IS_LAST_TILE>(
+          tile_offset, selection_flags, selection_indices, num_tile_items, num_tile_selections, num_selections_prefix);
+        return;
+      }
+
+      LoadItems<IS_LAST_TILE>(tile_offset, num_tile_items, items);
+
+      // Ensure temporary storage used during the deferred item load can be reused by scatter.
+      __syncthreads();
+    }
+
+    Scatter<IS_LAST_TILE>(
+      items,
+      selection_flags,
+      selection_indices,
+      num_tile_items,
+      num_tile_selections,
+      num_selections_prefix,
+      num_rejected_prefix,
+      num_selections,
+      bool_constant_v < SelectionOpt == SelectImpl::Partition >);
   }
 
   /**
@@ -860,24 +965,19 @@ struct AgentSelectIf
     OffsetT selection_flags[ITEMS_PER_THREAD];
     OffsetT selection_indices[ITEMS_PER_THREAD];
 
-    // Load items
-    if (IS_LAST_TILE)
+    if constexpr (!can_sparse_load_items)
     {
-      BlockLoadT(temp_storage.load_items)
-        .Load((d_in + streaming_context.input_offset()) + tile_offset, items, num_tile_items);
-    }
-    else
-    {
-      BlockLoadT(temp_storage.load_items).Load((d_in + streaming_context.input_offset()) + tile_offset, items);
+      LoadItems<IS_LAST_TILE>(tile_offset, num_tile_items, items);
     }
 
     // Initialize selection_flags
     InitializeSelections<true, IS_LAST_TILE>(
       tile_offset, num_tile_items, items, selection_flags, constant_v<SELECT_METHOD>);
 
-    // Ensure temporary storage used during block load can be reused
-    // Also, in case of in-place stream compaction, this is needed to order the loads of
-    // *all threads of this thread block* before the st.release of the thread writing this thread block's tile state
+    // Ensure temporary storage used during selection initialization can be reused.
+    // Also, in case of in-place stream compaction, this is needed to order the item
+    // loads of *all threads of this thread block* before the st.release of the
+    // thread writing this thread block's tile state.
     __syncthreads();
 
     // Exclusive scan of selection_flags
@@ -899,8 +999,8 @@ struct AgentSelectIf
       num_tile_selections -= (TILE_ITEMS - num_tile_items);
     }
 
-    // Scatter flagged items
-    Scatter<IS_LAST_TILE>(
+    ScatterItems<IS_LAST_TILE>(
+      tile_offset,
       items,
       selection_flags,
       selection_indices,
@@ -908,8 +1008,7 @@ struct AgentSelectIf
       num_tile_selections,
       0,
       0,
-      num_tile_selections,
-      bool_constant_v < SelectionOpt == SelectImpl::Partition >);
+      num_tile_selections);
 
     return num_tile_selections;
   }
@@ -940,24 +1039,19 @@ struct AgentSelectIf
     OffsetT selection_flags[ITEMS_PER_THREAD];
     OffsetT selection_indices[ITEMS_PER_THREAD];
 
-    // Load items
-    if (IS_LAST_TILE)
+    if constexpr (!can_sparse_load_items)
     {
-      BlockLoadT(temp_storage.load_items)
-        .Load((d_in + streaming_context.input_offset()) + tile_offset, items, num_tile_items);
-    }
-    else
-    {
-      BlockLoadT(temp_storage.load_items).Load((d_in + streaming_context.input_offset()) + tile_offset, items);
+      LoadItems<IS_LAST_TILE>(tile_offset, num_tile_items, items);
     }
 
     // Initialize selection_flags
     InitializeSelections<false, IS_LAST_TILE>(
       tile_offset, num_tile_items, items, selection_flags, constant_v<SELECT_METHOD>);
 
-    // Ensure temporary storage used during block load can be reused
-    // Also, in case of in-place stream compaction, this is needed to order the loads of
-    // *all threads of this thread block* before the st.release of the thread writing this thread block's tile state
+    // Ensure temporary storage used during selection initialization can be reused.
+    // Also, in case of in-place stream compaction, this is needed to order the item
+    // loads of *all threads of this thread block* before the st.release of the
+    // thread writing this thread block's tile state.
     __syncthreads();
 
     // Exclusive scan of values and selection_flags
@@ -983,7 +1077,8 @@ struct AgentSelectIf
     // previous tiles' input items, in case of in-place compaction), because this is implicitly ensured through
     // execution dependency: The scatter stage requires the offset from the prefix-sum and it can only know the
     // prefix-sum after having read that from the decoupled look-back. Scatter flagged items
-    Scatter<IS_LAST_TILE>(
+    ScatterItems<IS_LAST_TILE>(
+      tile_offset,
       items,
       selection_flags,
       selection_indices,
@@ -991,8 +1086,7 @@ struct AgentSelectIf
       num_tile_selections,
       num_selections_prefix,
       num_rejected_prefix,
-      num_selections,
-      bool_constant_v < SelectionOpt == SelectImpl::Partition >);
+      num_selections);
 
     return num_selections;
   }

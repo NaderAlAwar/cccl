@@ -43,7 +43,8 @@ template <int BlockThreads,
           cub::BlockLoadAlgorithm LoadAlgorithm = cub::BLOCK_LOAD_DIRECT,
           cub::CacheLoadModifier LoadModifier   = cub::LOAD_LDG,
           cub::BlockScanAlgorithm ScanAlgorithm = cub::BLOCK_SCAN_WARP_SCANS,
-          typename DelayConstructorT            = detail::fixed_delay_constructor_t<350, 450>>
+          typename DelayConstructorT            = detail::fixed_delay_constructor_t<350, 450>,
+          int SparseValueLoadThreshold          = (BlockThreads * ItemsPerThread) / 8>
 struct AgentUniqueByKeyPolicy
 {
   static constexpr int BLOCK_THREADS                      = BlockThreads;
@@ -51,6 +52,7 @@ struct AgentUniqueByKeyPolicy
   static constexpr cub::BlockLoadAlgorithm LOAD_ALGORITHM = LoadAlgorithm;
   static constexpr cub::CacheLoadModifier LOAD_MODIFIER   = LoadModifier;
   static constexpr cub::BlockScanAlgorithm SCAN_ALGORITHM = ScanAlgorithm;
+  static constexpr int SPARSE_VALUE_LOAD_THRESHOLD        = SparseValueLoadThreshold;
 
   struct detail
   {
@@ -74,7 +76,8 @@ CUB_DETAIL_POLICY_WRAPPER_DEFINE(
   (ITEMS_PER_THREAD, ItemsPerThread, int),
   (LOAD_ALGORITHM, LoadAlgorithm, cub::BlockLoadAlgorithm),
   (LOAD_MODIFIER, LoadModifier, cub::CacheLoadModifier),
-  (SCAN_ALGORITHM, ScanAlgorithm, cub::BlockScanAlgorithm))
+  (SCAN_ALGORITHM, ScanAlgorithm, cub::BlockScanAlgorithm),
+  (SPARSE_VALUE_LOAD_THRESHOLD, SparseValueLoadThreshold, int) )
 } // namespace detail
 #endif // defined(CUB_DEFINE_RUNTIME_POLICIES) || defined(CUB_ENABLE_POLICY_PTX_JSON)
 
@@ -130,9 +133,10 @@ struct AgentUniqueByKey
   using ScanTileStateT = ScanTileState<OffsetT>;
 
   // Constants
-  static constexpr int BLOCK_THREADS    = AgentUniqueByKeyPolicyT::BLOCK_THREADS;
-  static constexpr int ITEMS_PER_THREAD = AgentUniqueByKeyPolicyT::ITEMS_PER_THREAD;
-  static constexpr int ITEMS_PER_TILE   = BLOCK_THREADS * ITEMS_PER_THREAD;
+  static constexpr int BLOCK_THREADS               = AgentUniqueByKeyPolicyT::BLOCK_THREADS;
+  static constexpr int ITEMS_PER_THREAD            = AgentUniqueByKeyPolicyT::ITEMS_PER_THREAD;
+  static constexpr int ITEMS_PER_TILE              = BLOCK_THREADS * ITEMS_PER_THREAD;
+  static constexpr int SPARSE_VALUE_LOAD_THRESHOLD = AgentUniqueByKeyPolicyT::SPARSE_VALUE_LOAD_THRESHOLD;
 
   // Cache-modified Input iterator wrapper type (for applying cache modifier) for keys
   using WrappedKeyInputIteratorT = ::cuda::std::conditional_t<
@@ -287,6 +291,80 @@ struct AgentUniqueByKey
     __syncthreads();
   }
 
+  template <bool IS_LAST_TILE>
+  _CCCL_DEVICE _CCCL_FORCEINLINE void ScatterSelectedValues(
+    OffsetT tile_offset,
+    OffsetT (&selection_flags)[ITEMS_PER_THREAD],
+    OffsetT (&selection_indices)[ITEMS_PER_THREAD],
+    int num_tile_items,
+    int num_tile_selections,
+    OffsetT num_selections_prefix)
+  {
+    _CCCL_PRAGMA_UNROLL_FULL()
+    for (int ITEM = 0; ITEM < ITEMS_PER_THREAD; ++ITEM)
+    {
+      const OffsetT item_offset = static_cast<OffsetT>(threadIdx.x * ITEMS_PER_THREAD + ITEM);
+
+      if (selection_flags[ITEM] && (!IS_LAST_TILE || item_offset < num_tile_items))
+      {
+        const int local_scatter_offset = static_cast<int>(selection_indices[ITEM] - num_selections_prefix);
+        GetShared(ValueTagT())[local_scatter_offset] = d_values_in[tile_offset + item_offset];
+      }
+    }
+
+    __syncthreads();
+
+    _CCCL_PRAGMA_NOUNROLL()
+    for (int item = threadIdx.x; item < num_tile_selections; item += BLOCK_THREADS)
+    {
+      d_values_out[num_selections_prefix + item] = GetShared(ValueTagT())[item];
+    }
+
+    __syncthreads();
+  }
+
+  template <bool IS_LAST_TILE>
+  _CCCL_DEVICE _CCCL_FORCEINLINE void ScatterValues(
+    OffsetT tile_offset,
+    OffsetT (&selection_flags)[ITEMS_PER_THREAD],
+    OffsetT (&selection_indices)[ITEMS_PER_THREAD],
+    int num_tile_items,
+    int num_tile_selections,
+    OffsetT num_selections_prefix,
+    OffsetT num_selections)
+  {
+    if (num_tile_selections <= SPARSE_VALUE_LOAD_THRESHOLD)
+    {
+      ScatterSelectedValues<IS_LAST_TILE>(
+        tile_offset, selection_flags, selection_indices, num_tile_items, num_tile_selections, num_selections_prefix);
+      return;
+    }
+
+    ValueT values[ITEMS_PER_THREAD];
+    if constexpr (IS_LAST_TILE)
+    {
+      // Fill last elements with the first element because collectives are not suffix guarded.
+      BlockLoadValues(temp_storage.load_values)
+        .Load(d_values_in + tile_offset, values, num_tile_items, *(d_values_in + tile_offset));
+    }
+    else
+    {
+      BlockLoadValues(temp_storage.load_values).Load(d_values_in + tile_offset, values);
+    }
+
+    __syncthreads();
+
+    Scatter(ValueTagT(),
+            d_values_out,
+            values,
+            selection_flags,
+            selection_indices,
+            num_tile_items,
+            num_tile_selections,
+            num_selections_prefix,
+            num_selections);
+  }
+
   //---------------------------------------------------------------------
   // Cooperatively scan a device-wide sequence of tiles with other CTAs
   //---------------------------------------------------------------------
@@ -323,21 +401,6 @@ struct AgentUniqueByKey
     else
     {
       BlockLoadKeys(temp_storage.load_keys).Load(d_keys_in + tile_offset, keys);
-    }
-
-    __syncthreads();
-
-    ValueT values[ITEMS_PER_THREAD];
-    if constexpr (IS_LAST_TILE)
-    {
-      // Fill last elements with the first element
-      // because collectives are not suffix guarded
-      BlockLoadValues(temp_storage.load_values)
-        .Load(d_values_in + tile_offset, values, num_tile_items, *(d_values_in + tile_offset));
-    }
-    else
-    {
-      BlockLoadValues(temp_storage.load_values).Load(d_values_in + tile_offset, values);
     }
 
     __syncthreads();
@@ -393,15 +456,14 @@ struct AgentUniqueByKey
 
     __syncthreads();
 
-    Scatter(ValueTagT(),
-            d_values_out,
-            values,
-            selection_flags,
-            selection_idx,
-            num_tile_items,
-            num_tile_selections,
-            num_selections_prefix,
-            num_selections);
+    ScatterValues<IS_LAST_TILE>(
+      tile_offset,
+      selection_flags,
+      selection_idx,
+      num_tile_items,
+      num_tile_selections,
+      num_selections_prefix,
+      num_selections);
 
     return num_selections;
   }
@@ -441,21 +503,6 @@ struct AgentUniqueByKey
     else
     {
       BlockLoadKeys(temp_storage.load_keys).Load(d_keys_in + tile_offset, keys);
-    }
-
-    __syncthreads();
-
-    ValueT values[ITEMS_PER_THREAD];
-    if constexpr (IS_LAST_TILE)
-    {
-      // Fill last elements with the first element
-      // because collectives are not suffix guarded
-      BlockLoadValues(temp_storage.load_values)
-        .Load(d_values_in + tile_offset, values, num_tile_items, *(d_values_in + tile_offset));
-    }
-    else
-    {
-      BlockLoadValues(temp_storage.load_values).Load(d_values_in + tile_offset, values);
     }
 
     __syncthreads();
@@ -508,15 +555,14 @@ struct AgentUniqueByKey
 
     __syncthreads();
 
-    Scatter(ValueTagT(),
-            d_values_out,
-            values,
-            selection_flags,
-            selection_idx,
-            num_tile_items,
-            num_tile_selections,
-            num_selections_prefix,
-            num_selections);
+    ScatterValues<IS_LAST_TILE>(
+      tile_offset,
+      selection_flags,
+      selection_idx,
+      num_tile_items,
+      num_tile_selections,
+      num_selections_prefix,
+      num_selections);
 
     return num_selections;
   }

@@ -1469,8 +1469,36 @@ constexpr distinct_partitions is_distinct_partitions()
 template <class InputT, class FlagT, class OffsetT, bool DistinctPartitions, SelectImpl Impl>
 struct policy_hub
 {
-  static constexpr bool may_alias    = Impl == SelectImpl::SelectPotentiallyInPlace;
-  static constexpr bool keep_rejects = Impl == SelectImpl::Partition;
+  static constexpr bool may_alias                       = Impl == SelectImpl::SelectPotentiallyInPlace;
+  static constexpr bool keep_rejects                    = Impl == SelectImpl::Partition;
+  static constexpr int default_sparse_item_load_divisor = sizeof(InputT) >= 8 ? 8 : 16;
+
+  template <typename Tuning, typename = void>
+  struct sparse_item_load_divisor_or
+  {
+    static constexpr int value = default_sparse_item_load_divisor;
+  };
+
+  template <typename Tuning>
+  struct sparse_item_load_divisor_or<Tuning, ::cuda::std::void_t<decltype(Tuning::sparse_item_load_divisor)>>
+  {
+    static constexpr int value = Tuning::sparse_item_load_divisor;
+  };
+
+  template <int Threads,
+            int Items,
+            BlockLoadAlgorithm LoadAlgorithm,
+            CacheLoadModifier LoadModifier,
+            typename DelayConstructorT,
+            int SparseItemLoadDivisor = default_sparse_item_load_divisor>
+  using select_if_policy_t = AgentSelectIfPolicy<
+    Threads,
+    Items,
+    LoadAlgorithm,
+    LoadModifier,
+    BLOCK_SCAN_WARP_SCANS,
+    DelayConstructorT,
+    ((Threads * Items) / SparseItemLoadDivisor > 0 ? (Threads * Items) / SparseItemLoadDivisor : 1)>;
 
   template <CacheLoadModifier LoadModifier>
   struct DefaultPolicy
@@ -1479,12 +1507,11 @@ struct policy_hub
     static constexpr int items_per_thread =
       ::cuda::std::clamp(nominal_4B_items_per_thread * 4 / int{sizeof(InputT)}, 1, nominal_4B_items_per_thread);
     using SelectIfPolicyT =
-      AgentSelectIfPolicy<128,
-                          items_per_thread,
-                          BLOCK_LOAD_DIRECT,
-                          LoadModifier,
-                          BLOCK_SCAN_WARP_SCANS,
-                          detail::fixed_delay_constructor_t<350, 450>>;
+      select_if_policy_t<128,
+                         items_per_thread,
+                         BLOCK_LOAD_DIRECT,
+                         LoadModifier,
+                         detail::fixed_delay_constructor_t<350, 450>>;
   };
 
   // nvbug5935129: GCC-11.2 cannot directly use DefaultPolicy inside Policy500
@@ -1498,12 +1525,12 @@ struct policy_hub
   // Use values from tuning if a specialization exists, otherwise pick the default
   template <typename Tuning>
   static auto select_agent_policy(int)
-    -> AgentSelectIfPolicy<Tuning::threads,
-                           Tuning::items,
-                           Tuning::load_algorithm,
-                           LOAD_DEFAULT,
-                           BLOCK_SCAN_WARP_SCANS,
-                           typename Tuning::delay_constructor>;
+    -> select_if_policy_t<Tuning::threads,
+                          Tuning::items,
+                          Tuning::load_algorithm,
+                          LOAD_DEFAULT,
+                          typename Tuning::delay_constructor,
+                          sparse_item_load_divisor_or<Tuning>::value>;
   template <typename Tuning>
   static auto select_agent_policy(long) -> typename DefaultPolicy<LOAD_DEFAULT>::SelectIfPolicyT;
 
@@ -1542,12 +1569,12 @@ struct policy_hub
     // Use values from tuning if a specialization exists, otherwise pick Policy900
     template <typename Tuning>
     static auto select_agent_policy100(int)
-      -> AgentSelectIfPolicy<Tuning::threads,
-                             Nominal4BItemsToItems<InputT>(Tuning::nominal_4b_items),
-                             Tuning::load_algorithm,
-                             Tuning::load_modifier,
-                             BLOCK_SCAN_WARP_SCANS,
-                             typename Tuning::delay_constructor>;
+      -> select_if_policy_t<Tuning::threads,
+                            Nominal4BItemsToItems<InputT>(Tuning::nominal_4b_items),
+                            Tuning::load_algorithm,
+                            Tuning::load_modifier,
+                            typename Tuning::delay_constructor,
+                            sparse_item_load_divisor_or<Tuning>::value>;
     template <typename Tuning>
     static auto select_agent_policy100(long) -> typename Policy900::SelectIfPolicyT;
 

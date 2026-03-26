@@ -784,16 +784,44 @@ _CCCL_HOST_DEVICE UniqueByKeyPolicyWrapper<PolicyT> MakeUniqueByKeyPolicyWrapper
 template <class KeyT, class ValueT>
 struct policy_hub
 {
+  static constexpr int default_sparse_value_load_divisor = sizeof(ValueT) >= 8 ? 8 : 16;
+
+  template <typename Tuning, typename = void>
+  struct sparse_value_load_divisor_or
+  {
+    static constexpr int value = default_sparse_value_load_divisor;
+  };
+
+  template <typename Tuning>
+  struct sparse_value_load_divisor_or<Tuning, ::cuda::std::void_t<decltype(Tuning::sparse_value_load_divisor)>>
+  {
+    static constexpr int value = Tuning::sparse_value_load_divisor;
+  };
+
+  template <int Threads,
+            int Items,
+            cub::BlockLoadAlgorithm LoadAlgorithm,
+            cub::CacheLoadModifier LoadModifier,
+            typename DelayConstructorT,
+            int SparseValueLoadDivisor = default_sparse_value_load_divisor>
+  using unique_by_key_policy_t = AgentUniqueByKeyPolicy<
+    Threads,
+    Items,
+    LoadAlgorithm,
+    LoadModifier,
+    BLOCK_SCAN_WARP_SCANS,
+    DelayConstructorT,
+    ((Threads * Items) / SparseValueLoadDivisor > 0 ? (Threads * Items) / SparseValueLoadDivisor : 1)>;
+
   template <int Nominal4bItemsPerThread, int Threads>
   struct DefaultPolicy
   {
     static constexpr int items_per_thread = Nominal4BItemsToItems<KeyT>(Nominal4bItemsPerThread);
     using UniqueByKeyPolicyT =
-      AgentUniqueByKeyPolicy<Threads,
+      unique_by_key_policy_t<Threads,
                              items_per_thread,
                              BLOCK_LOAD_WARP_TRANSPOSE,
                              LOAD_LDG,
-                             BLOCK_SCAN_WARP_SCANS,
                              detail::default_delay_constructor_t<int>>;
   };
 
@@ -808,12 +836,12 @@ struct policy_hub
   // Use values from tuning if a specialization exists, otherwise pick the default
   template <typename Tuning>
   static _CCCL_HOST_DEVICE auto select_agent_policy(int)
-    -> AgentUniqueByKeyPolicy<Tuning::threads,
+    -> unique_by_key_policy_t<Tuning::threads,
                               Tuning::items,
                               Tuning::load_algorithm,
                               Tuning::load_modifier,
-                              BLOCK_SCAN_WARP_SCANS,
-                              typename Tuning::delay_constructor>;
+                              typename Tuning::delay_constructor,
+                              sparse_value_load_divisor_or<Tuning>::value>;
   template <typename Tuning>
   static _CCCL_HOST_DEVICE auto select_agent_policy(long) -> typename DefaultPolicy<11, 64>::UniqueByKeyPolicyT;
 
@@ -848,12 +876,12 @@ struct policy_hub
     // Use values from tuning if a specialization exists, otherwise pick Policy900
     template <typename Tuning>
     static _CCCL_HOST_DEVICE auto select_agent_policy100(int)
-      -> AgentUniqueByKeyPolicy<Tuning::threads,
+      -> unique_by_key_policy_t<Tuning::threads,
                                 Tuning::items,
                                 Tuning::load_algorithm,
                                 Tuning::load_modifier,
-                                BLOCK_SCAN_WARP_SCANS,
-                                typename Tuning::delay_constructor>;
+                                typename Tuning::delay_constructor,
+                                sparse_value_load_divisor_or<Tuning>::value>;
     template <typename Tuning>
     static _CCCL_HOST_DEVICE auto select_agent_policy100(long) -> typename Policy900::UniqueByKeyPolicyT;
 
