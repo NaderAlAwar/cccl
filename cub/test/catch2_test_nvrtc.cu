@@ -57,6 +57,7 @@ TEST_CASE("Test nvrtc", "[test][nvrtc]")
     #include <cub/device/dispatch/kernels/kernel_merge_sort.cuh>
     #include <cub/device/dispatch/kernels/kernel_segmented_reduce.cuh>
     #include <cub/device/dispatch/kernels/kernel_radix_sort.cuh>
+    #include <cub/device/dispatch/kernels/kernel_select_if.cuh>
     #include <cub/device/dispatch/kernels/kernel_unique_by_key.cuh>
     #include <cub/device/dispatch/kernels/kernel_transform.cuh>
     #include <cub/device/dispatch/kernels/kernel_histogram.cuh>
