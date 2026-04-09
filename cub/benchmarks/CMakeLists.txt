@@ -4,6 +4,35 @@ cccl_get_nvbench_helper()
 
 set(benches_root "${CMAKE_CURRENT_LIST_DIR}")
 
+set(
+  FLASHINFER_ROOT
+  ""
+  CACHE PATH
+  "Path to FlashInfer repo root for CUB benchmarks."
+)
+set(
+  TRTLLM_ROOT
+  ""
+  CACHE PATH
+  "Path to TensorRT-LLM repo root for CUB benchmarks."
+)
+set(
+  TRTLLM_LIB_DIR
+  ""
+  CACHE PATH
+  "Path to TensorRT-LLM installed libraries for CUB benchmarks."
+)
+set(
+  TRTLLM_TENSORRT_INCLUDE_DIR
+  "/usr/local/tensorrt/include"
+  CACHE PATH
+  "Path to TensorRT headers for TensorRT-LLM CUB benchmarks."
+)
+
+if (TRTLLM_ROOT OR TRTLLM_LIB_DIR)
+  find_package(CUDAToolkit REQUIRED)
+endif()
+
 if (NOT CMAKE_BUILD_TYPE STREQUAL "Release")
   set(message_type FATAL_ERROR)
   if (CCCL_ENABLE_CLANG_TIDY)
@@ -93,9 +122,67 @@ function(add_bench target_name bench_name bench_src)
   target_link_libraries(
     ${bench_target}
     PRIVATE #
+      CCCL::CCCL
       cccl.nvbench_helper
       nvbench::main
   )
+
+  get_filename_component(bench_basename "${bench_src}" NAME_WLE)
+
+  if (bench_basename MATCHES "^flashinfer_")
+    target_include_directories(
+      ${bench_target}
+      PRIVATE "${FLASHINFER_ROOT}/include"
+    )
+    target_compile_options(
+      ${bench_target}
+      PRIVATE "$<$<COMPILE_LANGUAGE:CUDA>:--expt-relaxed-constexpr>"
+    )
+  endif()
+
+  if (bench_basename MATCHES "trtllm")
+    target_link_libraries(
+      ${bench_target}
+      PRIVATE CUDA::toolkit "${TRTLLM_LIB_DIR}/libtensorrt_llm.so"
+    )
+    target_include_directories(
+      ${bench_target}
+      PRIVATE
+        "${TRTLLM_ROOT}/cpp/include"
+        "${TRTLLM_ROOT}/cpp"
+        "${TRTLLM_TENSORRT_INCLUDE_DIR}"
+    )
+    target_compile_definitions(${bench_target} PRIVATE ENABLE_BF16 ENABLE_FP8)
+    target_compile_options(
+      ${bench_target}
+      PRIVATE "$<$<COMPILE_LANGUAGE:CUDA>:--expt-relaxed-constexpr>"
+    )
+  endif()
+endfunction()
+
+function(should_add_bench bench_src result)
+  get_filename_component(bench_basename "${bench_src}" NAME_WLE)
+
+  set(add_bench_target ON)
+
+  if (bench_basename MATCHES "^flashinfer_")
+    if (NOT FLASHINFER_ROOT)
+      message(STATUS "Skipping ${bench_basename}: FLASHINFER_ROOT is not set.")
+      set(add_bench_target OFF)
+    endif()
+  endif()
+
+  if (bench_basename MATCHES "trtllm")
+    if (NOT TRTLLM_ROOT OR NOT TRTLLM_LIB_DIR)
+      message(
+        STATUS
+        "Skipping ${bench_basename}: TRTLLM_ROOT and TRTLLM_LIB_DIR must be set."
+      )
+      set(add_bench_target OFF)
+    endif()
+  endif()
+
+  set(${result} ${add_bench_target} PARENT_SCOPE)
 endfunction()
 
 function(add_bench_dir bench_dir)
@@ -105,6 +192,11 @@ function(add_bench_dir bench_dir)
   string(REPLACE "/" "." bench_prefix "${bench_prefix}")
 
   foreach (bench_src IN LISTS bench_srcs)
+    should_add_bench("${bench_src}" add_this_bench)
+    if (NOT add_this_bench)
+      continue()
+    endif()
+
     # base tuning
     get_filename_component(bench_name "${bench_src}" NAME_WLE)
     string(PREPEND bench_name "cub.${bench_prefix}.")
