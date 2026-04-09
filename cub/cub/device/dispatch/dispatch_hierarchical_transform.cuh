@@ -27,6 +27,7 @@ CUB_NAMESPACE_BEGIN
 namespace detail::hierarchical
 {
 template <int BlockThreads,
+          int ItemsPerThread,
           typename InputIteratorT,
           typename OutputIteratorT,
           typename SegmentOpT,
@@ -35,21 +36,31 @@ struct DeviceHierarchicalTransformKernelSource
 {
   CUB_DEFINE_KERNEL_GETTER(
     HierarchicalTransformKernel,
-    DeviceHierarchicalTransformKernel<BlockThreads, InputIteratorT, OutputIteratorT, SegmentOpT, ElementTransformOpT>)
+    DeviceHierarchicalTransformKernel<BlockThreads,
+                                      ItemsPerThread,
+                                      InputIteratorT,
+                                      OutputIteratorT,
+                                      SegmentOpT,
+                                      ElementTransformOpT>)
 };
 
-template <
-  int BlockThreads,
-  typename InputIteratorT,
-  typename OutputIteratorT,
-  typename SegmentOpT,
-  typename ElementTransformOpT,
-  typename KernelSource =
-    DeviceHierarchicalTransformKernelSource<BlockThreads, InputIteratorT, OutputIteratorT, SegmentOpT, ElementTransformOpT>,
-  typename KernelLauncherFactory = CUB_DETAIL_DEFAULT_KERNEL_LAUNCHER_FACTORY>
+template <int BlockThreads,
+          int ItemsPerThread,
+          typename InputIteratorT,
+          typename OutputIteratorT,
+          typename SegmentOpT,
+          typename ElementTransformOpT,
+          typename KernelSource          = DeviceHierarchicalTransformKernelSource<BlockThreads,
+                                                                                   ItemsPerThread,
+                                                                                   InputIteratorT,
+                                                                                   OutputIteratorT,
+                                                                                   SegmentOpT,
+                                                                                   ElementTransformOpT>,
+          typename KernelLauncherFactory = CUB_DETAIL_DEFAULT_KERNEL_LAUNCHER_FACTORY>
 struct DispatchHierarchicalTransform
 {
   static_assert(BlockThreads > 0, "BlockThreads must be positive.");
+  static_assert(ItemsPerThread > 0, "ItemsPerThread must be positive.");
 
   InputIteratorT d_in;
   OutputIteratorT d_out;
@@ -98,6 +109,37 @@ struct DispatchHierarchicalTransform
       return cudaSuccess;
     }
 
+    bool use_shared_input_staging = false;
+    int launch_dynamic_smem_bytes = 0;
+
+    if constexpr (shared_input_staging_supported_v<InputIteratorT>)
+    {
+      using value_t = cub::detail::it_value_t<InputIteratorT>;
+
+      constexpr int shared_buffer_alignment = alignof(value_t);
+      constexpr int alignment_padding       = shared_buffer_alignment > 16 ? (shared_buffer_alignment - 16) : 0;
+
+      const auto requested_shared_bytes =
+        static_cast<::cuda::std::size_t>(segment_size) * sizeof(value_t) + alignment_padding;
+
+      int max_dynamic_smem_size = 0;
+      if (const auto error =
+            CubDebug(launcher_factory.max_dynamic_smem_size_for(max_dynamic_smem_size, hierarchical_transform_kernel)))
+      {
+        return error;
+      }
+
+      if (requested_shared_bytes <= static_cast<::cuda::std::size_t>(max_dynamic_smem_size))
+      {
+        use_shared_input_staging  = true;
+        launch_dynamic_smem_bytes = static_cast<int>(requested_shared_bytes);
+
+        NV_IF_TARGET(NV_IS_HOST,
+                     (if (const auto error = CubDebug(launcher_factory.set_max_dynamic_smem_size_for(
+                            hierarchical_transform_kernel, launch_dynamic_smem_bytes))) { return error; }))
+      }
+    }
+
     int max_grid_dim_x = 0;
     if (const auto error = CubDebug(launcher_factory.MaxGridDimX(max_grid_dim_x)))
     {
@@ -114,12 +156,13 @@ struct DispatchHierarchicalTransform
       const auto num_current_segments = (::cuda::std::min) (num_segments_per_invocation, num_segments - segment_offset);
       const auto item_offset          = segment_offset * static_cast<::cuda::std::int64_t>(segment_size);
 
-      launcher_factory(static_cast<int>(num_current_segments), BlockThreads, 0, stream)
+      launcher_factory(static_cast<int>(num_current_segments), BlockThreads, launch_dynamic_smem_bytes, stream)
         .doit(hierarchical_transform_kernel,
               d_in + item_offset,
               d_out + item_offset,
               static_cast<int>(num_current_segments),
               segment_size,
+              use_shared_input_staging,
               segment_op,
               element_transform_op);
 
@@ -143,15 +186,19 @@ struct DispatchHierarchicalTransform
   }
 };
 
-template <
-  int BlockThreads = 256,
-  typename InputIteratorT,
-  typename OutputIteratorT,
-  typename SegmentOpT,
-  typename ElementTransformOpT,
-  typename KernelSource =
-    DeviceHierarchicalTransformKernelSource<BlockThreads, InputIteratorT, OutputIteratorT, SegmentOpT, ElementTransformOpT>,
-  typename KernelLauncherFactory = CUB_DETAIL_DEFAULT_KERNEL_LAUNCHER_FACTORY>
+template <int BlockThreads   = 256,
+          int ItemsPerThread = 4,
+          typename InputIteratorT,
+          typename OutputIteratorT,
+          typename SegmentOpT,
+          typename ElementTransformOpT,
+          typename KernelSource          = DeviceHierarchicalTransformKernelSource<BlockThreads,
+                                                                                   ItemsPerThread,
+                                                                                   InputIteratorT,
+                                                                                   OutputIteratorT,
+                                                                                   SegmentOpT,
+                                                                                   ElementTransformOpT>,
+          typename KernelLauncherFactory = CUB_DETAIL_DEFAULT_KERNEL_LAUNCHER_FACTORY>
 CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE cudaError_t dispatch(
   InputIteratorT d_in,
   OutputIteratorT d_out,
@@ -170,6 +217,7 @@ CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE cudaError_t dispatch(
   }
 
   return DispatchHierarchicalTransform<BlockThreads,
+                                       ItemsPerThread,
                                        InputIteratorT,
                                        OutputIteratorT,
                                        SegmentOpT,
