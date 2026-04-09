@@ -80,15 +80,11 @@ struct rmsnorm_segment_op
 template <typename T>
 struct hierarchical_normalize_and_scale_op
 {
-  const T* input;
   const T* weight;
-  int hidden_size;
 
-  __device__ T operator()(float rms_rcp, const T& x) const
+  __device__ T operator()(float rms_rcp, int index_in_segment, T x) const
   {
-    const int idx     = static_cast<int>(&x - input);
-    const int col     = idx % hidden_size;
-    const float scale = static_cast<float>(weight[col]) * rms_rcp;
+    const float scale = static_cast<float>(weight[index_in_segment]) * rms_rcp;
 
     return static_cast<T>(static_cast<float>(x) * scale);
   }
@@ -123,7 +119,7 @@ try
       batch_size,
       hidden_size,
       rmsnorm_segment_op<T, hierarchical_block_threads>{hidden_size, rms_norm_eps},
-      hierarchical_normalize_and_scale_op<T>{d_input, d_weight, hidden_size},
+      hierarchical_normalize_and_scale_op<T>{d_weight},
       launch.get_stream());
   });
 
