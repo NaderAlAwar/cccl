@@ -18,12 +18,14 @@
 #endif
 
 #include <cub/block/block_load.cuh>
+#include <cub/block/block_reduce.cuh>
 #include <cub/block/block_store.cuh>
 #include <cub/util_type.cuh>
 
 #include <cuda/__cmath/round_up.h>
 #include <cuda/hierarchy>
 #include <cuda/std/cstddef>
+#include <cuda/std/functional>
 #include <cuda/std/type_traits>
 #include <cuda/std/utility>
 
@@ -36,7 +38,37 @@ namespace detail::hierarchical
 template <typename InputIteratorT>
 inline constexpr bool shared_input_staging_supported_v =
   ::cuda::std::is_trivially_copyable_v<cub::detail::it_value_t<InputIteratorT>>;
+} // namespace detail::hierarchical
 
+namespace hierarchical
+{
+template <typename Hierarchy, typename T, typename ReductionOp>
+_CCCL_DEVICE T reduce(::cuda::experimental::this_block<Hierarchy> /*group*/, T thread_data, ReductionOp reduction_op)
+{
+  using block_extents_t = decltype(::cuda::gpu_thread.extents(::cuda::block, ::cuda::std::declval<Hierarchy>()));
+
+  static_assert(block_extents_t::rank_dynamic() == 0,
+                "cub::hierarchical::reduce currently requires statically sized block groups.");
+
+  using collective_t =
+    BlockReduce<T,
+                static_cast<int>(block_extents_t::static_extent(0)),
+                cub::BLOCK_REDUCE_WARP_REDUCTIONS,
+                static_cast<int>(block_extents_t::static_extent(1)),
+                static_cast<int>(block_extents_t::static_extent(2))>;
+
+  return collective_t{}.Reduce(thread_data, reduction_op);
+}
+
+template <typename Hierarchy, typename T>
+_CCCL_DEVICE T reduce(::cuda::experimental::this_block<Hierarchy> group, T thread_data)
+{
+  return reduce(group, thread_data, ::cuda::std::plus<>{});
+}
+} // namespace hierarchical
+
+namespace detail::hierarchical
+{
 template <typename RandomAccessIteratorT>
 class thread_segment_range
 {
@@ -141,11 +173,6 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
   // - when enabled, the block first stages the segment into shared memory via tiled `BlockLoad`
   // - the kernel broadcasts the root result to the whole block and then applies `element_transform_op` to each item,
   //   passing the segment result, the segment-local item index, and the item value
-  const int segment_id = static_cast<int>(blockIdx.x);
-  if (segment_id >= num_segments)
-  {
-    return;
-  }
 
   using segment_result_t = typename SegmentOpT::result_type;
   using value_t          = cub::detail::it_value_t<InputIteratorT>;
@@ -161,14 +188,15 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
   __shared__ segment_result_t segment_result;
   extern __shared__ char shared_segment_buffer_base[];
 
+  const int segment_id = static_cast<int>(blockIdx.x);
   const auto segment_offset =
     static_cast<::cuda::std::size_t>(segment_id) * static_cast<::cuda::std::size_t>(segment_size);
   const auto segment_begin = d_in + segment_offset;
   const int thread_rank    = static_cast<int>(threadIdx.x);
 
-  using block_group_t = ::cuda::experimental::this_block<::cuda::experimental::__implicit_hierarchy_t>;
-  block_group_t block_group{};
-  auto output_range = make_thread_segment_range<BlockThreads>(d_out + segment_offset, segment_size);
+  const auto block_hierarchy = ::cuda::hierarchy(::cuda::grid_dims(gridDim), ::cuda::block_dims<BlockThreads>());
+  auto block_group           = ::cuda::experimental::this_block{block_hierarchy};
+  auto output_range          = make_thread_segment_range<BlockThreads>(d_out + segment_offset, segment_size);
 
   auto transform_segment = [&](auto input_range) {
     const segment_result_t thread_result = segment_op(block_group, input_range);

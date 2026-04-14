@@ -1,7 +1,6 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include <cub/block/block_reduce.cuh>
 #include <cub/device/device_hierarchical_transform.cuh>
 
 #include <thrust/transform.h>
@@ -15,8 +14,7 @@
 
 #include "rmsnorm_check.cuh"
 
-constexpr float rms_norm_eps             = 1e-5f;
-constexpr int hierarchical_block_threads = 256;
+constexpr float rms_norm_eps = 1e-5f;
 
 template <typename T>
 struct convert_op
@@ -44,7 +42,7 @@ thrust::device_vector<T> make_bounded_vector(std::size_t elements)
   }
 }
 
-template <typename T, int BlockThreads>
+template <typename T>
 struct rmsnorm_segment_op
 {
   using result_type = float;
@@ -63,10 +61,7 @@ struct rmsnorm_segment_op
       partial_sum += value * value;
     }
 
-    using block_reduce_t = cub::BlockReduce<float, BlockThreads>;
-    __shared__ typename block_reduce_t::TempStorage temp_storage;
-
-    const float sum_of_squares = block_reduce_t(temp_storage).Sum(partial_sum);
+    const float sum_of_squares = cub::hierarchical::reduce(group, partial_sum, ::cuda::std::plus<>{});
 
     if (::cuda::gpu_thread.is_root_rank(group))
     {
@@ -118,7 +113,7 @@ try
       d_output,
       batch_size,
       hidden_size,
-      rmsnorm_segment_op<T, hierarchical_block_threads>{hidden_size, rms_norm_eps},
+      rmsnorm_segment_op<T>{hidden_size, rms_norm_eps},
       hierarchical_normalize_and_scale_op<T>{d_weight},
       launch.get_stream());
   });
