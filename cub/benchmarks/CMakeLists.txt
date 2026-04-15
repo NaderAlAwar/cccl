@@ -5,6 +5,18 @@ cccl_get_nvbench_helper()
 set(benches_root "${CMAKE_CURRENT_LIST_DIR}")
 
 set(
+  CUDF_ROOT
+  ""
+  CACHE PATH
+  "Path to installed cuDF package root for CUB benchmarks."
+)
+set(
+  RMM_ROOT
+  ""
+  CACHE PATH
+  "Path to installed RMM package root for CUB benchmarks."
+)
+set(
   FLASHINFER_ROOT
   ""
   CACHE PATH
@@ -32,6 +44,9 @@ set(
 if (TRTLLM_ROOT OR TRTLLM_LIB_DIR)
   find_package(CUDAToolkit REQUIRED)
 endif()
+
+find_package(rmm CONFIG QUIET HINTS "${RMM_ROOT}")
+find_package(cudf CONFIG QUIET HINTS "${CUDF_ROOT}")
 
 if (NOT CMAKE_BUILD_TYPE STREQUAL "Release")
   set(message_type FATAL_ERROR)
@@ -112,11 +127,18 @@ endfunction()
 function(add_bench target_name bench_name bench_src)
   set(bench_target ${bench_name})
   set(${target_name} ${bench_target} PARENT_SCOPE)
+  get_filename_component(bench_basename "${bench_src}" NAME_WLE)
+  file(RELATIVE_PATH bench_relpath "${benches_root}" "${bench_src}")
+
+  set(bench_dialect 17)
+  if (bench_relpath MATCHES "^bench/hierarchical/")
+    set(bench_dialect 20)
+  endif()
 
   cccl_add_executable(
     ${bench_target}
     NO_METATARGETS
-    DIALECT 17
+    DIALECT ${bench_dialect}
     SOURCES "${bench_src}"
   )
   target_link_libraries(
@@ -126,9 +148,6 @@ function(add_bench target_name bench_name bench_src)
       cccl.nvbench_helper
       nvbench::main
   )
-
-  get_filename_component(bench_basename "${bench_src}" NAME_WLE)
-
   if (bench_basename MATCHES "^flashinfer_")
     target_include_directories(
       ${bench_target}
@@ -158,6 +177,29 @@ function(add_bench target_name bench_name bench_src)
       PRIVATE "$<$<COMPILE_LANGUAGE:CUDA>:--expt-relaxed-constexpr>"
     )
   endif()
+
+  if (bench_basename MATCHES "^cudf_")
+    target_sources(
+      ${bench_target}
+      PRIVATE "${benches_root}/common/cudf_random_input.cu"
+    )
+    target_include_directories(
+      ${bench_target}
+      PRIVATE "${CMAKE_SOURCE_DIR}/cub"
+    )
+    target_link_libraries(${bench_target} PRIVATE cudf::cudf rmm::rmm)
+    set_target_properties(
+      ${bench_target}
+      PROPERTIES
+        BUILD_RPATH "$<TARGET_FILE_DIR:cudf::cudf>;$<TARGET_FILE_DIR:rmm::rmm>"
+        INSTALL_RPATH
+          "$<TARGET_FILE_DIR:cudf::cudf>;$<TARGET_FILE_DIR:rmm::rmm>"
+    )
+    target_link_options(
+      ${bench_target}
+      PRIVATE "$<$<LINK_LANGUAGE:CUDA>:-Wl,--disable-new-dtags>"
+    )
+  endif()
 endfunction()
 
 function(should_add_bench bench_src result)
@@ -177,6 +219,16 @@ function(should_add_bench bench_src result)
       message(
         STATUS
         "Skipping ${bench_basename}: TRTLLM_ROOT and TRTLLM_LIB_DIR must be set."
+      )
+      set(add_bench_target OFF)
+    endif()
+  endif()
+
+  if (bench_basename MATCHES "^cudf_")
+    if (NOT TARGET cudf::cudf OR NOT TARGET rmm::rmm)
+      message(
+        STATUS
+        "Skipping ${bench_basename}: installed cudf and rmm CMake packages were not found."
       )
       set(add_bench_target OFF)
     endif()
