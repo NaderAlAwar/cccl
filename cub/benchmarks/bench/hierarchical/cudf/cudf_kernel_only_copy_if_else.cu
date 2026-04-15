@@ -19,7 +19,7 @@
 
 #include <nvbench_helper.cuh>
 
-#include <benchmarks/common/cudf_random_input.cuh>
+#include <benchmarks/common/generate_input.hpp>
 #include <cudf/column/column.hpp>
 #include <cudf/column/column_device_view.cuh>
 #include <cudf/column/column_factories.hpp>
@@ -31,6 +31,7 @@
 #include <cudf/detail/utilities/integer_utils.hpp>
 #include <cudf/utilities/default_stream.hpp>
 #include <cudf/utilities/memory_resource.hpp>
+#include <rmm/device_buffer.hpp>
 
 namespace
 {
@@ -95,6 +96,7 @@ __launch_bounds__(block_size) __global__ void kernel_only_copy_if_else_kernel(
   }
 }
 
+template <typename DataType>
 void check_copy_if_else_correctness(
   const cudf::column_view& output, const cudf::column_view& expected, rmm::cuda_stream_view stream)
 {
@@ -104,8 +106,8 @@ void check_copy_if_else_correctness(
     thrust::cuda::par.on(stream.value()),
     thrust::make_counting_iterator<cudf::size_type>(0),
     thrust::make_counting_iterator<cudf::size_type>(output.size()),
-    [output_data   = output.data<int>(),
-     expected_data = expected.data<int>(),
+    [output_data   = output.data<DataType>(),
+     expected_data = expected.data<DataType>(),
      expected_mask = expected.null_mask()] __device__(cudf::size_type index) {
       const bool is_valid =
         expected_mask == nullptr || ((expected_mask[index / mask_word_bits] >> (index % mask_word_bits)) & 1u) != 0;
@@ -139,14 +141,24 @@ void check_copy_if_else_correctness(
 }
 } // namespace
 
-void cudf_kernel_only_copy_if_else(nvbench::state& state)
+template <typename DataType, bool HasNulls>
+void run_cudf_kernel_only_copy_if_else(nvbench::state& state)
 try
 {
-  constexpr cudf::size_type num_items = 64;
-  constexpr int num_words             = (num_items + mask_word_bits - 1) / mask_word_bits;
-  constexpr int block_size            = 256;
+  constexpr int block_size = 256;
+  auto const num_items     = static_cast<cudf::size_type>(state.get_int64("num_rows"));
 
-  auto input = cub::benchmarks::cudf_input::make_copy_if_else_input<int>(num_items, true);
+  auto input_type  = cudf::type_to_id<DataType>();
+  auto bool_type   = cudf::type_id::BOOL8;
+  auto const input = create_random_table({input_type, input_type, bool_type}, row_count{num_items});
+
+  if constexpr (!HasNulls)
+  {
+    input->get_column(0).set_null_mask(rmm::device_buffer{}, 0);
+    input->get_column(1).set_null_mask(rmm::device_buffer{}, 0);
+    input->get_column(2).set_null_mask(rmm::device_buffer{}, 0);
+  }
+
   cudf::column_view lhs(input->view().column(0));
   cudf::column_view rhs(input->view().column(1));
   cudf::column_view decision(input->view().column(2));
@@ -156,15 +168,27 @@ try
   auto rhs_dv     = cudf::column_device_view::create(rhs, stream);
   auto decision_d = cudf::column_device_view::create(decision, stream);
 
-  auto lhs_iter = cudf::detail::make_optional_iterator<int>(*lhs_dv, cudf::nullate::DYNAMIC{lhs.nullable()});
-  auto rhs_iter = cudf::detail::make_optional_iterator<int>(*rhs_dv, cudf::nullate::DYNAMIC{rhs.nullable()});
+  auto lhs_iter = cudf::detail::make_optional_iterator<DataType>(
+    *lhs_dv, cuda::std::conditional_t<HasNulls, cudf::nullate::YES, cudf::nullate::NO>{});
+  auto rhs_iter = cudf::detail::make_optional_iterator<DataType>(
+    *rhs_dv, cuda::std::conditional_t<HasNulls, cudf::nullate::YES, cudf::nullate::NO>{});
 
-  auto filter = [decision = *decision_d, has_nulls = decision.has_nulls()] __device__(cudf::size_type index) -> bool {
-    return (!has_nulls || decision.is_valid_nocheck(index)) && decision.element<bool>(index);
+  auto filter = [decision = *decision_d] __device__(cudf::size_type index) -> bool {
+    if constexpr (HasNulls)
+    {
+      return decision.is_valid_nocheck(index) && decision.element<bool>(index);
+    }
+    else
+    {
+      return decision.element<bool>(index);
+    }
   };
 
   auto output = cudf::make_fixed_width_column(
-    cudf::data_type{cudf::type_to_id<int>()}, num_items, cudf::mask_state::UNINITIALIZED, stream);
+    cudf::data_type{cudf::type_to_id<DataType>()},
+    num_items,
+    HasNulls ? cudf::mask_state::UNINITIALIZED : cudf::mask_state::UNALLOCATED,
+    stream);
   auto out_v = cudf::mutable_column_device_view::create(*output, stream);
   cudf::detail::device_scalar<cudf::size_type> valid_count{0, stream, cudf::get_current_device_resource_ref()};
 
@@ -172,29 +196,54 @@ try
   cudf::detail::grid_1d grid{num_els, block_size, 1};
 
   state.set_cuda_stream(nvbench::make_cuda_stream_view(stream.value()));
-  state.add_element_count(num_items);
-  state.add_global_memory_reads<int>(num_items, "LhsValues");
-  state.add_global_memory_reads<int>(num_items, "RhsValues");
-  state.add_global_memory_reads<bool>(num_items, "Decision");
-  state.add_global_memory_reads<nvbench::int8_t>(cudf::bitmask_allocation_size_bytes(num_items), "LhsValidity");
-  state.add_global_memory_reads<nvbench::int8_t>(cudf::bitmask_allocation_size_bytes(num_items), "RhsValidity");
-  state.add_global_memory_writes<int>(num_items, "Output");
-  state.add_global_memory_writes<std::uint32_t>(num_words, "MaskWords");
-  state.add_global_memory_writes<int>(1, "ValidCount");
+  {
+    auto const bytes_read    = num_items * (sizeof(DataType) + sizeof(bool));
+    auto const bytes_written = num_items * sizeof(DataType);
+    auto const null_bytes    = HasNulls ? 2 * cudf::bitmask_allocation_size_bytes(num_items) : 0;
+    state.add_global_memory_reads<int8_t>(bytes_read);
+    state.add_global_memory_writes<int8_t>(bytes_written + null_bytes);
+  }
 
-  state.exec(nvbench::exec_tag::no_batch, [&](nvbench::launch&) {
-    cudaMemsetAsync(valid_count.data(), 0, sizeof(cudf::size_type), stream.value());
-    kernel_only_copy_if_else_kernel<block_size, int, decltype(lhs_iter), decltype(rhs_iter), decltype(filter), true>
-      <<<grid.num_blocks, block_size, 0, stream.value()>>>(lhs_iter, rhs_iter, filter, *out_v, valid_count.data());
+  state.exec(nvbench::exec_tag::timer, [&](nvbench::launch& launch, auto& timer) {
+    const auto launch_stream = launch.get_stream().get_stream();
+    if constexpr (HasNulls)
+    {
+      valid_count.set_value_to_zero_async(stream);
+    }
+
+    timer.start();
+    kernel_only_copy_if_else_kernel<block_size, DataType, decltype(lhs_iter), decltype(rhs_iter), decltype(filter), HasNulls>
+      <<<grid.num_blocks, block_size, 0, launch_stream>>>(lhs_iter, rhs_iter, filter, *out_v, valid_count.data());
+    timer.stop();
   });
 
-  output->set_null_count(num_items - valid_count.value(stream));
+  output->set_null_count(HasNulls ? num_items - valid_count.value(stream) : 0);
   auto expected = cudf::copy_if_else(lhs, rhs, decision);
-  check_copy_if_else_correctness(output->view(), expected->view(), stream);
+  check_copy_if_else_correctness<DataType>(output->view(), expected->view(), stream);
 }
 catch (const std::bad_alloc&)
 {
   state.skip("Skipping: out of memory.");
 }
 
-NVBENCH_BENCH(cudf_kernel_only_copy_if_else).set_name("cudf_kernel_only_copy_if_else");
+template <typename DataType>
+void cudf_kernel_only_copy_if_else(nvbench::state& state, nvbench::type_list<DataType>)
+{
+  auto const nulls = static_cast<bool>(state.get_int64("nulls"));
+  if (nulls)
+  {
+    run_cudf_kernel_only_copy_if_else<DataType, true>(state);
+  }
+  else
+  {
+    run_cudf_kernel_only_copy_if_else<DataType, false>(state);
+  }
+}
+
+using Types = nvbench::type_list<int16_t, uint32_t, double>;
+
+NVBENCH_BENCH_TYPES(cudf_kernel_only_copy_if_else, NVBENCH_TYPE_AXES(Types))
+  .set_name("cudf_kernel_only_copy_if_else")
+  .set_type_axes_names({"DataType"})
+  .add_int64_axis("nulls", {true, false})
+  .add_int64_axis("num_rows", {4096, 32768, 262144, 2097152, 16777216, 134217728});
