@@ -22,3 +22,6 @@ template std::unique_ptr<cudf::table>
 cub::benchmarks::cudf_input::make_copy_if_else_input<std::uint32_t>(cudf::size_type, bool);
 template std::unique_ptr<cudf::table>
 cub::benchmarks::cudf_input::make_copy_if_else_input<double>(cudf::size_type, bool);
+
+template std::unique_ptr<cudf::column> cub::benchmarks::cudf_input::make_sequence_fixed_width_column<std::int32_t>(
+  cudf::size_type, std::int32_t, bool, unsigned, double);

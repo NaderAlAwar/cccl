@@ -8,6 +8,7 @@
 #include <thrust/execution_policy.h>
 #include <thrust/iterator/counting_iterator.h>
 #include <thrust/random.h>
+#include <thrust/sequence.h>
 #include <thrust/tabulate.h>
 
 #include <memory>
@@ -105,6 +106,61 @@ std::unique_ptr<cudf::table> make_copy_if_else_input(cudf::size_type num_rows, b
   columns.emplace_back(make_random_fixed_width_column<T>(num_rows, 17u, nullable, 29u));
   columns.emplace_back(make_random_fixed_width_column<T>(num_rows, 31u, nullable, 43u));
   columns.emplace_back(make_random_fixed_width_column<bool>(num_rows, 59u, nullable, 71u));
+  return std::make_unique<cudf::table>(std::move(columns));
+}
+
+template <typename T>
+std::unique_ptr<cudf::column> make_sequence_fixed_width_column(
+  cudf::size_type size, T start, bool nullable, unsigned validity_seed, double null_probability = 0.01)
+{
+  auto stream = cudf::get_default_stream();
+  auto column = cudf::make_fixed_width_column(cudf::data_type{cudf::type_to_id<T>()}, size);
+
+  auto mutable_view = column->mutable_view();
+  thrust::sequence(thrust::cuda::par.on(stream.value()), mutable_view.begin<T>(), mutable_view.end<T>(), start);
+
+  if (nullable)
+  {
+    auto begin                   = thrust::make_counting_iterator<cudf::size_type>(0);
+    auto end                     = begin + size;
+    auto [null_mask, null_count] = cudf::detail::valid_if(
+      begin,
+      end,
+      detail::validity_generator{validity_seed, null_probability},
+      stream,
+      cudf::get_current_device_resource_ref());
+    column->set_null_mask(std::move(null_mask), null_count);
+  }
+
+  return column;
+}
+
+inline std::unique_ptr<cudf::table>
+make_valid_if_copy_if_else_shape_input(cudf::size_type num_rows, double null_probability)
+{
+  std::vector<std::unique_ptr<cudf::column>> columns;
+  columns.emplace_back(make_sequence_fixed_width_column<std::int32_t>(num_rows, 0, true, 83u, null_probability));
+  columns.emplace_back(make_sequence_fixed_width_column<std::int32_t>(num_rows, 1000, true, 97u, null_probability));
+  columns.emplace_back(make_random_fixed_width_column<bool>(num_rows, 59u, false, 0u));
+  return std::make_unique<cudf::table>(std::move(columns));
+}
+
+inline std::unique_ptr<cudf::table>
+make_valid_if_any_null_input(cudf::size_type num_rows, cudf::size_type num_cols, double null_probability)
+{
+  std::vector<std::unique_ptr<cudf::column>> columns;
+  columns.reserve(num_cols);
+
+  for (cudf::size_type column_index = 0; column_index < num_cols; ++column_index)
+  {
+    columns.emplace_back(make_sequence_fixed_width_column<std::int32_t>(
+      num_rows,
+      static_cast<std::int32_t>(column_index * 1000),
+      true,
+      static_cast<unsigned>(101 + column_index),
+      null_probability));
+  }
+
   return std::make_unique<cudf::table>(std::move(columns));
 }
 } // namespace cub::benchmarks::cudf_input
