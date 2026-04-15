@@ -45,6 +45,7 @@ if (TRTLLM_ROOT OR TRTLLM_LIB_DIR)
   find_package(CUDAToolkit REQUIRED)
 endif()
 
+find_package(rapids_logger CONFIG QUIET HINTS "${RMM_ROOT}" "${CUDF_ROOT}")
 find_package(rmm CONFIG QUIET HINTS "${RMM_ROOT}")
 find_package(cudf CONFIG QUIET HINTS "${CUDF_ROOT}")
 
@@ -94,6 +95,17 @@ endfunction()
 
 create_benchmark_registry()
 
+function(is_cudf_backed_bench bench_src result)
+  file(RELATIVE_PATH bench_relpath "${benches_root}" "${bench_src}")
+
+  set(is_cudf_backed OFF)
+  if (bench_relpath MATCHES "^bench/hierarchical/cudf/")
+    set(is_cudf_backed ON)
+  endif()
+
+  set(${result} ${is_cudf_backed} PARENT_SCOPE)
+endfunction()
+
 function(get_bench_ranges src bench_name)
   file(READ "${src}" file_data)
   set(param_regex "//[ ]+%RANGE%[ ]+([^ ]+)[ ]+([^ ]+)[ ]+([^\n]*)")
@@ -129,6 +141,7 @@ function(add_bench target_name bench_name bench_src)
   set(${target_name} ${bench_target} PARENT_SCOPE)
   get_filename_component(bench_basename "${bench_src}" NAME_WLE)
   file(RELATIVE_PATH bench_relpath "${benches_root}" "${bench_src}")
+  is_cudf_backed_bench("${bench_src}" bench_uses_cudf)
 
   set(bench_dialect 17)
   if (bench_relpath MATCHES "^bench/hierarchical/")
@@ -178,7 +191,7 @@ function(add_bench target_name bench_name bench_src)
     )
   endif()
 
-  if (bench_basename MATCHES "^cudf_")
+  if (bench_uses_cudf)
     target_sources(
       ${bench_target}
       PRIVATE "${benches_root}/common/cudf_random_input.cu"
@@ -204,6 +217,7 @@ endfunction()
 
 function(should_add_bench bench_src result)
   get_filename_component(bench_basename "${bench_src}" NAME_WLE)
+  is_cudf_backed_bench("${bench_src}" bench_uses_cudf)
 
   set(add_bench_target ON)
 
@@ -224,7 +238,7 @@ function(should_add_bench bench_src result)
     endif()
   endif()
 
-  if (bench_basename MATCHES "^cudf_")
+  if (bench_uses_cudf)
     if (NOT TARGET cudf::cudf OR NOT TARGET rmm::rmm)
       message(
         STATUS
