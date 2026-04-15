@@ -194,7 +194,9 @@ function(add_bench target_name bench_name bench_src)
   if (bench_uses_cudf)
     target_sources(
       ${bench_target}
-      PRIVATE "${benches_root}/common/cudf_random_input.cu"
+      PRIVATE
+        "${benches_root}/common/cudf_random_input.cu"
+        "${benches_root}/common/generate_input.cu"
     )
     target_include_directories(
       ${bench_target}

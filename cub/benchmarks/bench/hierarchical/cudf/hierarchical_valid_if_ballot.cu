@@ -84,23 +84,14 @@ try
         return (value & 1) == 0;
       },
       [d_mask_words, d_valid_count] __device__(auto group, cuda::std::int64_t word_index, bool is_valid) {
-        // If this pattern persists, a dedicated `this_warp` overload is cleaner than templating over arbitrary groups.
-        if constexpr (cuda::std::is_same_v<typename decltype(group)::level_type, cuda::warp_level>)
-        {
-          const std::uint32_t word = cub::hierarchical::ballot(group, is_valid);
+        const std::uint32_t word = cuda::device::ballot(group, is_valid);
 
-          if (cuda::gpu_thread.is_root_rank(group))
-          {
-            d_mask_words[word_index] = word;
-
-            cuda::atomic_ref<int, cuda::thread_scope_device> atomic_valid_count(*d_valid_count);
-            atomic_valid_count.fetch_add(__popc(word), cuda::memory_order_relaxed);
-          }
-        }
-        else
+        if (cuda::gpu_thread.is_root_rank(group))
         {
-          static_assert(cuda::std::is_same_v<typename decltype(group)::level_type, cuda::warp_level>,
-                        "valid_if_ballot_epilog requires a warp group.");
+          d_mask_words[word_index] = word;
+
+          cuda::atomic_ref<int, cuda::thread_scope_device> atomic_valid_count(*d_valid_count);
+          atomic_valid_count.fetch_add(__popc(word), cuda::memory_order_relaxed);
         }
       },
       stream);

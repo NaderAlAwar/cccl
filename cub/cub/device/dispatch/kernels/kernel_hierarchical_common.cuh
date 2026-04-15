@@ -142,17 +142,10 @@ _CCCL_DEVICE T reduce(::cuda::experimental::this_block<Hierarchy> group, T threa
 {
   return reduce(group, thread_data, ::cuda::std::plus<>{});
 }
-} // namespace cuda::device
 
-CUB_NAMESPACE_BEGIN
-
-namespace hierarchical
-{
 template <typename Hierarchy>
 _CCCL_DEVICE ::cuda::std::uint32_t ballot(::cuda::experimental::this_warp<Hierarchy> /*group*/, bool predicate)
 {
   return static_cast<::cuda::std::uint32_t>(__ballot_sync(0xFFFF'FFFFu, predicate));
 }
-} // namespace hierarchical
-
-CUB_NAMESPACE_END
+} // namespace cuda::device

@@ -7,12 +7,12 @@
 // 1. Build and install compatible C++ builds of RMM and cuDF into one prefix:
 //    `git clone https://github.com/rapidsai/rmm.git /path/to/rmm`
 //    `git clone https://github.com/rapidsai/cudf.git /path/to/cudf`
-//    `cmake -S /path/to/rmm/cpp -B /path/to/rmm/cpp/build -DCMAKE_INSTALL_PREFIX=/path/to/rapids-install`
-//    `cmake --build /path/to/rmm/cpp/build`
-//    `cmake --install /path/to/rmm/cpp/build`
-//    `cmake -S /path/to/cudf/cpp -B /path/to/cudf/cpp/build -DCMAKE_INSTALL_PREFIX=/path/to/rapids-install
-//    -DCMAKE_PREFIX_PATH=/path/to/rapids-install -DBUILD_BENCHMARKS=ON -DBUILD_TESTS=OFF` `cmake --build
-//    /path/to/cudf/cpp/build` `cmake --install /path/to/cudf/cpp/build`
+//    `cmake -S /path/to/rmm/cpp -B /path/to/rmm/cpp/build -DCMAKE_INSTALL_PREFIX=/path/to/rapids-install
+//    -DCMAKE_CUDA_ARCHITECTURES=native -DBUILD_BENCHMARKS=OFF -DBUILD_TESTS=OFF` `cmake --build /path/to/rmm/cpp/build
+//    --parallel` `cmake --install /path/to/rmm/cpp/build` `cmake -S /path/to/cudf/cpp -B /path/to/cudf/cpp/build
+//    -DCMAKE_INSTALL_PREFIX=/path/to/rapids-install -DCMAKE_PREFIX_PATH=/path/to/rapids-install
+//    -DCMAKE_CUDA_ARCHITECTURES=native -DBUILD_BENCHMARKS=OFF -DBUILD_TESTS=OFF` `cmake --build /path/to/cudf/cpp/build
+//    --parallel` `cmake --install /path/to/cudf/cpp/build`
 // 2. Configure CCCL with those packages visible to CMake:
 //    `cmake -S /path/to/cccl -B /path/to/cccl/build/cub-benchmark --preset cub-benchmark
 //    -Dcudf_DIR=/path/to/rapids-install/lib/cmake/cudf -Drmm_DIR=/path/to/rapids-install/lib/cmake/rmm` Alternatively:

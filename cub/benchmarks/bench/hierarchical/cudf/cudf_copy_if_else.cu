@@ -7,12 +7,12 @@
 // 1. Build and install compatible C++ builds of RMM and cuDF into one prefix:
 //    `git clone https://github.com/rapidsai/rmm.git /path/to/rmm`
 //    `git clone https://github.com/rapidsai/cudf.git /path/to/cudf`
-//    `cmake -S /path/to/rmm/cpp -B /path/to/rmm/cpp/build -DCMAKE_INSTALL_PREFIX=/path/to/rapids-install`
-//    `cmake --build /path/to/rmm/cpp/build`
+//    `cmake -S /path/to/rmm/cpp -B /path/to/rmm/cpp/build -DCMAKE_INSTALL_PREFIX=/path/to/rapids-install
+//    -DCMAKE_CUDA_ARCHITECTURES=native -DBUILD_BENCHMARKS=OFF -DBUILD_TESTS=OFF` `cmake --build /path/to/rmm/cpp/build`
 //    `cmake --install /path/to/rmm/cpp/build`
 //    `cmake -S /path/to/cudf/cpp -B /path/to/cudf/cpp/build -DCMAKE_INSTALL_PREFIX=/path/to/rapids-install
-//    -DCMAKE_PREFIX_PATH=/path/to/rapids-install -DBUILD_BENCHMARKS=ON -DBUILD_TESTS=OFF` `cmake --build
-//    /path/to/cudf/cpp/build` `cmake --install /path/to/cudf/cpp/build`
+//    -DCMAKE_PREFIX_PATH=/path/to/rapids-install -DCMAKE_CUDA_ARCHITECTURES=native -DBUILD_BENCHMARKS=OFF
+//    -DBUILD_TESTS=OFF` `cmake --build /path/to/cudf/cpp/build` `cmake --install /path/to/cudf/cpp/build`
 // 2. Configure CCCL with those packages visible to CMake:
 //    `cmake -S /path/to/cccl -B /path/to/cccl/build/cub-benchmark --preset cub-benchmark
 //    -Dcudf_DIR=/path/to/rapids-install/lib/cmake/cudf -Drmm_DIR=/path/to/rapids-install/lib/cmake/rmm` Alternatively:
@@ -21,7 +21,7 @@
 // 3. Build this target:
 //    `cmake --build /path/to/cccl/build/cub-benchmark --target cub.bench.hierarchical.cudf.cudf_copy_if_else.base`
 
-#include <benchmarks/common/cudf_random_input.cuh>
+#include <benchmarks/common/generate_input.hpp>
 #include <cudf/column/column.hpp>
 #include <cudf/copying.hpp>
 #include <cudf/utilities/default_stream.hpp>
@@ -34,7 +34,9 @@ static void bench_copy_if_else(nvbench::state& state, nvbench::type_list<DataTyp
   auto const num_rows = static_cast<cudf::size_type>(state.get_int64("num_rows"));
   auto const nulls    = static_cast<bool>(state.get_int64("nulls"));
 
-  auto const input = cub::benchmarks::cudf_input::make_copy_if_else_input<DataType>(num_rows, nulls);
+  auto input_type  = cudf::type_to_id<DataType>();
+  auto bool_type   = cudf::type_id::BOOL8;
+  auto const input = create_random_table({input_type, input_type, bool_type}, row_count{num_rows});
 
   if (!nulls)
   {
