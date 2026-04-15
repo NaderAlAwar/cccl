@@ -114,10 +114,8 @@ try
   auto* d_temp_storage = thrust::raw_pointer_cast(temp_storage.data());
 
   state.add_element_count(elements);
-  state.add_global_memory_reads<T>(2 * elements, "Input");
-  state.add_global_memory_reads<T>(elements, "Weight");
-  state.add_global_memory_reads<float>(elements, "InvRMS");
-  state.add_global_memory_writes<float>(batch_size);
+  state.add_global_memory_reads<T>(elements, "Input");
+  state.add_global_memory_reads<T>(hidden_size, "Weight");
   state.add_global_memory_writes<T>(elements);
 
   state.exec(nvbench::exec_tag::no_batch, [&](nvbench::launch& launch) {

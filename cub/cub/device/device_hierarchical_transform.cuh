@@ -14,18 +14,19 @@
 #endif // no system header
 
 #include <cub/device/dispatch/dispatch_hierarchical_transform.cuh>
+#include <cub/device/dispatch/dispatch_hierarchical_transform_epilog.cuh>
 
 #include <cuda/std/cstdint>
 #include <cuda/std/utility>
 
 CUB_NAMESPACE_BEGIN
 
-//! DeviceHierarchicalTransform provides device-wide, fixed-size segmented
+//! DeviceSegmentedTransform provides device-wide, fixed-size segmented
 //! reduce-then-transform operations.
-struct DeviceHierarchicalTransform
+struct DeviceSegmentedTransform
 {
   template <typename InputIteratorT, typename OutputIteratorT, typename SegmentOpT, typename ElementTransformOpT>
-  CUB_RUNTIME_FUNCTION static cudaError_t Transform(
+  CUB_RUNTIME_FUNCTION static cudaError_t TransformProlog(
     InputIteratorT d_in,
     OutputIteratorT d_out,
     ::cuda::std::int64_t num_segments,
@@ -34,7 +35,7 @@ struct DeviceHierarchicalTransform
     ElementTransformOpT element_transform_op,
     cudaStream_t stream = 0)
   {
-    _CCCL_NVTX_RANGE_SCOPE("cub::DeviceHierarchicalTransform::Transform");
+    _CCCL_NVTX_RANGE_SCOPE("cub::DeviceSegmentedTransform::TransformProlog");
 
     return detail::hierarchical::dispatch(
       ::cuda::std::move(d_in),
@@ -43,6 +44,28 @@ struct DeviceHierarchicalTransform
       segment_size,
       ::cuda::std::move(segment_op),
       ::cuda::std::move(element_transform_op),
+      stream);
+  }
+
+  template <typename InputIteratorT, typename OutputIteratorT, typename TransformOpT, typename DeviceEpilogOpT>
+  CUB_RUNTIME_FUNCTION static cudaError_t TransformEpilog(
+    InputIteratorT d_in,
+    OutputIteratorT d_out,
+    ::cuda::std::int64_t num_segments,
+    int segment_size,
+    TransformOpT transform_op,
+    DeviceEpilogOpT device_epilog_op,
+    cudaStream_t stream = 0)
+  {
+    _CCCL_NVTX_RANGE_SCOPE("cub::DeviceSegmentedTransform::TransformEpilog");
+
+    return detail::hierarchical::dispatch_transform_epilog(
+      ::cuda::std::move(d_in),
+      ::cuda::std::move(d_out),
+      num_segments,
+      segment_size,
+      ::cuda::std::move(transform_op),
+      ::cuda::std::move(device_epilog_op),
       stream);
   }
 };

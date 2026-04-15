@@ -30,7 +30,7 @@ thrust::device_vector<T> make_bounded_vector(std::size_t elements)
 {
   thrust::device_vector<float> source = generate(elements, bit_entropy::_1_000, -1.0f, 1.0f);
 
-  if constexpr (::cuda::std::is_same_v<T, float>)
+  if constexpr (cuda::std::is_same_v<T, float>)
   {
     return source;
   }
@@ -41,49 +41,6 @@ thrust::device_vector<T> make_bounded_vector(std::size_t elements)
     return destination;
   }
 }
-
-template <typename T>
-struct rmsnorm_segment_op
-{
-  using result_type = float;
-
-  int hidden_size;
-  float eps;
-
-  template <typename Group, typename Range>
-  __device__ float operator()(Group group, const Range& range) const
-  {
-    float partial_sum = 0.0f;
-
-    for (int item = 0; item < range.size(); ++item)
-    {
-      const float value = static_cast<float>(range[item]);
-      partial_sum += value * value;
-    }
-
-    const float sum_of_squares = cub::hierarchical::reduce(group, partial_sum, ::cuda::std::plus<>{});
-
-    if (::cuda::gpu_thread.is_root_rank(group))
-    {
-      return rsqrtf(sum_of_squares / static_cast<float>(hidden_size) + eps);
-    }
-
-    return 0.0f;
-  }
-};
-
-template <typename T>
-struct hierarchical_normalize_and_scale_op
-{
-  const T* weight;
-
-  __device__ T operator()(float rms_rcp, int index_in_segment, T x) const
-  {
-    const float scale = static_cast<float>(weight[index_in_segment]) * rms_rcp;
-
-    return static_cast<T>(static_cast<float>(x) * scale);
-  }
-};
 
 template <typename T>
 void hierarchical_rmsnorm(nvbench::state& state, nvbench::type_list<T>)
@@ -103,18 +60,39 @@ try
   auto* d_weight = thrust::raw_pointer_cast(weight.data());
 
   state.add_element_count(elements);
-  state.add_global_memory_reads<T>(2 * elements, "Input");
-  state.add_global_memory_reads<T>(elements, "Weight");
+  state.add_global_memory_reads<T>(elements, "Input");
+  state.add_global_memory_reads<T>(hidden_size, "Weight");
   state.add_global_memory_writes<T>(elements);
 
   state.exec(nvbench::exec_tag::no_batch, [&](nvbench::launch& launch) {
-    cub::DeviceHierarchicalTransform::Transform(
+    cub::DeviceSegmentedTransform::TransformProlog(
       d_input,
       d_output,
       batch_size,
       hidden_size,
-      rmsnorm_segment_op<T>{hidden_size, rms_norm_eps},
-      hierarchical_normalize_and_scale_op<T>{d_weight},
+      // Later: if we had variable segment sizes, this hidden_size would not work.
+      // Can we make range hierarchical? i.e., range would be an object that is
+      // constructed by the kernel, passed in. Mental model is two iterators, begin
+      // and end.
+      [hidden_size, eps = rms_norm_eps] __device__(auto group, const auto& range) -> float {
+        float partial_sum = 0.0f;
+
+        // with a proper range can be range based for loop
+        for (int item = 0; item < range.size(); ++item)
+        {
+          const float value = static_cast<float>(range[item]);
+          partial_sum += value * value;
+        }
+
+        const float sum_of_squares = cuda::device::reduce(group, partial_sum, cuda::std::plus<>{});
+
+        return rsqrtf(sum_of_squares / static_cast<float>(hidden_size) + eps);
+      },
+      [d_weight] __device__(float rms_rcp, int index_in_segment, T x) {
+        const float scale = static_cast<float>(d_weight[index_in_segment]) * rms_rcp;
+
+        return static_cast<T>(static_cast<float>(x) * scale);
+      },
       launch.get_stream());
   });
 
