@@ -183,7 +183,7 @@ try
     timer.start();
 
     cub::DeviceSegmentedTransform::TransformEpilog(
-      cuda::zip_iterator{lhs_iter, rhs_iter, filter_values},
+      ::cuda::std::make_tuple(lhs_iter, rhs_iter, filter_values),
       output_iterator,
       num_words,
       mask_word_bits,
