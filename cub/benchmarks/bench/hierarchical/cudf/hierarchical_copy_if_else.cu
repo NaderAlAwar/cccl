@@ -110,11 +110,6 @@ try
   auto rhs_dv     = cudf::column_device_view::create(rhs, stream);
   auto decision_d = cudf::column_device_view::create(decision, stream);
 
-  auto lhs_iter = cudf::detail::make_optional_iterator<DataType>(
-    *lhs_dv, cuda::std::conditional_t<HasNulls, cudf::nullate::YES, cudf::nullate::NO>{});
-  auto rhs_iter = cudf::detail::make_optional_iterator<DataType>(
-    *rhs_dv, cuda::std::conditional_t<HasNulls, cudf::nullate::YES, cudf::nullate::NO>{});
-
   auto output = cudf::make_fixed_width_column(
     cudf::data_type{cudf::type_to_id<DataType>()},
     num_items,
@@ -127,43 +122,6 @@ try
   auto* d_mask_words  = output_view.null_mask();
   auto* d_valid_count = valid_count.data();
 
-  auto indices = cuda::counting_iterator<cudf::size_type>{0};
-  auto filter_values =
-    cuda::make_transform_iterator(indices, [decision = *decision_d] __device__(cudf::size_type index) -> bool {
-      if constexpr (HasNulls)
-      {
-        return decision.is_valid_nocheck(index) && decision.element<bool>(index);
-      }
-      else
-      {
-        return decision.element<bool>(index);
-      }
-    });
-  auto output_iterator =
-    cuda::make_transform_output_iterator(d_output, [] __device__(cuda::std::optional<DataType> result) -> DataType {
-      return result.value_or(DataType{});
-    });
-  auto transform_op = [] __device__(auto item) -> cuda::std::optional<DataType> {
-    const auto [lhs_value, rhs_value, select_lhs] = item;
-    return select_lhs ? lhs_value : rhs_value;
-  };
-  auto epilog_op =
-    [d_mask_words,
-     d_valid_count] __device__(auto group, cuda::std::int64_t word_index, cuda::std::optional<DataType> result) {
-      if constexpr (HasNulls)
-      {
-        const std::uint32_t word = cuda::device::ballot(group, result.has_value());
-
-        if (cuda::gpu_thread.is_root_rank(group))
-        {
-          d_mask_words[word_index] = word;
-
-          cuda::atomic_ref<cudf::size_type, cuda::thread_scope_device> atomic_valid_count(*d_valid_count);
-          atomic_valid_count.fetch_add(static_cast<cudf::size_type>(__popc(word)), cuda::memory_order_relaxed);
-        }
-      }
-    };
-
   state.set_cuda_stream(nvbench::make_cuda_stream_view(stream.value()));
   {
     auto const bytes_read    = num_items * ((HasNulls ? sizeof(DataType) : 2 * sizeof(DataType)) + sizeof(bool));
@@ -173,26 +131,76 @@ try
     state.add_global_memory_writes<int8_t>(bytes_written + null_bytes);
   }
 
-  state.exec(nvbench::exec_tag::timer, [&](nvbench::launch& launch, auto& timer) {
-    const auto launch_stream = launch.get_stream().get_stream();
-    if constexpr (HasNulls)
-    {
+  if constexpr (HasNulls)
+  {
+    auto lhs_iter = cudf::detail::make_optional_iterator<DataType>(*lhs_dv, cudf::nullate::YES{});
+    auto rhs_iter = cudf::detail::make_optional_iterator<DataType>(*rhs_dv, cudf::nullate::YES{});
+    auto indices  = cuda::counting_iterator<cudf::size_type>{0};
+    auto filter_values =
+      cuda::make_transform_iterator(indices, [decision = *decision_d] __device__(cudf::size_type index) -> bool {
+        return decision.is_valid_nocheck(index) && decision.element<bool>(index);
+      });
+    auto output_iterator =
+      cuda::make_transform_output_iterator(d_output, [] __device__(cuda::std::optional<DataType> result) -> DataType {
+        return result.value_or(DataType{});
+      });
+    auto transform_op = [] __device__(auto item) -> cuda::std::optional<DataType> {
+      const auto [lhs_value, rhs_value, select_lhs] = item;
+      return select_lhs ? lhs_value : rhs_value;
+    };
+    auto epilog_op =
+      [d_mask_words,
+       d_valid_count] __device__(auto group, cuda::std::int64_t word_index, cuda::std::optional<DataType> result) {
+        const std::uint32_t word = cuda::device::ballot(group, result.has_value());
+
+        if (cuda::gpu_thread.is_root_rank(group))
+        {
+          d_mask_words[word_index] = word;
+
+          cuda::atomic_ref<cudf::size_type, cuda::thread_scope_device> atomic_valid_count(*d_valid_count);
+          atomic_valid_count.fetch_add(static_cast<cudf::size_type>(__popc(word)), cuda::memory_order_relaxed);
+        }
+      };
+
+    state.exec(nvbench::exec_tag::timer, [&](nvbench::launch& launch, auto& timer) {
+      const auto launch_stream = launch.get_stream().get_stream();
       valid_count.set_value_to_zero_async(stream);
-    }
 
-    timer.start();
+      timer.start();
+      cub::DeviceSegmentedTransform::TransformEpilog(
+        ::cuda::std::make_tuple(lhs_iter, rhs_iter, filter_values),
+        output_iterator,
+        num_words,
+        mask_word_bits,
+        transform_op,
+        epilog_op,
+        launch_stream);
+      timer.stop();
+    });
+  }
+  else
+  {
+    auto transform_op = [] __device__(auto item) -> DataType {
+      const auto [lhs_value, rhs_value, select_lhs] = item;
+      return select_lhs ? lhs_value : rhs_value;
+    };
+    auto epilog_op = [] __device__(auto, cuda::std::int64_t, DataType) {};
 
-    cub::DeviceSegmentedTransform::TransformEpilog(
-      ::cuda::std::make_tuple(lhs_iter, rhs_iter, filter_values),
-      output_iterator,
-      num_words,
-      mask_word_bits,
-      transform_op,
-      epilog_op,
-      launch_stream);
+    state.exec(nvbench::exec_tag::timer, [&](nvbench::launch& launch, auto& timer) {
+      const auto launch_stream = launch.get_stream().get_stream();
 
-    timer.stop();
-  });
+      timer.start();
+      cub::DeviceSegmentedTransform::TransformEpilog(
+        ::cuda::std::make_tuple(lhs.data<DataType>(), rhs.data<DataType>(), decision.data<bool>()),
+        d_output,
+        num_words,
+        mask_word_bits,
+        transform_op,
+        epilog_op,
+        launch_stream);
+      timer.stop();
+    });
+  }
 
   auto const host_valid_count = HasNulls ? valid_count.value(stream) : num_items;
   output->set_null_count(num_items - host_valid_count);
