@@ -38,6 +38,45 @@ namespace
 constexpr int mask_word_bits = 32;
 
 template <typename DataType>
+struct nullable_transform_op_t
+{
+  template <typename LhsValueT, typename RhsValueT, typename PredValueT>
+  __device__ cuda::std::optional<DataType> operator()(
+    LhsValueT lhs_value,
+    RhsValueT rhs_value,
+    PredValueT select_lhs,
+    bool lhs_valid,
+    bool rhs_valid,
+    bool decision_valid) const
+  {
+    if (decision_valid && select_lhs)
+    {
+      return lhs_valid ? ::cuda::std::optional<DataType>{static_cast<DataType>(lhs_value)} : cuda::std::nullopt;
+    }
+
+    return rhs_valid ? ::cuda::std::optional<DataType>{static_cast<DataType>(rhs_value)} : cuda::std::nullopt;
+  }
+
+  template <typename ItemT>
+  __device__ cuda::std::optional<DataType> operator()(ItemT item) const
+  {
+    if constexpr (::cuda::std::tuple_size_v<::cuda::std::decay_t<ItemT>> == 3)
+    {
+      const auto [lhs_value, rhs_value, select_lhs] = item;
+      return select_lhs ? lhs_value : rhs_value;
+    }
+    else
+    {
+      const auto [lhs_value, lhs_mask_word, rhs_value, rhs_mask_word, select_lhs, decision_mask_word] = item;
+      (void) lhs_mask_word;
+      (void) rhs_mask_word;
+      (void) decision_mask_word;
+      return select_lhs ? ::cuda::std::optional<DataType>{lhs_value} : ::cuda::std::optional<DataType>{rhs_value};
+    }
+  }
+};
+
+template <typename DataType>
 void check_copy_if_else_correctness(
   const cudf::column_view& output, int valid_count, const cudf::column_view& expected, rmm::cuda_stream_view stream)
 {
@@ -137,21 +176,7 @@ try
       cuda::make_transform_output_iterator(d_output, [] __device__(cuda::std::optional<DataType> result) -> DataType {
         return result.value_or(DataType{});
       });
-    auto transform_op = [] __device__(auto item) -> cuda::std::optional<DataType> {
-      if constexpr (::cuda::std::tuple_size_v<::cuda::std::decay_t<decltype(item)>> == 3)
-      {
-        const auto [lhs_value, rhs_value, select_lhs] = item;
-        return select_lhs ? lhs_value : rhs_value;
-      }
-      else
-      {
-        const auto [lhs_value, lhs_mask_word, rhs_value, rhs_mask_word, select_lhs, decision_mask_word] = item;
-        (void) lhs_mask_word;
-        (void) rhs_mask_word;
-        (void) decision_mask_word;
-        return select_lhs ? ::cuda::std::optional<DataType>{lhs_value} : ::cuda::std::optional<DataType>{rhs_value};
-      }
-    };
+    auto transform_op = nullable_transform_op_t<DataType>{};
     auto epilog_op =
       [d_mask_words,
        d_valid_count] __device__(auto group, cuda::std::int64_t word_index, cuda::std::optional<DataType> result) {

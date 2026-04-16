@@ -104,6 +104,24 @@ struct transform_epilog_result<TransformOpT, InputRefT, false>
   using type = ::cuda::std::decay_t<::cuda::std::invoke_result_t<TransformOpT, InputRefT>>;
 };
 
+template <typename TransformOpT, typename LhsValueT, typename RhsValueT, typename PredValueT, bool AcceptsIndex>
+struct nullable_transform_epilog_result
+{};
+
+template <typename TransformOpT, typename LhsValueT, typename RhsValueT, typename PredValueT>
+struct nullable_transform_epilog_result<TransformOpT, LhsValueT, RhsValueT, PredValueT, true>
+{
+  using type = ::cuda::std::decay_t<
+    ::cuda::std::invoke_result_t<TransformOpT, ::cuda::std::int64_t, LhsValueT, RhsValueT, PredValueT, bool, bool, bool>>;
+};
+
+template <typename TransformOpT, typename LhsValueT, typename RhsValueT, typename PredValueT>
+struct nullable_transform_epilog_result<TransformOpT, LhsValueT, RhsValueT, PredValueT, false>
+{
+  using type =
+    ::cuda::std::decay_t<::cuda::std::invoke_result_t<TransformOpT, LhsValueT, RhsValueT, PredValueT, bool, bool, bool>>;
+};
+
 template <int BlockThreads,
           typename InputIteratorT,
           typename OutputIteratorT,
@@ -265,18 +283,27 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
                 "The nullable raw-pointer hierarchical transform epilog kernel requires a tuple of raw pointers and "
                 "mask pointers.");
 
-  using input_ref_t = ::cuda::std::tuple<
-    ::cuda::std::optional<
-      ::cuda::std::remove_cv_t<::cuda::std::remove_pointer_t<::cuda::std::tuple_element_t<0, InputIteratorT>>>>,
-    ::cuda::std::optional<
-      ::cuda::std::remove_cv_t<::cuda::std::remove_pointer_t<::cuda::std::tuple_element_t<2, InputIteratorT>>>>,
-    bool>;
-  constexpr bool transform_accepts_index = ::cuda::std::is_invocable_v<TransformOpT, ::cuda::std::int64_t, input_ref_t>;
+  using lhs_value_t =
+    ::cuda::std::remove_cv_t<::cuda::std::remove_pointer_t<::cuda::std::tuple_element_t<0, InputIteratorT>>>;
+  using rhs_value_t =
+    ::cuda::std::remove_cv_t<::cuda::std::remove_pointer_t<::cuda::std::tuple_element_t<2, InputIteratorT>>>;
+  using pred_value_t =
+    ::cuda::std::remove_cv_t<::cuda::std::remove_pointer_t<::cuda::std::tuple_element_t<4, InputIteratorT>>>;
+  constexpr bool transform_accepts_index = ::cuda::std::
+    is_invocable_v<TransformOpT, ::cuda::std::int64_t, lhs_value_t, rhs_value_t, pred_value_t, bool, bool, bool>;
 
-  static_assert(transform_accepts_index || ::cuda::std::is_invocable_v<TransformOpT, input_ref_t>,
-                "transform_op must be invocable with either (index, value) or (value).");
+  static_assert(
+    transform_accepts_index
+      || ::cuda::std::is_invocable_v<TransformOpT, lhs_value_t, rhs_value_t, pred_value_t, bool, bool, bool>,
+    "transform_op must be invocable with either (index, lhs, rhs, pred, lhs_valid, rhs_valid, pred_valid) or "
+    "(lhs, rhs, pred, lhs_valid, rhs_valid, pred_valid).");
 
-  using transform_result_t = typename transform_epilog_result<TransformOpT, input_ref_t, transform_accepts_index>::type;
+  using transform_result_t = typename nullable_transform_epilog_result<
+    TransformOpT,
+    lhs_value_t,
+    rhs_value_t,
+    pred_value_t,
+    transform_accepts_index>::type;
 
   static_assert(::cuda::std::is_default_constructible_v<transform_result_t>,
                 "The nullable raw-pointer hierarchical transform epilog kernel default-initializes the per-thread "
@@ -294,9 +321,6 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
   using rhs_mask_ptr_t  = ::cuda::std::tuple_element_t<3, InputIteratorT>;
   using pred_ptr_t      = ::cuda::std::tuple_element_t<4, InputIteratorT>;
   using pred_mask_ptr_t = ::cuda::std::tuple_element_t<5, InputIteratorT>;
-  using lhs_value_t     = ::cuda::std::remove_cv_t<::cuda::std::remove_pointer_t<lhs_ptr_t>>;
-  using rhs_value_t     = ::cuda::std::remove_cv_t<::cuda::std::remove_pointer_t<rhs_ptr_t>>;
-  using pred_value_t    = ::cuda::std::remove_cv_t<::cuda::std::remove_pointer_t<pred_ptr_t>>;
   using mask_word_t     = ::cuda::std::remove_cv_t<::cuda::std::remove_pointer_t<lhs_mask_ptr_t>>;
 
   static_assert(sizeof(mask_word_t) <= sizeof(::cuda::std::uint32_t),
@@ -402,18 +426,19 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
           const bool lhs_valid  = ((lhs_word >> lane_rank) & 1u) != 0;
           const bool rhs_valid  = ((rhs_word >> lane_rank) & 1u) != 0;
           const bool pred_valid = ((pred_word >> lane_rank) & 1u) != 0;
+          const auto lhs_value  = lhs_items[local_item_index];
+          const auto rhs_value  = rhs_items[local_item_index];
+          const auto pred_value = pred_items[local_item_index];
 
-          auto input_value = ::cuda::std::make_tuple(
-            lhs_valid ? ::cuda::std::optional<lhs_value_t>{lhs_items[local_item_index]} : ::cuda::std::nullopt,
-            rhs_valid ? ::cuda::std::optional<rhs_value_t>{rhs_items[local_item_index]} : ::cuda::std::nullopt,
-            pred_valid && pred_items[local_item_index]);
           if constexpr (transform_accepts_index)
           {
-            thread_results.items[item_slot] = transform_op(item_index, input_value);
+            thread_results.items[item_slot] =
+              transform_op(item_index, lhs_value, rhs_value, pred_value, lhs_valid, rhs_valid, pred_valid);
           }
           else
           {
-            thread_results.items[item_slot] = transform_op(input_value);
+            thread_results.items[item_slot] =
+              transform_op(lhs_value, rhs_value, pred_value, lhs_valid, rhs_valid, pred_valid);
           }
           *(d_out + item_index) = thread_results.items[item_slot];
         }
