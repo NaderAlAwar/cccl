@@ -166,7 +166,7 @@ try
 
   state.set_cuda_stream(nvbench::make_cuda_stream_view(stream.value()));
   {
-    auto const bytes_read    = num_items * (sizeof(DataType) + sizeof(bool));
+    auto const bytes_read    = num_items * ((HasNulls ? sizeof(DataType) : 2 * sizeof(DataType)) + sizeof(bool));
     auto const bytes_written = num_items * sizeof(DataType);
     auto const null_bytes    = HasNulls ? 2 * cudf::bitmask_allocation_size_bytes(num_items) : 0;
     state.add_global_memory_reads<int8_t>(bytes_read);
