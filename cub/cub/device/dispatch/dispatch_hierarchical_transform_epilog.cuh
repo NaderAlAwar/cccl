@@ -35,13 +35,6 @@ struct DeviceHierarchicalTransformEpilogKernelSource
   CUB_DEFINE_KERNEL_GETTER(
     HierarchicalTransformEpilogKernel,
     DeviceHierarchicalTransformEpilogKernel<BlockThreads, InputIteratorT, OutputIteratorT, TransformOpT, DeviceEpilogOpT>)
-  CUB_DEFINE_KERNEL_GETTER(
-    HierarchicalTransformEpilogRawPointerKernel,
-    DeviceHierarchicalTransformEpilogRawPointerKernel<BlockThreads,
-                                                      InputIteratorT,
-                                                      OutputIteratorT,
-                                                      TransformOpT,
-                                                      DeviceEpilogOpT>)
 };
 
 template <int BlockThreads,
@@ -140,13 +133,6 @@ struct DispatchHierarchicalTransformEpilog
 
   CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE cudaError_t Invoke()
   {
-    if constexpr (is_raw_pointer_tuple<InputIteratorT>::value)
-    {
-      if (segment_size == 32)
-      {
-        return InvokeKernel(kernel_source.HierarchicalTransformEpilogRawPointerKernel());
-      }
-    }
     return InvokeKernel(kernel_source.HierarchicalTransformEpilogKernel());
   }
 };
