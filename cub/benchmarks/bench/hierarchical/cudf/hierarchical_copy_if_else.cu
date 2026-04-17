@@ -163,11 +163,11 @@ try
 
   state.set_cuda_stream(nvbench::make_cuda_stream_view(stream.value()));
   {
-    auto const validity_bytes = HasNulls ? 3 * cudf::bitmask_allocation_size_bytes(num_items) : 0;
-    auto const bytes_read     = num_items * (2 * sizeof(DataType) + sizeof(bool)) + validity_bytes;
-    auto const bytes_written  = num_items * sizeof(DataType);
+    auto const bytes_read    = num_items * ((HasNulls ? sizeof(DataType) : 2 * sizeof(DataType)) + sizeof(bool));
+    auto const bytes_written = num_items * sizeof(DataType);
+    auto const null_bytes    = HasNulls ? 2 * cudf::bitmask_allocation_size_bytes(num_items) : 0;
     state.add_global_memory_reads<int8_t>(bytes_read);
-    state.add_global_memory_writes<int8_t>(bytes_written);
+    state.add_global_memory_writes<int8_t>(bytes_written + null_bytes);
   }
 
   if constexpr (HasNulls)

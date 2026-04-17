@@ -36,6 +36,13 @@ namespace
 {
 constexpr int mask_word_bits = 32;
 
+template <typename DataType>
+struct nullable_result
+{
+  DataType value{};
+  ::cuda::std::uint8_t valid{};
+};
+
 template <typename T>
 void materialize_validity(
   thrust::device_vector<::cuda::std::uint8_t>& out, cudf::column_view const& column, rmm::cuda_stream_view stream)
@@ -83,42 +90,29 @@ void check_copy_if_else_correctness(
 
 template <typename DataType>
 void check_nullable_copy_if_else_correctness(
-  thrust::device_vector<DataType> const& output,
-  cudf::column_view const& lhs,
-  cudf::column_view const& rhs,
-  cudf::column_view const& decision,
+  thrust::device_vector<nullable_result<DataType>> const& output,
+  cudf::column_view const& expected,
   rmm::cuda_stream_view stream)
 {
-  auto const* lhs_data      = lhs.data<DataType>();
-  auto const* rhs_data      = rhs.data<DataType>();
-  auto const* decision_data = decision.data<bool>();
-  auto const* lhs_mask      = lhs.null_mask();
-  auto const* rhs_mask      = rhs.null_mask();
-  auto const* decision_mask = decision.null_mask();
+  auto const* expected_data = expected.data<DataType>();
+  auto const* expected_mask = expected.null_mask();
   auto const* output_data   = thrust::raw_pointer_cast(output.data());
 
   bool const values_match = thrust::all_of(
     thrust::cuda::par.on(stream.value()),
     thrust::make_counting_iterator<cudf::size_type>(0),
-    thrust::make_counting_iterator<cudf::size_type>(lhs.size()),
-    [output_data, lhs_data, rhs_data, decision_data, lhs_mask, rhs_mask, decision_mask] __device__(
-      cudf::size_type index) {
-      bool const lhs_valid =
-        lhs_mask == nullptr || ((lhs_mask[index / mask_word_bits] >> (index % mask_word_bits)) & 1u) != 0;
-      bool const rhs_valid =
-        rhs_mask == nullptr || ((rhs_mask[index / mask_word_bits] >> (index % mask_word_bits)) & 1u) != 0;
-      bool const decision_valid =
-        decision_mask == nullptr || ((decision_mask[index / mask_word_bits] >> (index % mask_word_bits)) & 1u) != 0;
-      bool const choose_lhs = decision_valid && decision_data[index];
-      auto const expected =
-        choose_lhs ? (lhs_valid ? lhs_data[index] : DataType{}) : (rhs_valid ? rhs_data[index] : DataType{});
-      return output_data[index] == expected;
+    thrust::make_counting_iterator<cudf::size_type>(expected.size()),
+    [output_data, expected_data, expected_mask] __device__(cudf::size_type index) {
+      bool const expected_valid =
+        expected_mask == nullptr || ((expected_mask[index / mask_word_bits] >> (index % mask_word_bits)) & 1u) != 0;
+      auto const result = output_data[index];
+      return (result.valid != 0) == expected_valid && (!expected_valid || result.value == expected_data[index]);
     });
 
   if (!values_match)
   {
-    throw std::runtime_error("device_transform_copy_if_else_nullable correctness check failed: unexpected output "
-                             "value.");
+    throw std::runtime_error("device_transform_copy_if_else_nullable correctness check failed: unexpected output value "
+                             "or validity.");
   }
 }
 } // namespace
@@ -198,12 +192,12 @@ try
   materialize_validity<DataType>(rhs_valid, rhs, stream);
   materialize_validity<bool>(decision_valid, decision, stream);
 
-  thrust::device_vector<DataType> output(num_items);
+  thrust::device_vector<nullable_result<DataType>> output(num_items);
 
   state.set_cuda_stream(nvbench::make_cuda_stream_view(stream.value()));
   state.add_global_memory_reads<int8_t>(
-    num_items * (2 * sizeof(DataType) + sizeof(bool)) + 3 * cudf::bitmask_allocation_size_bytes(num_items));
-  state.add_global_memory_writes<int8_t>(num_items * sizeof(DataType));
+    num_items * (2 * sizeof(DataType) + sizeof(bool) + 3 * sizeof(::cuda::std::uint8_t)));
+  state.add_global_memory_writes<int8_t>(num_items * sizeof(nullable_result<DataType>));
 
   auto transform_op =
     [] __device__(
@@ -214,7 +208,8 @@ try
       ::cuda::std::uint8_t rhs_is_valid,
       ::cuda::std::uint8_t decision_is_valid) {
       bool const choose_lhs = decision_is_valid != 0 && select_lhs;
-      return choose_lhs ? (lhs_is_valid != 0 ? lhs_value : DataType{}) : (rhs_is_valid != 0 ? rhs_value : DataType{});
+      return nullable_result<DataType>{choose_lhs ? lhs_value : rhs_value,
+                                       static_cast<::cuda::std::uint8_t>(choose_lhs ? lhs_is_valid : rhs_is_valid)};
     };
 
   state.exec(nvbench::exec_tag::timer, [&](nvbench::launch& launch, auto& timer) {
@@ -236,7 +231,8 @@ try
     timer.stop();
   });
 
-  check_nullable_copy_if_else_correctness(output, lhs, rhs, decision, stream);
+  auto expected = cudf::copy_if_else(lhs, rhs, decision);
+  check_nullable_copy_if_else_correctness(output, expected->view(), stream);
 }
 catch (const std::bad_alloc&)
 {
