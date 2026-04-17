@@ -42,14 +42,6 @@ struct DeviceHierarchicalTransformEpilogKernelSource
                                                       OutputIteratorT,
                                                       TransformOpT,
                                                       DeviceEpilogOpT>)
-  CUB_DEFINE_KERNEL_GETTER(
-    HierarchicalTransformEpilogNullableRawPointerKernel,
-    DeviceHierarchicalTransformEpilogNullableRawPointerKernel<
-      BlockThreads,
-      InputIteratorT,
-      OutputIteratorT,
-      TransformOpT,
-      DeviceEpilogOpT>)
 };
 
 template <int BlockThreads,
@@ -148,12 +140,6 @@ struct DispatchHierarchicalTransformEpilog
 
   CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE cudaError_t Invoke()
   {
-    if constexpr (is_nullable_raw_pointer_mask_tuple<InputIteratorT>::value)
-    {
-      return segment_size == 32
-             ? InvokeKernel(kernel_source.HierarchicalTransformEpilogNullableRawPointerKernel())
-             : cudaErrorInvalidValue;
-    }
     if constexpr (is_raw_pointer_tuple<InputIteratorT>::value)
     {
       if (segment_size == 32)

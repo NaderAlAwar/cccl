@@ -133,24 +133,20 @@ try
 
   if constexpr (HasNulls)
   {
+    auto lhs_iter = cudf::detail::make_optional_iterator<DataType>(*lhs_dv, cudf::nullate::YES{});
+    auto rhs_iter = cudf::detail::make_optional_iterator<DataType>(*rhs_dv, cudf::nullate::YES{});
+    auto indices  = cuda::counting_iterator<cudf::size_type>{0};
+    auto filter_values =
+      cuda::make_transform_iterator(indices, [decision = *decision_d] __device__(cudf::size_type index) -> bool {
+        return decision.is_valid_nocheck(index) && decision.element<bool>(index);
+      });
     auto output_iterator =
       cuda::make_transform_output_iterator(d_output, [] __device__(cuda::std::optional<DataType> result) -> DataType {
         return result.value_or(DataType{});
       });
     auto transform_op = [] __device__(auto item) -> cuda::std::optional<DataType> {
-      if constexpr (::cuda::std::tuple_size_v<::cuda::std::decay_t<decltype(item)>> == 3)
-      {
-        const auto [lhs_value, rhs_value, select_lhs] = item;
-        return select_lhs ? lhs_value : rhs_value;
-      }
-      else
-      {
-        const auto [lhs_value, lhs_mask_word, rhs_value, rhs_mask_word, select_lhs, decision_mask_word] = item;
-        (void) lhs_mask_word;
-        (void) rhs_mask_word;
-        (void) decision_mask_word;
-        return select_lhs ? ::cuda::std::optional<DataType>{lhs_value} : ::cuda::std::optional<DataType>{rhs_value};
-      }
+      const auto [lhs_value, rhs_value, select_lhs] = item;
+      return select_lhs ? lhs_value : rhs_value;
     };
     auto epilog_op =
       [d_mask_words,
@@ -172,13 +168,7 @@ try
 
       timer.start();
       cub::DeviceSegmentedTransform::TransformEpilog(
-        ::cuda::std::make_tuple(
-          lhs.data<DataType>(),
-          lhs.null_mask(),
-          rhs.data<DataType>(),
-          rhs.null_mask(),
-          decision.data<bool>(),
-          decision.null_mask()),
+        ::cuda::std::make_tuple(lhs_iter, rhs_iter, filter_values),
         output_iterator,
         num_words,
         mask_word_bits,
