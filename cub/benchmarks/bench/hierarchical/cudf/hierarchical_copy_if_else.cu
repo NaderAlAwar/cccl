@@ -148,18 +148,26 @@ try
     return select_lhs ? lhs_value : rhs_value;
   };
   auto epilog_op =
-    [d_mask_words,
-     d_valid_count] __device__(auto group, cuda::std::int64_t word_index, cuda::std::optional<DataType> result) {
+    [d_mask_words, d_valid_count] __device__(
+      auto block_group, bool segment_valid, cuda::std::int64_t word_index, cuda::std::optional<DataType> result) {
       if constexpr (HasNulls)
       {
-        const std::uint32_t word = cuda::device::ballot(group, result.has_value());
+        auto warp_group          = cuda::experimental::this_warp(block_group);
+        const std::uint32_t word = cuda::device::ballot(warp_group, segment_valid && result.has_value());
+        int warp_valid           = 0;
 
-        if (cuda::gpu_thread.is_root_rank(group))
+        if (segment_valid && cuda::gpu_thread.is_root_rank(warp_group))
         {
           d_mask_words[word_index] = word;
+          warp_valid               = __popc(word);
+        }
 
+        const int block_valid = cuda::device::reduce(block_group, warp_valid, cuda::std::plus<>{});
+
+        if (cuda::gpu_thread.is_root_rank(block_group))
+        {
           cuda::atomic_ref<cudf::size_type, cuda::thread_scope_device> atomic_valid_count(*d_valid_count);
-          atomic_valid_count.fetch_add(static_cast<cudf::size_type>(__popc(word)), cuda::memory_order_relaxed);
+          atomic_valid_count.fetch_add(static_cast<cudf::size_type>(block_valid), cuda::memory_order_relaxed);
         }
       }
     };
@@ -183,7 +191,7 @@ try
     timer.start();
 
     cub::DeviceSegmentedTransform::TransformEpilog(
-      ::cuda::std::make_tuple(lhs_iter, rhs_iter, filter_values),
+      cuda::zip_iterator{lhs_iter, rhs_iter, filter_values},
       output_iterator,
       num_words,
       mask_word_bits,
