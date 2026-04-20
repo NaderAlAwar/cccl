@@ -4,6 +4,7 @@
 #include <cub/device/device_transform.cuh>
 
 #include <cuda/iterator>
+#include <cuda/std/tuple>
 
 #include <nvbench_helper.cuh>
 
@@ -131,11 +132,11 @@ try
     auto const* d_rhs      = rhs.data<DataType>();
     auto const* d_decision = decision.data<bool>();
 
-    state.add_global_memory_reads<int8_t>(num_items * (sizeof(DataType) + sizeof(bool)));
+    state.add_global_memory_reads<int8_t>(num_items * (2 * sizeof(DataType) + sizeof(bool)));
     state.add_global_memory_writes<int8_t>(num_items * sizeof(DataType));
 
-    auto transform_op = [d_lhs, d_rhs, d_decision] __device__(cudf::size_type index) {
-      return d_decision[index] ? d_lhs[index] : d_rhs[index];
+    auto transform_op = [] __device__(DataType lhs_value, DataType rhs_value, bool choose_lhs) {
+      return choose_lhs ? lhs_value : rhs_value;
     };
 
     state.exec(nvbench::exec_tag::timer, [&](nvbench::launch& launch, auto& timer) {
@@ -143,7 +144,7 @@ try
 
       timer.start();
       cub::DeviceTransform::Transform(
-        cuda::counting_iterator<cudf::size_type>{0}, d_output, num_items, transform_op, launch_stream);
+        cuda::std::tuple{d_lhs, d_rhs, d_decision}, d_output, num_items, transform_op, launch_stream);
       timer.stop();
     });
   }
