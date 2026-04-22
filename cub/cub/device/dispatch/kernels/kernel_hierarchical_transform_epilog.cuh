@@ -13,6 +13,7 @@
 #  pragma system_header
 #endif // no system header
 
+#include <cub/block/block_load.cuh>
 #include <cub/device/dispatch/kernels/kernel_hierarchical_common.cuh>
 
 #include <cuda/std/cstdint>
@@ -38,32 +39,6 @@ struct transform_epilog_result<TransformOpT, InputRefT, false>
 {
   using type = ::cuda::std::decay_t<::cuda::std::invoke_result_t<TransformOpT, InputRefT>>;
 };
-
-template <typename DeviceEpilogOpT,
-          typename BlockGroupT,
-          typename WarpGroupT,
-          typename SegmentIndexT,
-          typename TransformResultT>
-_CCCL_DEVICE _CCCL_FORCEINLINE void invoke_transform_epilog_callback(
-  DeviceEpilogOpT& device_epilog_op,
-  BlockGroupT block_group,
-  WarpGroupT warp_group,
-  bool segment_valid,
-  SegmentIndexT segment_index,
-  TransformResultT const& thread_result)
-{
-  if constexpr (::cuda::std::is_invocable_v<DeviceEpilogOpT, BlockGroupT, bool, SegmentIndexT, TransformResultT>)
-  {
-    device_epilog_op(block_group, segment_valid, segment_index, thread_result);
-  }
-  else
-  {
-    if (segment_valid)
-    {
-      device_epilog_op(warp_group, segment_index, thread_result);
-    }
-  }
-}
 
 template <int BlockThreads,
           typename InputIteratorT,
@@ -110,34 +85,55 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
   const int warp_rank_in_block = static_cast<int>(threadIdx.x / warp_threads);
   const auto block_hierarchy   = ::cuda::hierarchy(::cuda::grid_dims(gridDim), ::cuda::block_dims<BlockThreads>());
   auto block_group             = ::cuda::experimental::this_block{block_hierarchy};
-  auto warp_group              = ::cuda::experimental::this_warp{block_hierarchy};
 
   const auto block_segment_stride = static_cast<::cuda::std::int64_t>(gridDim.x) * warps_per_block;
   const auto block_segment_base   = static_cast<::cuda::std::int64_t>(blockIdx.x) * warps_per_block;
+  using block_load_t              = BlockLoad<input_ref_t, BlockThreads, 1, BLOCK_LOAD_DIRECT>;
+  __shared__ typename block_load_t::TempStorage temp_storage;
+
+  // Assumption is one item per thread
+  __shared__ input_ref_t shared_values[BlockThreads];
 
   for (::cuda::std::int64_t tile_segment_base = block_segment_base; tile_segment_base < num_segments;
        tile_segment_base += block_segment_stride)
   {
-    const auto segment_index = tile_segment_base + warp_rank_in_block;
+    const auto segment_index = tile_segment_base + warp_rank_in_block; // absolute segment index
     const bool segment_valid = segment_index < num_segments;
     transform_result_t thread_result{};
+    input_ref_t loaded_value[1];
+
+    const auto remaining_segments = num_segments - tile_segment_base;
+    const int segments_to_load =
+      static_cast<int>((::cuda::std::min) (remaining_segments, static_cast<::cuda::std::int64_t>(warps_per_block)));
+    const int items_to_load = segments_to_load * segment_size;
+    block_load_t(temp_storage)
+      .Load(d_in + tile_segment_base * static_cast<::cuda::std::int64_t>(segment_size), loaded_value, items_to_load);
+
+    shared_values[threadIdx.x] = loaded_value[0];
+    __syncthreads();
 
     if (segment_valid && lane_rank < segment_size)
     {
-      const auto item_index = segment_index * static_cast<::cuda::std::int64_t>(segment_size) + lane_rank;
+      const auto shared_item_index = lane_rank + warp_rank_in_block * segment_size;
       if constexpr (transform_accepts_index)
       {
-        thread_result = transform_op(item_index, *(d_in + item_index));
+        const auto item_index = tile_segment_base * static_cast<::cuda::std::int64_t>(segment_size)
+                              + static_cast<::cuda::std::int64_t>(shared_item_index);
+        thread_result         = transform_op(item_index, shared_values[shared_item_index]);
+        *(d_out + item_index) = thread_result;
       }
       else
       {
-        thread_result = transform_op(*(d_in + item_index));
+        const auto item_index = tile_segment_base * static_cast<::cuda::std::int64_t>(segment_size)
+                              + static_cast<::cuda::std::int64_t>(shared_item_index);
+        thread_result         = transform_op(shared_values[shared_item_index]);
+        *(d_out + item_index) = thread_result;
       }
-      *(d_out + item_index) = thread_result;
     }
 
-    invoke_transform_epilog_callback(
-      device_epilog_op, block_group, warp_group, segment_valid, segment_index, thread_result);
+    device_epilog_op(block_group, segment_valid, segment_index, thread_result);
+
+    __syncthreads();
   }
 }
 } // namespace detail::hierarchical
