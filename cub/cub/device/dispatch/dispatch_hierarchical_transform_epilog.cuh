@@ -26,6 +26,7 @@ CUB_NAMESPACE_BEGIN
 namespace detail::hierarchical
 {
 template <int BlockThreads,
+          int ItemsPerThread,
           typename InputIteratorT,
           typename OutputIteratorT,
           typename TransformOpT,
@@ -34,19 +35,27 @@ struct DeviceHierarchicalTransformEpilogKernelSource
 {
   CUB_DEFINE_KERNEL_GETTER(
     HierarchicalTransformEpilogKernel,
-    DeviceHierarchicalTransformEpilogKernel<BlockThreads, InputIteratorT, OutputIteratorT, TransformOpT, DeviceEpilogOpT>)
+    DeviceHierarchicalTransformEpilogKernel<BlockThreads,
+                                            ItemsPerThread,
+                                            InputIteratorT,
+                                            OutputIteratorT,
+                                            TransformOpT,
+                                            DeviceEpilogOpT>)
 };
 
 template <int BlockThreads,
+          int ItemsPerThread,
           typename InputIteratorT,
           typename OutputIteratorT,
           typename TransformOpT,
           typename DeviceEpilogOpT,
-          typename KernelSource          = DeviceHierarchicalTransformEpilogKernelSource<BlockThreads,
-                                                                                         InputIteratorT,
-                                                                                         OutputIteratorT,
-                                                                                         TransformOpT,
-                                                                                         DeviceEpilogOpT>,
+          typename KernelSource = DeviceHierarchicalTransformEpilogKernelSource<
+            BlockThreads,
+            ItemsPerThread,
+            InputIteratorT,
+            OutputIteratorT,
+            TransformOpT,
+            DeviceEpilogOpT>,
           typename KernelLauncherFactory = CUB_DETAIL_DEFAULT_KERNEL_LAUNCHER_FACTORY>
 struct DispatchHierarchicalTransformEpilog
 {
@@ -137,16 +146,19 @@ struct DispatchHierarchicalTransformEpilog
   }
 };
 
-template <int BlockThreads = 256,
+template <int BlockThreads   = 256,
+          int ItemsPerThread = 1,
           typename InputIteratorT,
           typename OutputIteratorT,
           typename TransformOpT,
           typename DeviceEpilogOpT,
-          typename KernelSource          = DeviceHierarchicalTransformEpilogKernelSource<BlockThreads,
-                                                                                         InputIteratorT,
-                                                                                         OutputIteratorT,
-                                                                                         TransformOpT,
-                                                                                         DeviceEpilogOpT>,
+          typename KernelSource = DeviceHierarchicalTransformEpilogKernelSource<
+            BlockThreads,
+            ItemsPerThread,
+            InputIteratorT,
+            OutputIteratorT,
+            TransformOpT,
+            DeviceEpilogOpT>,
           typename KernelLauncherFactory = CUB_DETAIL_DEFAULT_KERNEL_LAUNCHER_FACTORY>
 CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE cudaError_t dispatch_transform_epilog(
   InputIteratorT d_in,
@@ -161,6 +173,7 @@ CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE cudaError_t dispatch_transform_epilog(
 {
   return DispatchHierarchicalTransformEpilog<
            BlockThreads,
+           ItemsPerThread,
            InputIteratorT,
            OutputIteratorT,
            TransformOpT,
