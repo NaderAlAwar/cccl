@@ -155,17 +155,27 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
   {
     const auto segment_index = tile_segment_base + warp_rank_in_block * ItemsPerThread; // absolute segment index of the
                                                                                         // first item
+    const auto tile_item_base = tile_segment_base * static_cast<::cuda::std::int64_t>(segment_size);
     input_ref_t loaded_values[ItemsPerThread];
     transform_result_t output_values[ItemsPerThread]{};
     indices_storage_t indices_storage;
 
     const auto remaining_segments                  = num_segments - tile_segment_base;
     constexpr int max_segments_per_block_iteration = warps_per_block * ItemsPerThread;
-    const int segments_to_load                     = static_cast<int>(
+    const bool full_tile = remaining_segments >= static_cast<::cuda::std::int64_t>(max_segments_per_block_iteration);
+    const int full_tile_items  = max_segments_per_block_iteration * segment_size;
+    const int segments_to_load = static_cast<int>(
       (::cuda::std::min) (remaining_segments, static_cast<::cuda::std::int64_t>(max_segments_per_block_iteration)));
     const int items_to_load = segments_to_load * segment_size;
-    block_load_t(temp_storage.load)
-      .Load(d_in + tile_segment_base * static_cast<::cuda::std::int64_t>(segment_size), loaded_values, items_to_load);
+    if (full_tile && segment_size == warp_threads)
+    {
+      block_load_t(temp_storage.load).Load(d_in + tile_item_base, loaded_values);
+    }
+    else
+    {
+      block_load_t(temp_storage.load)
+        .Load(d_in + tile_item_base, loaded_values, full_tile ? full_tile_items : items_to_load);
+    }
 
     indices_storage.initialize();
     for (int item = 0; item < ItemsPerThread; ++item)
@@ -176,41 +186,75 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
 
     if (lane_rank < segment_size)
     {
-      for (int item = 0; item < ItemsPerThread; ++item)
+      if (full_tile)
       {
-        const auto item_segment_index = segment_index + item;
-        const bool item_valid         = item_segment_index < num_segments;
-
-        if (!item_valid)
+        for (int item = 0; item < ItemsPerThread; ++item)
         {
-          continue;
-        }
-
-        const auto shared_item_index = item + (lane_rank + warp_rank_in_block * segment_size) * ItemsPerThread;
-        if constexpr (transform_accepts_index || epilog_accepts_indices)
-        {
-          const auto item_index = tile_segment_base * static_cast<::cuda::std::int64_t>(segment_size)
-                                + static_cast<::cuda::std::int64_t>(shared_item_index);
-          indices_storage.set(item, item_index);
-
-          if constexpr (transform_accepts_index)
+          const auto shared_item_index = item + (lane_rank + warp_rank_in_block * segment_size) * ItemsPerThread;
+          if constexpr (transform_accepts_index || epilog_accepts_indices)
           {
-            output_values[item] = transform_op(item_index, shared_values[shared_item_index]);
+            const auto item_index = tile_item_base + static_cast<::cuda::std::int64_t>(shared_item_index);
+            indices_storage.set(item, item_index);
+
+            if constexpr (transform_accepts_index)
+            {
+              output_values[item] = transform_op(item_index, shared_values[shared_item_index]);
+            }
+            else
+            {
+              output_values[item] = transform_op(shared_values[shared_item_index]);
+            }
           }
           else
           {
             output_values[item] = transform_op(shared_values[shared_item_index]);
           }
         }
-        else
+      }
+      else
+      {
+        for (int item = 0; item < ItemsPerThread; ++item)
         {
-          output_values[item] = transform_op(shared_values[shared_item_index]);
+          const auto item_segment_index = segment_index + item;
+          const bool item_valid         = item_segment_index < num_segments;
+
+          if (!item_valid)
+          {
+            continue;
+          }
+
+          const auto shared_item_index = item + (lane_rank + warp_rank_in_block * segment_size) * ItemsPerThread;
+          if constexpr (transform_accepts_index || epilog_accepts_indices)
+          {
+            const auto item_index = tile_item_base + static_cast<::cuda::std::int64_t>(shared_item_index);
+            indices_storage.set(item, item_index);
+
+            if constexpr (transform_accepts_index)
+            {
+              output_values[item] = transform_op(item_index, shared_values[shared_item_index]);
+            }
+            else
+            {
+              output_values[item] = transform_op(shared_values[shared_item_index]);
+            }
+          }
+          else
+          {
+            output_values[item] = transform_op(shared_values[shared_item_index]);
+          }
         }
       }
     }
 
-    block_store_t(temp_storage.store)
-      .Store(d_out + tile_segment_base * static_cast<::cuda::std::int64_t>(segment_size), output_values, items_to_load);
+    if (full_tile && segment_size == warp_threads)
+    {
+      block_store_t(temp_storage.store).Store(d_out + tile_item_base, output_values);
+    }
+    else
+    {
+      block_store_t(temp_storage.store)
+        .Store(d_out + tile_item_base, output_values, full_tile ? full_tile_items : items_to_load);
+    }
 
     if constexpr (epilog_accepts_indices)
     {
