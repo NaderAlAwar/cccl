@@ -42,6 +42,37 @@ struct transform_epilog_result<TransformOpT, InputRefT, false>
   using type = ::cuda::std::decay_t<::cuda::std::invoke_result_t<TransformOpT, InputRefT>>;
 };
 
+template <int ItemsPerThread>
+struct transform_epilog_indices_storage
+{
+  ::cuda::std::int64_t values[ItemsPerThread];
+
+  _CCCL_DEVICE _CCCL_FORCEINLINE void initialize()
+  {
+    for (int item = 0; item < ItemsPerThread; ++item)
+    {
+      values[item] = -1;
+    }
+  }
+
+  _CCCL_DEVICE _CCCL_FORCEINLINE void set(int item, ::cuda::std::int64_t value)
+  {
+    values[item] = value;
+  }
+
+  _CCCL_DEVICE _CCCL_FORCEINLINE auto get() const -> const ::cuda::std::int64_t (&)[ItemsPerThread]
+  {
+    return values;
+  }
+};
+
+struct transform_epilog_no_indices_storage
+{
+  _CCCL_DEVICE _CCCL_FORCEINLINE void initialize() {}
+
+  _CCCL_DEVICE _CCCL_FORCEINLINE void set(int, ::cuda::std::int64_t) {}
+};
+
 template <int BlockThreads,
           int ItemsPerThread,
           typename InputIteratorT,
@@ -93,6 +124,20 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
   const int warp_rank_in_block = static_cast<int>(threadIdx.x / warp_threads);
   const auto block_hierarchy   = ::cuda::hierarchy(::cuda::grid_dims(gridDim), ::cuda::block_dims<BlockThreads>());
   auto block_group             = ::cuda::experimental::this_block{block_hierarchy};
+  using block_group_t          = decltype(block_group);
+  using results_arg_t          = const transform_result_t(&)[ItemsPerThread];
+  using indices_arg_t          = const ::cuda::std::int64_t (&)[ItemsPerThread];
+  constexpr bool epilog_accepts_indices =
+    ::cuda::std::is_invocable_v<DeviceEpilogOpT, block_group_t, results_arg_t, indices_arg_t>;
+
+  static_assert(epilog_accepts_indices || ::cuda::std::is_invocable_v<DeviceEpilogOpT, block_group_t, results_arg_t>,
+                "device_epilog_op must be invocable with either "
+                "(block_group, results) or (block_group, results, indices).");
+
+  using indices_storage_t =
+    ::cuda::std::conditional_t<epilog_accepts_indices,
+                               transform_epilog_indices_storage<ItemsPerThread>,
+                               transform_epilog_no_indices_storage>;
 
   const auto block_segment_stride = static_cast<::cuda::std::int64_t>(gridDim.x) * warps_per_block * ItemsPerThread;
   const auto block_segment_base   = static_cast<::cuda::std::int64_t>(blockIdx.x) * warps_per_block * ItemsPerThread;
@@ -112,7 +157,7 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
                                                                                         // first item
     input_ref_t loaded_values[ItemsPerThread];
     transform_result_t output_values[ItemsPerThread]{};
-    ::cuda::std::int64_t indices[ItemsPerThread];
+    indices_storage_t indices_storage;
 
     const auto remaining_segments                  = num_segments - tile_segment_base;
     constexpr int max_segments_per_block_iteration = warps_per_block * ItemsPerThread;
@@ -122,10 +167,10 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
     block_load_t(temp_storage.load)
       .Load(d_in + tile_segment_base * static_cast<::cuda::std::int64_t>(segment_size), loaded_values, items_to_load);
 
+    indices_storage.initialize();
     for (int item = 0; item < ItemsPerThread; ++item)
     {
       shared_values[threadIdx.x * ItemsPerThread + item] = loaded_values[item];
-      indices[item]                                      = -1;
     }
     __syncthreads();
 
@@ -142,12 +187,20 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
         }
 
         const auto shared_item_index = item + (lane_rank + warp_rank_in_block * segment_size) * ItemsPerThread;
-        const auto item_index        = tile_segment_base * static_cast<::cuda::std::int64_t>(segment_size)
-                              + static_cast<::cuda::std::int64_t>(shared_item_index);
-        indices[item] = item_index;
-        if constexpr (transform_accepts_index)
+        if constexpr (transform_accepts_index || epilog_accepts_indices)
         {
-          output_values[item] = transform_op(item_index, shared_values[shared_item_index]);
+          const auto item_index = tile_segment_base * static_cast<::cuda::std::int64_t>(segment_size)
+                                + static_cast<::cuda::std::int64_t>(shared_item_index);
+          indices_storage.set(item, item_index);
+
+          if constexpr (transform_accepts_index)
+          {
+            output_values[item] = transform_op(item_index, shared_values[shared_item_index]);
+          }
+          else
+          {
+            output_values[item] = transform_op(shared_values[shared_item_index]);
+          }
         }
         else
         {
@@ -159,19 +212,12 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
     block_store_t(temp_storage.store)
       .Store(d_out + tile_segment_base * static_cast<::cuda::std::int64_t>(segment_size), output_values, items_to_load);
 
-    using block_group_t = decltype(block_group);
-    using results_arg_t = const transform_result_t(&)[ItemsPerThread];
-    using indices_arg_t = const ::cuda::std::int64_t (&)[ItemsPerThread];
-
-    if constexpr (::cuda::std::is_invocable_v<DeviceEpilogOpT, block_group_t, results_arg_t, indices_arg_t>)
+    if constexpr (epilog_accepts_indices)
     {
-      device_epilog_op(block_group, output_values, indices);
+      device_epilog_op(block_group, output_values, indices_storage.get());
     }
     else
     {
-      static_assert(::cuda::std::is_invocable_v<DeviceEpilogOpT, block_group_t, results_arg_t>,
-                    "device_epilog_op must be invocable with either "
-                    "(block_group, results) or (block_group, results, indices).");
       device_epilog_op(block_group, output_values);
     }
 

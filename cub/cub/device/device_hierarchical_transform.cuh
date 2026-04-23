@@ -68,6 +68,26 @@ struct DeviceSegmentedTransform
       ::cuda::std::move(device_epilog_op),
       stream);
   }
+
+  template <typename InputIteratorT, typename OutputIteratorT, typename TransformOpT>
+  CUB_RUNTIME_FUNCTION static cudaError_t TransformEpilog(
+    InputIteratorT d_in,
+    OutputIteratorT d_out,
+    ::cuda::std::int64_t num_segments,
+    int segment_size,
+    TransformOpT transform_op,
+    cudaStream_t stream = 0)
+  {
+    _CCCL_NVTX_RANGE_SCOPE("cub::DeviceSegmentedTransform::TransformEpilog");
+
+    return detail::hierarchical::dispatch_transform_epilog(
+      ::cuda::std::move(d_in),
+      ::cuda::std::move(d_out),
+      num_segments,
+      segment_size,
+      ::cuda::std::move(transform_op),
+      stream);
+  }
 };
 
 CUB_NAMESPACE_END
