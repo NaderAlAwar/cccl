@@ -148,18 +148,48 @@ try
     return select_lhs ? lhs_value : rhs_value;
   };
   auto epilog_op =
-    [d_mask_words, d_valid_count] __device__(
-      auto block_group, bool segment_valid, cuda::std::int64_t word_index, cuda::std::optional<DataType> result) {
+    [d_mask_words, d_valid_count] __device__(auto block_group, const auto& results, const auto& indices) {
       if constexpr (HasNulls)
       {
-        auto warp_group          = cuda::experimental::this_warp(block_group);
-        const std::uint32_t word = cuda::device::ballot(warp_group, segment_valid && result.has_value());
-        int warp_valid           = 0;
+        using results_t                = cuda::std::remove_reference_t<decltype(results)>;
+        constexpr int items_per_thread = cuda::std::extent_v<results_t>;
+        static_assert(items_per_thread > 0, "Results array must be non-empty.");
+        static_assert(mask_word_bits % items_per_thread == 0, "ItemsPerThread must evenly divide the mask word size.");
 
-        if (segment_valid && cuda::gpu_thread.is_root_rank(warp_group))
+        constexpr int subgroup_size = mask_word_bits / items_per_thread;
+        const int lane_rank         = static_cast<int>(threadIdx.x % mask_word_bits);
+        const int subgroup_rank     = lane_rank / subgroup_size;
+        const int subgroup_lane     = lane_rank % subgroup_size;
+
+        const cuda::std::uint32_t subgroup_mask =
+          items_per_thread == 1 ? 0xffffffffu : ((1u << subgroup_size) - 1u) << (subgroup_rank * subgroup_size);
+
+        cuda::std::uint32_t local_mask         = 0;
+        cuda::std::int64_t subgroup_word_index = -1;
+
+        for (int item = 0; item < items_per_thread; ++item)
         {
-          d_mask_words[word_index] = word;
-          warp_valid               = __popc(word);
+          const auto& result = results[item];
+          const auto index   = indices[item];
+
+          if (index >= 0)
+          {
+            subgroup_word_index = index / mask_word_bits;
+          }
+
+          if (index >= 0 && result.has_value())
+          {
+            local_mask |= 1u << (subgroup_lane * items_per_thread + item);
+          }
+        }
+
+        const cuda::std::uint32_t word = __reduce_or_sync(subgroup_mask, local_mask);
+        int warp_valid                 = 0;
+
+        if (subgroup_lane == 0 && subgroup_word_index >= 0)
+        {
+          d_mask_words[subgroup_word_index] = word;
+          warp_valid                        = __popc(word);
         }
 
         const int block_valid = cuda::device::reduce(block_group, warp_valid, cuda::std::plus<>{});
