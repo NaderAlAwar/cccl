@@ -147,7 +147,7 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
     typename block_store_t::TempStorage store;
   } temp_storage;
 
-  // Assumption is one item per thread
+  // Only needed when segment_size < warp_threads, where the segmented remap is not identity.
   __shared__ input_ref_t shared_values[BlockThreads * ItemsPerThread];
 
   for (::cuda::std::int64_t tile_segment_base = block_segment_base; tile_segment_base < num_segments;
@@ -163,8 +163,9 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
     const auto remaining_segments                  = num_segments - tile_segment_base;
     constexpr int max_segments_per_block_iteration = warps_per_block * ItemsPerThread;
     const bool full_tile = remaining_segments >= static_cast<::cuda::std::int64_t>(max_segments_per_block_iteration);
-    const int full_tile_items  = max_segments_per_block_iteration * segment_size;
-    const int segments_to_load = static_cast<int>(
+    const bool direct_segment_path = segment_size == warp_threads;
+    const int full_tile_items      = max_segments_per_block_iteration * segment_size;
+    const int segments_to_load     = static_cast<int>(
       (::cuda::std::min) (remaining_segments, static_cast<::cuda::std::int64_t>(max_segments_per_block_iteration)));
     const int items_to_load = segments_to_load * segment_size;
     if (full_tile && segment_size == warp_threads)
@@ -178,69 +179,136 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
     }
 
     indices_storage.initialize();
-    for (int item = 0; item < ItemsPerThread; ++item)
+    if (!direct_segment_path)
     {
-      shared_values[threadIdx.x * ItemsPerThread + item] = loaded_values[item];
+      for (int item = 0; item < ItemsPerThread; ++item)
+      {
+        shared_values[threadIdx.x * ItemsPerThread + item] = loaded_values[item];
+      }
+      __syncthreads();
     }
-    __syncthreads();
 
     if (lane_rank < segment_size)
     {
-      if (full_tile)
+      if (direct_segment_path)
       {
-        for (int item = 0; item < ItemsPerThread; ++item)
+        if (full_tile)
         {
-          const auto shared_item_index = item + (lane_rank + warp_rank_in_block * segment_size) * ItemsPerThread;
-          if constexpr (transform_accepts_index || epilog_accepts_indices)
+          for (int item = 0; item < ItemsPerThread; ++item)
           {
-            const auto item_index = tile_item_base + static_cast<::cuda::std::int64_t>(shared_item_index);
-            indices_storage.set(item, item_index);
-
-            if constexpr (transform_accepts_index)
+            if constexpr (transform_accepts_index || epilog_accepts_indices)
             {
-              output_values[item] = transform_op(item_index, shared_values[shared_item_index]);
+              const auto item_index =
+                tile_item_base + static_cast<::cuda::std::int64_t>(threadIdx.x * ItemsPerThread + item);
+              indices_storage.set(item, item_index);
+
+              if constexpr (transform_accepts_index)
+              {
+                output_values[item] = transform_op(item_index, loaded_values[item]);
+              }
+              else
+              {
+                output_values[item] = transform_op(loaded_values[item]);
+              }
             }
             else
             {
-              output_values[item] = transform_op(shared_values[shared_item_index]);
+              output_values[item] = transform_op(loaded_values[item]);
             }
           }
-          else
+        }
+        else
+        {
+          for (int item = 0; item < ItemsPerThread; ++item)
           {
-            output_values[item] = transform_op(shared_values[shared_item_index]);
+            const auto item_segment_index = segment_index + item;
+            const bool item_valid         = item_segment_index < num_segments;
+
+            if (!item_valid)
+            {
+              continue;
+            }
+
+            if constexpr (transform_accepts_index || epilog_accepts_indices)
+            {
+              const auto item_index =
+                tile_item_base + static_cast<::cuda::std::int64_t>(threadIdx.x * ItemsPerThread + item);
+              indices_storage.set(item, item_index);
+
+              if constexpr (transform_accepts_index)
+              {
+                output_values[item] = transform_op(item_index, loaded_values[item]);
+              }
+              else
+              {
+                output_values[item] = transform_op(loaded_values[item]);
+              }
+            }
+            else
+            {
+              output_values[item] = transform_op(loaded_values[item]);
+            }
           }
         }
       }
       else
       {
-        for (int item = 0; item < ItemsPerThread; ++item)
+        if (full_tile)
         {
-          const auto item_segment_index = segment_index + item;
-          const bool item_valid         = item_segment_index < num_segments;
-
-          if (!item_valid)
+          for (int item = 0; item < ItemsPerThread; ++item)
           {
-            continue;
-          }
-
-          const auto shared_item_index = item + (lane_rank + warp_rank_in_block * segment_size) * ItemsPerThread;
-          if constexpr (transform_accepts_index || epilog_accepts_indices)
-          {
-            const auto item_index = tile_item_base + static_cast<::cuda::std::int64_t>(shared_item_index);
-            indices_storage.set(item, item_index);
-
-            if constexpr (transform_accepts_index)
+            const auto shared_item_index = item + (lane_rank + warp_rank_in_block * segment_size) * ItemsPerThread;
+            if constexpr (transform_accepts_index || epilog_accepts_indices)
             {
-              output_values[item] = transform_op(item_index, shared_values[shared_item_index]);
+              const auto item_index = tile_item_base + static_cast<::cuda::std::int64_t>(shared_item_index);
+              indices_storage.set(item, item_index);
+
+              if constexpr (transform_accepts_index)
+              {
+                output_values[item] = transform_op(item_index, shared_values[shared_item_index]);
+              }
+              else
+              {
+                output_values[item] = transform_op(shared_values[shared_item_index]);
+              }
             }
             else
             {
               output_values[item] = transform_op(shared_values[shared_item_index]);
             }
           }
-          else
+        }
+        else
+        {
+          for (int item = 0; item < ItemsPerThread; ++item)
           {
-            output_values[item] = transform_op(shared_values[shared_item_index]);
+            const auto item_segment_index = segment_index + item;
+            const bool item_valid         = item_segment_index < num_segments;
+
+            if (!item_valid)
+            {
+              continue;
+            }
+
+            const auto shared_item_index = item + (lane_rank + warp_rank_in_block * segment_size) * ItemsPerThread;
+            if constexpr (transform_accepts_index || epilog_accepts_indices)
+            {
+              const auto item_index = tile_item_base + static_cast<::cuda::std::int64_t>(shared_item_index);
+              indices_storage.set(item, item_index);
+
+              if constexpr (transform_accepts_index)
+              {
+                output_values[item] = transform_op(item_index, shared_values[shared_item_index]);
+              }
+              else
+              {
+                output_values[item] = transform_op(shared_values[shared_item_index]);
+              }
+            }
+            else
+            {
+              output_values[item] = transform_op(shared_values[shared_item_index]);
+            }
           }
         }
       }
