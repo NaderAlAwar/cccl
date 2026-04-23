@@ -25,6 +25,13 @@ CUB_NAMESPACE_BEGIN
 
 namespace detail::hierarchical
 {
+struct NoopDeviceEpilogOp
+{
+  template <typename BlockGroupT, typename ResultsT>
+  _CCCL_DEVICE _CCCL_FORCEINLINE void operator()(BlockGroupT, ResultsT const&) const
+  {}
+};
+
 template <int BlockThreads,
           int ItemsPerThread,
           typename InputIteratorT,
@@ -145,6 +152,49 @@ struct DispatchHierarchicalTransformEpilog
     return InvokeKernel(kernel_source.HierarchicalTransformEpilogKernel());
   }
 };
+
+template <int BlockThreads   = 256,
+          int ItemsPerThread = 1,
+          typename InputIteratorT,
+          typename OutputIteratorT,
+          typename TransformOpT,
+          typename KernelSource = DeviceHierarchicalTransformEpilogKernelSource<
+            BlockThreads,
+            ItemsPerThread,
+            InputIteratorT,
+            OutputIteratorT,
+            TransformOpT,
+            NoopDeviceEpilogOp>,
+          typename KernelLauncherFactory = CUB_DETAIL_DEFAULT_KERNEL_LAUNCHER_FACTORY>
+CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE cudaError_t dispatch_transform_epilog(
+  InputIteratorT d_in,
+  OutputIteratorT d_out,
+  ::cuda::std::int64_t num_segments,
+  int segment_size,
+  TransformOpT transform_op,
+  cudaStream_t stream,
+  KernelSource kernel_source             = {},
+  KernelLauncherFactory launcher_factory = {})
+{
+  return dispatch_transform_epilog<
+    BlockThreads,
+    ItemsPerThread,
+    InputIteratorT,
+    OutputIteratorT,
+    TransformOpT,
+    NoopDeviceEpilogOp,
+    KernelSource,
+    KernelLauncherFactory>(
+    ::cuda::std::move(d_in),
+    ::cuda::std::move(d_out),
+    num_segments,
+    segment_size,
+    ::cuda::std::move(transform_op),
+    NoopDeviceEpilogOp{},
+    stream,
+    kernel_source,
+    launcher_factory);
+}
 
 template <int BlockThreads   = 256,
           int ItemsPerThread = 1,

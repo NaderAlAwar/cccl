@@ -221,14 +221,27 @@ try
 
     timer.start();
 
-    cub::DeviceSegmentedTransform::TransformEpilog(
-      cuda::zip_iterator{lhs_iter, rhs_iter, filter_values},
-      output_iterator,
-      num_words,
-      mask_word_bits,
-      transform_op,
-      epilog_op,
-      launch_stream);
+    if constexpr (HasNulls)
+    {
+      cub::DeviceSegmentedTransform::TransformEpilog(
+        cuda::zip_iterator{lhs_iter, rhs_iter, filter_values},
+        output_iterator,
+        num_words,
+        mask_word_bits,
+        transform_op,
+        epilog_op,
+        launch_stream);
+    }
+    else
+    {
+      cub::DeviceSegmentedTransform::TransformEpilog(
+        cuda::zip_iterator{lhs_iter, rhs_iter, filter_values},
+        output_iterator,
+        num_words,
+        mask_word_bits,
+        transform_op,
+        launch_stream);
+    }
 
     timer.stop();
   });
