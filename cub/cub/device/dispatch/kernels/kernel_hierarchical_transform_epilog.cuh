@@ -130,16 +130,31 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
     ::cuda::std::conditional_t<epilog_accepts_indices,
                                transform_epilog_indices_storage<ItemsPerThread>,
                                transform_epilog_no_indices_storage>;
+  using block_load_t = BlockLoad<input_ref_t, BlockThreads, ItemsPerThread, BLOCK_LOAD_DIRECT>;
 
   const auto total_items                  = num_segments * static_cast<::cuda::std::int64_t>(segment_size);
   constexpr int items_per_block_iteration = BlockThreads * ItemsPerThread;
   const auto block_item_stride            = static_cast<::cuda::std::int64_t>(gridDim.x) * items_per_block_iteration;
   const auto block_item_base              = static_cast<::cuda::std::int64_t>(blockIdx.x) * items_per_block_iteration;
   const auto linear_tid                   = static_cast<int>(threadIdx.x);
+  __shared__ typename block_load_t::TempStorage temp_storage;
 
   for (::cuda::std::int64_t tile_item_base = block_item_base; tile_item_base < total_items;
        tile_item_base += block_item_stride)
   {
+    input_ref_t loaded_values[ItemsPerThread];
+    const bool full_tile = tile_item_base + items_per_block_iteration <= total_items;
+
+    if (full_tile)
+    {
+      block_load_t(temp_storage).Load(d_in + tile_item_base, loaded_values);
+    }
+    else
+    {
+      const auto remaining_items = total_items - tile_item_base;
+      block_load_t(temp_storage).Load(d_in + tile_item_base, loaded_values, static_cast<int>(remaining_items));
+    }
+
     transform_result_t output_values[ItemsPerThread]{};
     indices_storage_t indices_storage;
     const auto thread_item_base = tile_item_base + static_cast<::cuda::std::int64_t>(linear_tid) * ItemsPerThread;
@@ -154,11 +169,11 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
 
         if constexpr (transform_accepts_index)
         {
-          output_values[item] = transform_op(item_index, d_in[item_index]);
+          output_values[item] = transform_op(item_index, loaded_values[item]);
         }
         else
         {
-          output_values[item] = transform_op(d_in[item_index]);
+          output_values[item] = transform_op(loaded_values[item]);
         }
 
         d_out[item_index] = output_values[item];
@@ -177,11 +192,11 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
 
         if constexpr (transform_accepts_index)
         {
-          output_values[item] = transform_op(item_index, d_in[item_index]);
+          output_values[item] = transform_op(item_index, loaded_values[item]);
         }
         else
         {
-          output_values[item] = transform_op(d_in[item_index]);
+          output_values[item] = transform_op(loaded_values[item]);
         }
 
         d_out[item_index] = output_values[item];
