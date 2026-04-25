@@ -130,7 +130,7 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
     ::cuda::std::conditional_t<epilog_accepts_indices,
                                transform_epilog_indices_storage<ItemsPerThread>,
                                transform_epilog_no_indices_storage>;
-  using block_load_t = BlockLoad<input_ref_t, BlockThreads, ItemsPerThread, BLOCK_LOAD_DIRECT>;
+  using block_load_t = BlockLoad<input_ref_t, BlockThreads, ItemsPerThread, BLOCK_LOAD_WARP_TRANSPOSE>;
 
   const auto total_items                  = num_segments * static_cast<::cuda::std::int64_t>(segment_size);
   constexpr int items_per_block_iteration = BlockThreads * ItemsPerThread;
@@ -154,6 +154,7 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
       const auto remaining_items = total_items - tile_item_base;
       block_load_t(temp_storage).Load(d_in + tile_item_base, loaded_values, static_cast<int>(remaining_items));
     }
+    __syncthreads();
 
     transform_result_t output_values[ItemsPerThread]{};
     indices_storage_t indices_storage;
