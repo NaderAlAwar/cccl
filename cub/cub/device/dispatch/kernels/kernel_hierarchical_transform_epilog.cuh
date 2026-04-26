@@ -13,6 +13,8 @@
 #  pragma system_header
 #endif // no system header
 
+#include <cub/block/block_load.cuh>
+#include <cub/block/block_store.cuh>
 #include <cub/device/dispatch/kernels/kernel_hierarchical_common.cuh>
 
 #include <cuda/std/cstdint>
@@ -130,14 +132,19 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
     ::cuda::std::conditional_t<epilog_accepts_indices,
                                transform_epilog_indices_storage<ItemsPerThread>,
                                transform_epilog_no_indices_storage>;
-  using block_load_t = BlockLoad<input_ref_t, BlockThreads, ItemsPerThread, BLOCK_LOAD_WARP_TRANSPOSE>;
+  using block_load_t  = BlockLoad<input_ref_t, BlockThreads, ItemsPerThread, BLOCK_LOAD_WARP_TRANSPOSE>;
+  using block_store_t = BlockStore<transform_result_t, BlockThreads, ItemsPerThread, BLOCK_STORE_WARP_TRANSPOSE>;
 
   const auto total_items                  = num_segments * static_cast<::cuda::std::int64_t>(segment_size);
   constexpr int items_per_block_iteration = BlockThreads * ItemsPerThread;
   const auto block_item_stride            = static_cast<::cuda::std::int64_t>(gridDim.x) * items_per_block_iteration;
   const auto block_item_base              = static_cast<::cuda::std::int64_t>(blockIdx.x) * items_per_block_iteration;
   const auto linear_tid                   = static_cast<int>(threadIdx.x);
-  __shared__ typename block_load_t::TempStorage temp_storage;
+  __shared__ union
+  {
+    typename block_load_t::TempStorage load;
+    typename block_store_t::TempStorage store;
+  } temp_storage;
 
   for (::cuda::std::int64_t tile_item_base = block_item_base; tile_item_base < total_items;
        tile_item_base += block_item_stride)
@@ -147,12 +154,12 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
 
     if (full_tile)
     {
-      block_load_t(temp_storage).Load(d_in + tile_item_base, loaded_values);
+      block_load_t(temp_storage.load).Load(d_in + tile_item_base, loaded_values);
     }
     else
     {
       const auto remaining_items = total_items - tile_item_base;
-      block_load_t(temp_storage).Load(d_in + tile_item_base, loaded_values, static_cast<int>(remaining_items));
+      block_load_t(temp_storage.load).Load(d_in + tile_item_base, loaded_values, static_cast<int>(remaining_items));
     }
     __syncthreads();
 
@@ -177,7 +184,6 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
           output_values[item] = transform_op(loaded_values[item]);
         }
 
-        d_out[item_index] = output_values[item];
         indices_storage.set(item, item_index);
       }
     }
@@ -200,7 +206,6 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
           output_values[item] = transform_op(loaded_values[item]);
         }
 
-        d_out[item_index] = output_values[item];
         indices_storage.set(item, item_index);
       }
     }
@@ -213,6 +218,17 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
     {
       device_epilog_op(block_group, output_values);
     }
+
+    if (full_tile)
+    {
+      block_store_t(temp_storage.store).Store(d_out + tile_item_base, output_values);
+    }
+    else
+    {
+      const auto remaining_items = total_items - tile_item_base;
+      block_store_t(temp_storage.store).Store(d_out + tile_item_base, output_values, static_cast<int>(remaining_items));
+    }
+    __syncthreads();
   }
 }
 } // namespace detail::hierarchical
