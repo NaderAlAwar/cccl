@@ -18,6 +18,7 @@
 #include <cub/util_debug.cuh>
 #include <cub/util_device.cuh>
 
+#include <cuda/__cmath/ceil_div.h>
 #include <cuda/std/__algorithm/min.h>
 #include <cuda/std/cstdint>
 #include <cuda/std/tuple>
@@ -111,6 +112,7 @@ template <int BlockThreads,
 struct DispatchHierarchicalTransformEpilog
 {
   static_assert(BlockThreads > 0, "BlockThreads must be positive.");
+  static_assert(ItemsPerThread > 0, "ItemsPerThread must be positive.");
   static_assert(BlockThreads % 32 == 0, "BlockThreads must be a multiple of warp size.");
 
   InputIteratorT d_in;
@@ -157,8 +159,7 @@ struct DispatchHierarchicalTransformEpilog
       return cudaSuccess;
     }
 
-    constexpr int warp_threads    = 32;
-    constexpr int warps_per_block = BlockThreads / warp_threads;
+    constexpr int warp_threads = 32;
 
     if (segment_size <= 0 || segment_size > warp_threads)
     {
@@ -171,7 +172,9 @@ struct DispatchHierarchicalTransformEpilog
       return error;
     }
 
-    const auto required_blocks = (num_segments + warps_per_block - 1) / warps_per_block;
+    constexpr int items_per_block = BlockThreads * ItemsPerThread;
+    const auto total_items        = num_segments * static_cast<::cuda::std::int64_t>(segment_size);
+    const auto required_blocks    = ::cuda::ceil_div(total_items, static_cast<::cuda::std::int64_t>(items_per_block));
     const auto grid_size = (::cuda::std::min) (required_blocks, static_cast<::cuda::std::int64_t>(max_grid_dim_x));
 
     launcher_factory(static_cast<int>(grid_size), BlockThreads, 0, stream)
