@@ -38,6 +38,60 @@ namespace
 constexpr int mask_word_bits = 32;
 
 template <typename DataType>
+struct copy_if_else_raw_input
+{
+  DataType lhs;
+  DataType rhs;
+  bool select_lhs;
+};
+
+template <typename DataType>
+struct copy_if_else_raw_input_iterator
+{
+  using value_type        = copy_if_else_raw_input<DataType>;
+  using reference         = value_type;
+  using difference_type   = cuda::std::int64_t;
+  using pointer           = void;
+  using iterator_category = cuda::std::random_access_iterator_tag;
+  using iterator_concept  = cuda::std::random_access_iterator_tag;
+
+  const DataType* lhs{};
+  const DataType* rhs{};
+  const bool* decision{};
+  difference_type offset{};
+
+  _CCCL_HOST_DEVICE reference operator[](difference_type index) const
+  {
+    const auto item_index = offset + index;
+    return {lhs[item_index], rhs[item_index], decision[item_index]};
+  }
+
+  _CCCL_HOST_DEVICE reference operator*() const
+  {
+    return (*this)[0];
+  }
+
+  _CCCL_HOST_DEVICE copy_if_else_raw_input_iterator operator+(difference_type n) const
+  {
+    return {lhs, rhs, decision, offset + n};
+  }
+
+  _CCCL_HOST_DEVICE copy_if_else_raw_input_iterator& operator+=(difference_type n)
+  {
+    offset += n;
+    return *this;
+  }
+};
+
+template <typename DataType>
+_CCCL_HOST_DEVICE copy_if_else_raw_input_iterator<DataType>
+operator+(typename copy_if_else_raw_input_iterator<DataType>::difference_type n,
+          copy_if_else_raw_input_iterator<DataType> iterator)
+{
+  return iterator + n;
+}
+
+template <typename DataType>
 void check_copy_if_else_correctness(
   const cudf::column_view& output, int valid_count, const cudf::column_view& expected, rmm::cuda_stream_view stream)
 {
@@ -105,15 +159,7 @@ try
   cudf::column_view rhs(input->view().column(1));
   cudf::column_view decision(input->view().column(2));
 
-  auto stream     = cudf::get_default_stream();
-  auto lhs_dv     = cudf::column_device_view::create(lhs, stream);
-  auto rhs_dv     = cudf::column_device_view::create(rhs, stream);
-  auto decision_d = cudf::column_device_view::create(decision, stream);
-
-  auto lhs_iter = cudf::detail::make_optional_iterator<DataType>(
-    *lhs_dv, cuda::std::conditional_t<HasNulls, cudf::nullate::YES, cudf::nullate::NO>{});
-  auto rhs_iter = cudf::detail::make_optional_iterator<DataType>(
-    *rhs_dv, cuda::std::conditional_t<HasNulls, cudf::nullate::YES, cudf::nullate::NO>{});
+  auto stream = cudf::get_default_stream();
 
   auto output = cudf::make_fixed_width_column(
     cudf::data_type{cudf::type_to_id<DataType>()},
@@ -127,25 +173,12 @@ try
   auto* d_mask_words  = output_view.null_mask();
   auto* d_valid_count = valid_count.data();
 
-  auto indices = cuda::counting_iterator<cudf::size_type>{0};
-  auto filter_values =
-    cuda::make_transform_iterator(indices, [decision = *decision_d] __device__(cudf::size_type index) -> bool {
-      if constexpr (HasNulls)
-      {
-        return decision.is_valid_nocheck(index) && decision.element<bool>(index);
-      }
-      else
-      {
-        return decision.element<bool>(index);
-      }
-    });
-  auto output_iterator =
-    cuda::make_transform_output_iterator(d_output, [] __device__(cuda::std::optional<DataType> result) -> DataType {
-      return result.value_or(DataType{});
-    });
-  auto transform_op = [] __device__(auto item) -> cuda::std::optional<DataType> {
+  auto nullable_transform_op = [] __device__(auto item) -> cuda::std::optional<DataType> {
     const auto [lhs_value, rhs_value, select_lhs] = item;
     return select_lhs ? lhs_value : rhs_value;
+  };
+  auto non_null_transform_op = [] __device__(copy_if_else_raw_input<DataType> item) -> DataType {
+    return item.select_lhs ? item.lhs : item.rhs;
   };
   auto epilog_op =
     [d_mask_words, d_valid_count] __device__(auto block_group, const auto& results, const auto& indices) {
@@ -212,39 +245,60 @@ try
     state.add_global_memory_writes<int8_t>(bytes_written + null_bytes);
   }
 
-  state.exec(nvbench::exec_tag::timer, [&](nvbench::launch& launch, auto& timer) {
-    const auto launch_stream = launch.get_stream().get_stream();
-    if constexpr (HasNulls)
-    {
+  if constexpr (HasNulls)
+  {
+    auto lhs_dv     = cudf::column_device_view::create(lhs, stream);
+    auto rhs_dv     = cudf::column_device_view::create(rhs, stream);
+    auto decision_d = cudf::column_device_view::create(decision, stream);
+
+    auto lhs_iter = cudf::detail::make_optional_iterator<DataType>(*lhs_dv, cudf::nullate::YES{});
+    auto rhs_iter = cudf::detail::make_optional_iterator<DataType>(*rhs_dv, cudf::nullate::YES{});
+    auto indices  = cuda::counting_iterator<cudf::size_type>{0};
+    auto filter_values =
+      cuda::make_transform_iterator(indices, [decision = *decision_d] __device__(cudf::size_type index) -> bool {
+        return decision.is_valid_nocheck(index) && decision.element<bool>(index);
+      });
+    auto output_iterator =
+      cuda::make_transform_output_iterator(d_output, [] __device__(cuda::std::optional<DataType> result) -> DataType {
+        return result.value_or(DataType{});
+      });
+
+    state.exec(nvbench::exec_tag::timer, [&](nvbench::launch& launch, auto& timer) {
+      const auto launch_stream = launch.get_stream().get_stream();
       valid_count.set_value_to_zero_async(stream);
-    }
 
-    timer.start();
+      timer.start();
 
-    if constexpr (HasNulls)
-    {
       cub::DeviceSegmentedTransform::TransformEpilog(
         cuda::zip_iterator{lhs_iter, rhs_iter, filter_values},
         output_iterator,
         num_words,
         mask_word_bits,
-        transform_op,
+        nullable_transform_op,
         epilog_op,
         launch_stream);
-    }
-    else
-    {
-      cub::DeviceSegmentedTransform::TransformEpilog(
-        cuda::zip_iterator{lhs_iter, rhs_iter, filter_values},
-        output_iterator,
-        num_words,
-        mask_word_bits,
-        transform_op,
-        launch_stream);
-    }
 
-    timer.stop();
-  });
+      timer.stop();
+    });
+  }
+  else
+  {
+    auto* lhs_values      = lhs.data<DataType>();
+    auto* rhs_values      = rhs.data<DataType>();
+    auto* decision_values = decision.data<bool>();
+    auto input_iterator   = copy_if_else_raw_input_iterator<DataType>{lhs_values, rhs_values, decision_values};
+
+    state.exec(nvbench::exec_tag::timer, [&](nvbench::launch& launch, auto& timer) {
+      const auto launch_stream = launch.get_stream().get_stream();
+
+      timer.start();
+
+      cub::DeviceSegmentedTransform::TransformEpilog(
+        input_iterator, d_output, num_words, mask_word_bits, non_null_transform_op, launch_stream);
+
+      timer.stop();
+    });
+  }
 
   auto const host_valid_count = HasNulls ? valid_count.value(stream) : num_items;
   output->set_null_count(num_items - host_valid_count);
