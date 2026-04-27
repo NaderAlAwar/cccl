@@ -49,11 +49,17 @@ struct transform_epilog_input_values
   InputValueT values[ItemsPerThread];
 };
 
+template <typename InputIteratorT>
+inline constexpr BlockLoadAlgorithm transform_epilog_load_algorithm =
+  ::cuda::std::is_pointer_v<::cuda::std::decay_t<InputIteratorT>> ? BLOCK_LOAD_VECTORIZE : BLOCK_LOAD_WARP_TRANSPOSE;
+
 template <int BlockThreads, int ItemsPerThread, typename... InputIteratorTs>
-using transform_epilog_block_load_storage_t = ::cuda::std::aligned_union_t<
-  0,
-  typename BlockLoad<cub::detail::it_value_t<InputIteratorTs>, BlockThreads, ItemsPerThread, BLOCK_LOAD_WARP_TRANSPOSE>::
-    TempStorage...>;
+using transform_epilog_block_load_storage_t =
+  ::cuda::std::aligned_union_t<0,
+                               typename BlockLoad<cub::detail::it_value_t<InputIteratorTs>,
+                                                  BlockThreads,
+                                                  ItemsPerThread,
+                                                  transform_epilog_load_algorithm<InputIteratorTs>>::TempStorage...>;
 
 template <typename BlockLoadStorageT, typename BlockLoadTempStorageT>
 _CCCL_DEVICE _CCCL_FORCEINLINE auto transform_epilog_alias_load_storage(BlockLoadStorageT& load_storage)
@@ -77,7 +83,8 @@ _CCCL_DEVICE _CCCL_FORCEINLINE void transform_epilog_load_input(
   int remaining_items)
 {
   using input_value_t = cub::detail::it_value_t<InputIteratorT>;
-  using block_load_t  = BlockLoad<input_value_t, BlockThreads, ItemsPerThread, BLOCK_LOAD_WARP_TRANSPOSE>;
+  using block_load_t =
+    BlockLoad<input_value_t, BlockThreads, ItemsPerThread, transform_epilog_load_algorithm<InputIteratorT>>;
 
   auto& values = ::cuda::std::get<Index>(loaded_inputs).values;
   auto input   = d_in + tile_item_base;
@@ -93,7 +100,10 @@ _CCCL_DEVICE _CCCL_FORCEINLINE void transform_epilog_load_input(
     block_load_t(storage).Load(input, values, remaining_items);
   }
 
-  __syncthreads();
+  if constexpr (transform_epilog_load_algorithm<InputIteratorT> == BLOCK_LOAD_WARP_TRANSPOSE)
+  {
+    __syncthreads();
+  }
 }
 
 template <int BlockThreads,
