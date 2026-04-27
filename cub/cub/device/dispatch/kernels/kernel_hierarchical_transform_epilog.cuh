@@ -92,6 +92,8 @@ _CCCL_DEVICE _CCCL_FORCEINLINE void transform_epilog_load_input(
   {
     block_load_t(storage).Load(input, values, remaining_items);
   }
+
+  __syncthreads();
 }
 
 template <int BlockThreads,
@@ -258,7 +260,6 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
       full_tile,
       static_cast<int>(remaining_items),
       d_in...);
-    __syncthreads();
 
     transform_result_t output_values[ItemsPerThread]{};
     indices_storage_t indices_storage;
