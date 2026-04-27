@@ -51,7 +51,7 @@ struct transform_epilog_input_values
 
 template <typename InputIteratorT>
 inline constexpr BlockLoadAlgorithm transform_epilog_load_algorithm =
-  ::cuda::std::is_pointer_v<::cuda::std::decay_t<InputIteratorT>> ? BLOCK_LOAD_VECTORIZE : BLOCK_LOAD_WARP_TRANSPOSE;
+  ::cuda::std::is_pointer_v<::cuda::std::decay_t<InputIteratorT>> ? BLOCK_LOAD_DIRECT : BLOCK_LOAD_WARP_TRANSPOSE;
 
 template <int BlockThreads, int ItemsPerThread, typename... InputIteratorTs>
 using transform_epilog_block_load_storage_t =
