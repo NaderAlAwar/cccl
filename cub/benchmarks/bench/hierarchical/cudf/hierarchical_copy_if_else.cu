@@ -16,6 +16,7 @@
 #include <cuda/iterator>
 #include <cuda/std/cstdint>
 #include <cuda/std/optional>
+#include <cuda/std/tuple>
 #include <cuda/std/type_traits>
 #include <cuda/std/utility>
 
@@ -36,60 +37,6 @@
 namespace
 {
 constexpr int mask_word_bits = 32;
-
-template <typename DataType>
-struct copy_if_else_raw_input
-{
-  DataType lhs;
-  DataType rhs;
-  bool select_lhs;
-};
-
-template <typename DataType>
-struct copy_if_else_raw_input_iterator
-{
-  using value_type        = copy_if_else_raw_input<DataType>;
-  using reference         = value_type;
-  using difference_type   = cuda::std::int64_t;
-  using pointer           = void;
-  using iterator_category = cuda::std::random_access_iterator_tag;
-  using iterator_concept  = cuda::std::random_access_iterator_tag;
-
-  const DataType* lhs{};
-  const DataType* rhs{};
-  const bool* decision{};
-  difference_type offset{};
-
-  _CCCL_HOST_DEVICE reference operator[](difference_type index) const
-  {
-    const auto item_index = offset + index;
-    return {lhs[item_index], rhs[item_index], decision[item_index]};
-  }
-
-  _CCCL_HOST_DEVICE reference operator*() const
-  {
-    return (*this)[0];
-  }
-
-  _CCCL_HOST_DEVICE copy_if_else_raw_input_iterator operator+(difference_type n) const
-  {
-    return {lhs, rhs, decision, offset + n};
-  }
-
-  _CCCL_HOST_DEVICE copy_if_else_raw_input_iterator& operator+=(difference_type n)
-  {
-    offset += n;
-    return *this;
-  }
-};
-
-template <typename DataType>
-_CCCL_HOST_DEVICE copy_if_else_raw_input_iterator<DataType>
-operator+(typename copy_if_else_raw_input_iterator<DataType>::difference_type n,
-          copy_if_else_raw_input_iterator<DataType> iterator)
-{
-  return iterator + n;
-}
 
 template <typename DataType>
 void check_copy_if_else_correctness(
@@ -173,12 +120,13 @@ try
   auto* d_mask_words  = output_view.null_mask();
   auto* d_valid_count = valid_count.data();
 
-  auto nullable_transform_op = [] __device__(auto item) -> cuda::std::optional<DataType> {
-    const auto [lhs_value, rhs_value, select_lhs] = item;
+  auto nullable_transform_op =
+    [] __device__(cuda::std::optional<DataType> lhs_value, cuda::std::optional<DataType> rhs_value, bool select_lhs)
+    -> cuda::std::optional<DataType> {
     return select_lhs ? lhs_value : rhs_value;
   };
-  auto non_null_transform_op = [] __device__(copy_if_else_raw_input<DataType> item) -> DataType {
-    return item.select_lhs ? item.lhs : item.rhs;
+  auto non_null_transform_op = [] __device__(DataType lhs_value, DataType rhs_value, bool select_lhs) -> DataType {
+    return select_lhs ? lhs_value : rhs_value;
   };
   auto epilog_op =
     [d_mask_words, d_valid_count] __device__(auto block_group, const auto& results, const auto& indices) {
@@ -270,7 +218,7 @@ try
       timer.start();
 
       cub::DeviceSegmentedTransform::TransformEpilog(
-        cuda::zip_iterator{lhs_iter, rhs_iter, filter_values},
+        cuda::std::make_tuple(lhs_iter, rhs_iter, filter_values),
         output_iterator,
         num_words,
         mask_word_bits,
@@ -286,7 +234,6 @@ try
     auto* lhs_values      = lhs.data<DataType>();
     auto* rhs_values      = rhs.data<DataType>();
     auto* decision_values = decision.data<bool>();
-    auto input_iterator   = copy_if_else_raw_input_iterator<DataType>{lhs_values, rhs_values, decision_values};
 
     state.exec(nvbench::exec_tag::timer, [&](nvbench::launch& launch, auto& timer) {
       const auto launch_stream = launch.get_stream().get_stream();
@@ -294,7 +241,12 @@ try
       timer.start();
 
       cub::DeviceSegmentedTransform::TransformEpilog(
-        input_iterator, d_output, num_words, mask_word_bits, non_null_transform_op, launch_stream);
+        cuda::std::make_tuple(lhs_values, rhs_values, decision_values),
+        d_output,
+        num_words,
+        mask_word_bits,
+        non_null_transform_op,
+        launch_stream);
 
       timer.stop();
     });

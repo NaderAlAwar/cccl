@@ -10,6 +10,7 @@
 #include <cuda/atomic>
 #include <cuda/iterator>
 #include <cuda/std/cstdint>
+#include <cuda/std/functional>
 #include <cuda/std/type_traits>
 #include <cuda/std/utility>
 
@@ -83,15 +84,51 @@ try
       [] __device__(int value) -> bool {
         return (value & 1) == 0;
       },
-      [d_mask_words, d_valid_count] __device__(auto group, cuda::std::int64_t word_index, bool is_valid) {
-        const std::uint32_t word = cuda::device::ballot(group, is_valid);
+      [d_mask_words, d_valid_count] __device__(auto block_group, const auto& results, const auto& indices) {
+        using results_t                = cuda::std::remove_reference_t<decltype(results)>;
+        constexpr int items_per_thread = cuda::std::extent_v<results_t>;
+        static_assert(mask_word_bits % items_per_thread == 0);
 
-        if (cuda::gpu_thread.is_root_rank(group))
+        constexpr int subgroup_size = mask_word_bits / items_per_thread;
+        const int lane_rank         = static_cast<int>(threadIdx.x % mask_word_bits);
+        const int subgroup_rank     = lane_rank / subgroup_size;
+        const int subgroup_lane     = lane_rank % subgroup_size;
+
+        const cuda::std::uint32_t subgroup_mask =
+          items_per_thread == 1 ? 0xffffffffu : ((1u << subgroup_size) - 1u) << (subgroup_rank * subgroup_size);
+
+        cuda::std::uint32_t local_mask = 0;
+        cuda::std::int64_t word_index  = -1;
+
+        for (int item = 0; item < items_per_thread; ++item)
+        {
+          const auto index = indices[item];
+          if (index >= 0)
+          {
+            word_index = index / mask_word_bits;
+          }
+
+          if (index >= 0 && results[item])
+          {
+            local_mask |= 1u << (subgroup_lane * items_per_thread + item);
+          }
+        }
+
+        const cuda::std::uint32_t word = __reduce_or_sync(subgroup_mask, local_mask);
+        int warp_valid                 = 0;
+
+        if (subgroup_lane == 0 && word_index >= 0)
         {
           d_mask_words[word_index] = word;
+          warp_valid               = __popc(word);
+        }
 
+        const int block_valid = cuda::device::reduce(block_group, warp_valid, cuda::std::plus<>{});
+
+        if (cuda::gpu_thread.is_root_rank(block_group))
+        {
           cuda::atomic_ref<int, cuda::thread_scope_device> atomic_valid_count(*d_valid_count);
-          atomic_valid_count.fetch_add(__popc(word), cuda::memory_order_relaxed);
+          atomic_valid_count.fetch_add(block_valid, cuda::memory_order_relaxed);
         }
       },
       stream);

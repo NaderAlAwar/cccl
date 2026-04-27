@@ -20,6 +20,9 @@
 
 #include <cuda/std/__algorithm/min.h>
 #include <cuda/std/cstdint>
+#include <cuda/std/tuple>
+#include <cuda/std/type_traits>
+#include <cuda/std/utility>
 
 CUB_NAMESPACE_BEGIN
 
@@ -32,22 +35,63 @@ struct NoopDeviceEpilogOp
   {}
 };
 
+template <typename T>
+struct is_cuda_std_tuple : ::cuda::std::false_type
+{};
+
+template <typename... Ts>
+struct is_cuda_std_tuple<::cuda::std::tuple<Ts...>> : ::cuda::std::true_type
+{};
+
+template <typename InputIteratorT>
+using transform_epilog_input_tuple_t =
+  ::cuda::std::conditional_t<is_cuda_std_tuple<::cuda::std::decay_t<InputIteratorT>>::value,
+                             ::cuda::std::decay_t<InputIteratorT>,
+                             ::cuda::std::tuple<::cuda::std::decay_t<InputIteratorT>>>;
+
+template <typename InputIteratorT>
+CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE auto make_transform_epilog_input_tuple(InputIteratorT&& d_in)
+{
+  if constexpr (is_cuda_std_tuple<::cuda::std::decay_t<InputIteratorT>>::value)
+  {
+    return ::cuda::std::forward<InputIteratorT>(d_in);
+  }
+  else
+  {
+    return ::cuda::std::make_tuple(::cuda::std::forward<InputIteratorT>(d_in));
+  }
+}
+
 template <int BlockThreads,
           int ItemsPerThread,
           typename InputIteratorT,
           typename OutputIteratorT,
           typename TransformOpT,
           typename DeviceEpilogOpT>
-struct DeviceHierarchicalTransformEpilogKernelSource
+struct DeviceHierarchicalTransformEpilogKernelSource;
+
+template <int BlockThreads,
+          int ItemsPerThread,
+          typename... InputIteratorTs,
+          typename OutputIteratorT,
+          typename TransformOpT,
+          typename DeviceEpilogOpT>
+struct DeviceHierarchicalTransformEpilogKernelSource<
+  BlockThreads,
+  ItemsPerThread,
+  ::cuda::std::tuple<InputIteratorTs...>,
+  OutputIteratorT,
+  TransformOpT,
+  DeviceEpilogOpT>
 {
   CUB_DEFINE_KERNEL_GETTER(
     HierarchicalTransformEpilogKernel,
     DeviceHierarchicalTransformEpilogKernel<BlockThreads,
                                             ItemsPerThread,
-                                            InputIteratorT,
                                             OutputIteratorT,
                                             TransformOpT,
-                                            DeviceEpilogOpT>)
+                                            DeviceEpilogOpT,
+                                            InputIteratorTs...>)
 };
 
 template <int BlockThreads,
@@ -104,9 +148,9 @@ struct DispatchHierarchicalTransformEpilog
       , launcher_factory(launcher_factory)
   {}
 
-  template <typename DeviceHierarchicalTransformEpilogKernelT>
-  CUB_RUNTIME_FUNCTION _CCCL_VISIBILITY_HIDDEN _CCCL_FORCEINLINE cudaError_t
-  InvokeKernel(DeviceHierarchicalTransformEpilogKernelT hierarchical_transform_epilog_kernel)
+  template <typename DeviceHierarchicalTransformEpilogKernelT, ::cuda::std::size_t... Is>
+  CUB_RUNTIME_FUNCTION _CCCL_VISIBILITY_HIDDEN _CCCL_FORCEINLINE cudaError_t InvokeKernel(
+    DeviceHierarchicalTransformEpilogKernelT hierarchical_transform_epilog_kernel, ::cuda::std::index_sequence<Is...>)
   {
     if (num_segments == 0)
     {
@@ -131,8 +175,13 @@ struct DispatchHierarchicalTransformEpilog
     const auto grid_size = (::cuda::std::min) (required_blocks, static_cast<::cuda::std::int64_t>(max_grid_dim_x));
 
     launcher_factory(static_cast<int>(grid_size), BlockThreads, 0, stream)
-      .doit(
-        hierarchical_transform_epilog_kernel, d_in, d_out, num_segments, segment_size, transform_op, device_epilog_op);
+      .doit(hierarchical_transform_epilog_kernel,
+            ::cuda::std::get<Is>(d_in)...,
+            d_out,
+            num_segments,
+            segment_size,
+            transform_op,
+            device_epilog_op);
 
     if (const auto error = CubDebug(cudaPeekAtLastError()))
     {
@@ -149,7 +198,8 @@ struct DispatchHierarchicalTransformEpilog
 
   CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE cudaError_t Invoke()
   {
-    return InvokeKernel(kernel_source.HierarchicalTransformEpilogKernel());
+    return InvokeKernel(kernel_source.HierarchicalTransformEpilogKernel(),
+                        ::cuda::std::make_index_sequence<::cuda::std::tuple_size_v<InputIteratorT>>{});
   }
 };
 
@@ -158,13 +208,14 @@ template <int BlockThreads   = 256,
           typename InputIteratorT,
           typename OutputIteratorT,
           typename TransformOpT,
-          typename KernelSource = DeviceHierarchicalTransformEpilogKernelSource<
-            BlockThreads,
-            ItemsPerThread,
-            InputIteratorT,
-            OutputIteratorT,
-            TransformOpT,
-            NoopDeviceEpilogOp>,
+          typename InputIteratorTupleT = transform_epilog_input_tuple_t<InputIteratorT>,
+          typename KernelSource        = DeviceHierarchicalTransformEpilogKernelSource<
+                   BlockThreads,
+                   ItemsPerThread,
+                   InputIteratorTupleT,
+                   OutputIteratorT,
+                   TransformOpT,
+                   NoopDeviceEpilogOp>,
           typename KernelLauncherFactory = CUB_DETAIL_DEFAULT_KERNEL_LAUNCHER_FACTORY>
 CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE cudaError_t dispatch_transform_epilog(
   InputIteratorT d_in,
@@ -179,13 +230,14 @@ CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE cudaError_t dispatch_transform_epilog(
   return dispatch_transform_epilog<
     BlockThreads,
     ItemsPerThread,
-    InputIteratorT,
+    InputIteratorTupleT,
     OutputIteratorT,
     TransformOpT,
     NoopDeviceEpilogOp,
+    InputIteratorTupleT,
     KernelSource,
     KernelLauncherFactory>(
-    ::cuda::std::move(d_in),
+    make_transform_epilog_input_tuple(::cuda::std::move(d_in)),
     ::cuda::std::move(d_out),
     num_segments,
     segment_size,
@@ -202,13 +254,14 @@ template <int BlockThreads   = 256,
           typename OutputIteratorT,
           typename TransformOpT,
           typename DeviceEpilogOpT,
-          typename KernelSource = DeviceHierarchicalTransformEpilogKernelSource<
-            BlockThreads,
-            ItemsPerThread,
-            InputIteratorT,
-            OutputIteratorT,
-            TransformOpT,
-            DeviceEpilogOpT>,
+          typename InputIteratorTupleT = transform_epilog_input_tuple_t<InputIteratorT>,
+          typename KernelSource        = DeviceHierarchicalTransformEpilogKernelSource<
+                   BlockThreads,
+                   ItemsPerThread,
+                   InputIteratorTupleT,
+                   OutputIteratorT,
+                   TransformOpT,
+                   DeviceEpilogOpT>,
           typename KernelLauncherFactory = CUB_DETAIL_DEFAULT_KERNEL_LAUNCHER_FACTORY>
 CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE cudaError_t dispatch_transform_epilog(
   InputIteratorT d_in,
@@ -224,13 +277,13 @@ CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE cudaError_t dispatch_transform_epilog(
   return DispatchHierarchicalTransformEpilog<
            BlockThreads,
            ItemsPerThread,
-           InputIteratorT,
+           InputIteratorTupleT,
            OutputIteratorT,
            TransformOpT,
            DeviceEpilogOpT,
            KernelSource,
            KernelLauncherFactory>{
-    ::cuda::std::move(d_in),
+    make_transform_epilog_input_tuple(::cuda::std::move(d_in)),
     ::cuda::std::move(d_out),
     num_segments,
     segment_size,
