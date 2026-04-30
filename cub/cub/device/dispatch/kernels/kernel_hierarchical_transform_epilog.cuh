@@ -17,6 +17,7 @@
 #include <cub/block/block_store.cuh>
 #include <cub/device/dispatch/kernels/kernel_hierarchical_common.cuh>
 
+#include <cuda/__cmath/pow2.h>
 #include <cuda/std/cstdint>
 #include <cuda/std/iterator>
 #include <cuda/std/tuple>
@@ -27,6 +28,13 @@ CUB_NAMESPACE_BEGIN
 
 namespace detail::hierarchical
 {
+struct NoopDeviceEpilogOp
+{
+  template <typename BlockGroupT, typename ResultsT>
+  _CCCL_DEVICE _CCCL_FORCEINLINE void operator()(BlockGroupT, ResultsT const&) const
+  {}
+};
+
 template <typename TransformOpT, bool AcceptsIndex, typename... InputValueTs>
 struct transform_epilog_result
 {};
@@ -48,6 +56,242 @@ struct transform_epilog_input_values
 {
   InputValueT values[ItemsPerThread];
 };
+
+#if _CCCL_CTK_BELOW(13, 0)
+struct alignas(32) transform_epilog_aligned32_t
+{
+  longlong4 data;
+};
+#endif // _CCCL_CTK_BELOW(13, 0)
+
+template <int Bytes>
+_CCCL_HOST_DEVICE _CCCL_CONSTEVAL auto transform_epilog_load_store_type()
+{
+  static_assert(::cuda::is_power_of_two(Bytes));
+  if constexpr (Bytes == 1)
+  {
+    return ::cuda::std::int8_t{};
+  }
+  else if constexpr (Bytes == 2)
+  {
+    return ::cuda::std::int16_t{};
+  }
+  else if constexpr (Bytes == 4)
+  {
+    return ::cuda::std::int32_t{};
+  }
+  else if constexpr (Bytes == 8)
+  {
+    return ::cuda::std::int64_t{};
+  }
+  else if constexpr (Bytes == 16)
+  {
+    static_assert(alignof(int4) == 16);
+    return int4{};
+  }
+  else if constexpr (Bytes == 32)
+  {
+#if _CCCL_CTK_BELOW(13, 0)
+    static_assert(alignof(transform_epilog_aligned32_t) == 32);
+    return transform_epilog_aligned32_t{};
+#else // ^^^ _CCCL_CTK_BELOW(13, 0) ^^^ / vvv _CCCL_CTK_AT_LEAST(13, 0) vvv
+    return longlong4_32a{};
+#endif // _CCCL_CTK_AT_LEAST(13, 0)
+  }
+  else
+  {
+    static_assert(Bytes <= 32, "Unsupported transform epilog vector load/store width.");
+    return int4{};
+  }
+}
+
+template <int ItemsPerThread>
+_CCCL_HOST_DEVICE _CCCL_CONSTEVAL int transform_epilog_pack_size()
+{
+  return (ItemsPerThread % 4 == 0) ? 4 : (ItemsPerThread % 2 == 0) ? 2 : 1;
+}
+
+template <typename ValueT, int PackSize>
+inline constexpr bool transform_epilog_supported_packed_type =
+  ::cuda::is_power_of_two(sizeof(ValueT) * PackSize) && (sizeof(ValueT) * PackSize <= 32);
+
+template <typename ValueT, int PackSize>
+inline constexpr bool transform_epilog_pack_input_type =
+  sizeof(::cuda::std::remove_cv_t<ValueT>) < sizeof(::cuda::std::int32_t)
+  && !::cuda::std::is_same_v<::cuda::std::remove_cv_t<ValueT>, bool>
+  && transform_epilog_supported_packed_type<::cuda::std::remove_cv_t<ValueT>, PackSize>;
+
+template <typename ValueT, int PackSize>
+inline constexpr bool transform_epilog_pack_output_type =
+  sizeof(::cuda::std::remove_cv_t<ValueT>) < sizeof(::cuda::std::int32_t)
+  && !::cuda::std::is_same_v<::cuda::std::remove_cv_t<ValueT>, bool>
+  && transform_epilog_supported_packed_type<::cuda::std::remove_cv_t<ValueT>, PackSize>;
+
+template <typename ValueT, int ItemsPerThread, int PackSize>
+struct transform_epilog_packed_block_load_values
+{
+  static constexpr int packed_items_per_thread = ItemsPerThread / PackSize;
+  using packed_t = decltype(transform_epilog_load_store_type<sizeof(ValueT) * PackSize>());
+
+  packed_t values[packed_items_per_thread];
+
+  _CCCL_DEVICE _CCCL_FORCEINLINE ValueT get(int item) const
+  {
+    return reinterpret_cast<const ValueT*>(values)[item];
+  }
+
+  _CCCL_DEVICE _CCCL_FORCEINLINE void set(int item, ValueT value)
+  {
+    reinterpret_cast<ValueT*>(values)[item] = value;
+  }
+
+  template <int BlockThreads>
+  _CCCL_DEVICE _CCCL_FORCEINLINE void load(const ValueT* input)
+  {
+    using block_load_t = BlockLoad<packed_t, BlockThreads, packed_items_per_thread, BLOCK_LOAD_VECTORIZE>;
+    block_load_t().Load(reinterpret_cast<const packed_t*>(input), values);
+  }
+
+  template <int BlockThreads>
+  _CCCL_DEVICE _CCCL_FORCEINLINE void store(ValueT* output)
+  {
+    using block_store_t = BlockStore<packed_t, BlockThreads, packed_items_per_thread, BLOCK_STORE_VECTORIZE>;
+    block_store_t().Store(reinterpret_cast<packed_t*>(output), values);
+  }
+};
+
+template <typename ValueT,
+          int ItemsPerThread,
+          int PackSize,
+          bool UsePacked = transform_epilog_pack_input_type<ValueT, PackSize>>
+struct transform_epilog_packed_block_input_values;
+
+template <typename ValueT, int ItemsPerThread, int PackSize>
+struct transform_epilog_packed_block_input_values<ValueT, ItemsPerThread, PackSize, true>
+    : transform_epilog_packed_block_load_values<::cuda::std::remove_cv_t<ValueT>, ItemsPerThread, PackSize>
+{};
+
+template <typename ValueT, int ItemsPerThread, int PackSize>
+struct transform_epilog_packed_block_input_values<ValueT, ItemsPerThread, PackSize, false>
+{
+  using value_t = ::cuda::std::remove_cv_t<ValueT>;
+
+  value_t values[ItemsPerThread];
+
+  _CCCL_DEVICE _CCCL_FORCEINLINE value_t get(int item) const
+  {
+    return values[item];
+  }
+
+  template <int BlockThreads>
+  _CCCL_DEVICE _CCCL_FORCEINLINE void load(const value_t* input)
+  {
+    using block_load_t = BlockLoad<value_t, BlockThreads, ItemsPerThread, BLOCK_LOAD_DIRECT>;
+    block_load_t().Load(input, values);
+  }
+};
+
+template <int PackSize, typename PointerT>
+_CCCL_DEVICE _CCCL_FORCEINLINE bool transform_epilog_packed_aligned(PointerT ptr)
+{
+  using value_t  = ::cuda::std::remove_cv_t<::cuda::std::remove_pointer_t<::cuda::std::decay_t<PointerT>>>;
+  using packed_t = decltype(transform_epilog_load_store_type<sizeof(value_t) * PackSize>());
+  return reinterpret_cast<::cuda::std::uintptr_t>(ptr) % alignof(packed_t) == 0;
+}
+
+template <int PackSize, typename InputIteratorT>
+_CCCL_DEVICE _CCCL_FORCEINLINE bool
+transform_epilog_input_packed_aligned(::cuda::std::int64_t tile_item_base, InputIteratorT d_in)
+{
+  using value_t = ::cuda::std::remove_cv_t<::cuda::std::remove_pointer_t<::cuda::std::decay_t<InputIteratorT>>>;
+  if constexpr (transform_epilog_pack_input_type<value_t, PackSize>)
+  {
+    return transform_epilog_packed_aligned<PackSize>(d_in + tile_item_base);
+  }
+  else
+  {
+    return true;
+  }
+}
+
+template <int PackSize, typename OutputIteratorT, typename... InputIteratorTs>
+_CCCL_DEVICE _CCCL_FORCEINLINE bool transform_epilog_packed_path_aligned(
+  ::cuda::std::int64_t tile_item_base, OutputIteratorT d_out, InputIteratorTs... d_in)
+{
+  return transform_epilog_packed_aligned<PackSize>(d_out + tile_item_base)
+      && (... && transform_epilog_input_packed_aligned<PackSize>(tile_item_base, d_in));
+}
+
+template <int BlockThreads,
+          int ItemsPerThread,
+          int PackSize,
+          typename LoadedInputsT,
+          ::cuda::std::size_t... Is,
+          typename... InputIteratorTs>
+_CCCL_DEVICE _CCCL_FORCEINLINE void transform_epilog_load_packed_block_inputs(
+  LoadedInputsT& loaded_inputs,
+  ::cuda::std::index_sequence<Is...>,
+  ::cuda::std::int64_t tile_item_base,
+  InputIteratorTs... d_in)
+{
+  (::cuda::std::get<Is>(loaded_inputs).template load<BlockThreads>(d_in + tile_item_base), ...);
+}
+
+template <int BlockThreads,
+          int ItemsPerThread,
+          int PackSize,
+          typename OutputIteratorT,
+          typename TransformOpT,
+          ::cuda::std::size_t... Is,
+          typename... InputIteratorTs>
+_CCCL_DEVICE _CCCL_FORCEINLINE void transform_epilog_process_packed_block_tile(
+  OutputIteratorT d_out,
+  TransformOpT& transform_op,
+  ::cuda::std::index_sequence<Is...> input_indices,
+  ::cuda::std::int64_t tile_item_base,
+  InputIteratorTs... d_in)
+{
+  using output_value_t = ::cuda::std::remove_cv_t<::cuda::std::remove_pointer_t<::cuda::std::decay_t<OutputIteratorT>>>;
+  using output_values_t = transform_epilog_packed_block_load_values<output_value_t, ItemsPerThread, PackSize>;
+  using loaded_inputs_t = ::cuda::std::tuple<
+    transform_epilog_packed_block_input_values<cub::detail::it_value_t<InputIteratorTs>, ItemsPerThread, PackSize>...>;
+
+  loaded_inputs_t loaded_inputs;
+  output_values_t output_values;
+
+  transform_epilog_load_packed_block_inputs<BlockThreads, ItemsPerThread, PackSize>(
+    loaded_inputs, input_indices, tile_item_base, d_in...);
+
+  _CCCL_PRAGMA_UNROLL_FULL()
+  for (int item = 0; item < ItemsPerThread; ++item)
+  {
+    output_values.set(item, transform_op(::cuda::std::get<Is>(loaded_inputs).get(item)...));
+  }
+
+  output_values.template store<BlockThreads>(d_out + tile_item_base);
+}
+
+template <int ItemsPerThread,
+          bool TransformAcceptsIndex,
+          typename OutputIteratorT,
+          typename TransformResultT,
+          typename DeviceEpilogOpT,
+          typename... InputIteratorTs>
+inline constexpr bool transform_epilog_can_process_packed_block_path =
+  transform_epilog_pack_size<ItemsPerThread>() > 1 && !TransformAcceptsIndex
+  && ::cuda::std::is_pointer_v<::cuda::std::decay_t<OutputIteratorT>>
+  && (... && ::cuda::std::is_pointer_v<::cuda::std::decay_t<InputIteratorTs>>)
+  && ::cuda::std::is_same_v<::cuda::std::decay_t<DeviceEpilogOpT>, NoopDeviceEpilogOp>
+  && ::cuda::std::is_same_v<
+    ::cuda::std::remove_cv_t<::cuda::std::remove_pointer_t<::cuda::std::decay_t<OutputIteratorT>>>,
+    ::cuda::std::remove_cv_t<TransformResultT>>
+  && ::cuda::std::is_trivially_copyable_v<::cuda::std::remove_cv_t<TransformResultT>>
+  && (... && ::cuda::std::is_trivially_copyable_v<::cuda::std::remove_cv_t<cub::detail::it_value_t<InputIteratorTs>>>)
+  && transform_epilog_pack_output_type<::cuda::std::remove_cv_t<TransformResultT>,
+                                       transform_epilog_pack_size<ItemsPerThread>()>
+  && (...
+      || transform_epilog_pack_input_type<::cuda::std::remove_cv_t<cub::detail::it_value_t<InputIteratorTs>>,
+                                          transform_epilog_pack_size<ItemsPerThread>()>);
 
 template <typename InputIteratorT>
 inline constexpr BlockLoadAlgorithm transform_epilog_load_algorithm =
@@ -242,7 +486,15 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
   using input_load_storage_t = transform_epilog_block_load_storage_t<BlockThreads, ItemsPerThread, InputIteratorTs...>;
   using loaded_inputs_t =
     ::cuda::std::tuple<transform_epilog_input_values<ItemsPerThread, cub::detail::it_value_t<InputIteratorTs>>...>;
-  using block_store_t = BlockStore<transform_result_t, BlockThreads, ItemsPerThread, BLOCK_STORE_WARP_TRANSPOSE>;
+  using block_store_t     = BlockStore<transform_result_t, BlockThreads, ItemsPerThread, BLOCK_STORE_WARP_TRANSPOSE>;
+  constexpr int pack_size = transform_epilog_pack_size<ItemsPerThread>();
+  constexpr bool can_process_packed_block_path = transform_epilog_can_process_packed_block_path<
+    ItemsPerThread,
+    transform_accepts_index,
+    OutputIteratorT,
+    transform_result_t,
+    DeviceEpilogOpT,
+    InputIteratorTs...>;
 
   const auto total_items                  = num_segments * static_cast<::cuda::std::int64_t>(segment_size);
   constexpr int items_per_block_iteration = BlockThreads * ItemsPerThread;
@@ -261,6 +513,16 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
     loaded_inputs_t loaded_inputs;
     const bool full_tile       = tile_item_base + items_per_block_iteration <= total_items;
     const auto remaining_items = total_items - tile_item_base;
+
+    if constexpr (can_process_packed_block_path)
+    {
+      if (full_tile && transform_epilog_packed_path_aligned<pack_size>(tile_item_base, d_out, d_in...))
+      {
+        transform_epilog_process_packed_block_tile<BlockThreads, ItemsPerThread, pack_size>(
+          d_out, transform_op, ::cuda::std::index_sequence_for<InputIteratorTs...>{}, tile_item_base, d_in...);
+        continue;
+      }
+    }
 
     transform_epilog_load_inputs<BlockThreads, ItemsPerThread>(
       temp_storage.load,
