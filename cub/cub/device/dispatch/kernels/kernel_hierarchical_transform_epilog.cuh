@@ -17,7 +17,6 @@
 #include <cub/block/block_load_to_shared.cuh>
 #include <cub/device/dispatch/kernels/kernel_hierarchical_common.cuh>
 
-#include <cuda/std/cstdint>
 #include <cuda/std/iterator>
 #include <cuda/std/span>
 #include <cuda/std/tuple>
@@ -35,7 +34,7 @@ struct transform_epilog_result
 template <typename TransformOpT, typename... InputValueTs>
 struct transform_epilog_result<TransformOpT, true, InputValueTs...>
 {
-  using type = ::cuda::std::decay_t<::cuda::std::invoke_result_t<TransformOpT, ::cuda::std::int64_t, InputValueTs...>>;
+  using type = ::cuda::std::decay_t<::cuda::std::invoke_result_t<TransformOpT, int, InputValueTs...>>;
 };
 
 template <typename TransformOpT, typename... InputValueTs>
@@ -207,7 +206,7 @@ _CCCL_DEVICE _CCCL_FORCEINLINE void transform_epilog_load_register_input(
   LoadStorageT& load_storage,
   LoadedInputsT& loaded_inputs,
   InputIteratorT d_in,
-  ::cuda::std::int64_t tile_item_base,
+  int tile_item_base,
   bool full_tile,
   int remaining_items)
 {
@@ -241,7 +240,7 @@ _CCCL_DEVICE _CCCL_FORCEINLINE void transform_epilog_load_register_input(
 template <bool TransformAcceptsIndex, typename TransformOpT, typename LoadedInputsT, ::cuda::std::size_t... Is>
 _CCCL_DEVICE _CCCL_FORCEINLINE auto transform_epilog_invoke(
   TransformOpT& transform_op,
-  ::cuda::std::int64_t item_index,
+  int item_index,
   LoadedInputsT& loaded_inputs,
   int item,
   int linear_tid,
@@ -260,7 +259,7 @@ _CCCL_DEVICE _CCCL_FORCEINLINE auto transform_epilog_invoke(
 template <int ItemsPerThread>
 struct transform_epilog_indices_storage
 {
-  ::cuda::std::int64_t values[ItemsPerThread];
+  int values[ItemsPerThread];
 
   _CCCL_DEVICE _CCCL_FORCEINLINE void initialize()
   {
@@ -270,12 +269,12 @@ struct transform_epilog_indices_storage
     }
   }
 
-  _CCCL_DEVICE _CCCL_FORCEINLINE void set(int item, ::cuda::std::int64_t value)
+  _CCCL_DEVICE _CCCL_FORCEINLINE void set(int item, int value)
   {
     values[item] = value;
   }
 
-  _CCCL_DEVICE _CCCL_FORCEINLINE auto get() const -> const ::cuda::std::int64_t (&)[ItemsPerThread]
+  _CCCL_DEVICE _CCCL_FORCEINLINE auto get() const -> const int (&)[ItemsPerThread]
   {
     return values;
   }
@@ -285,7 +284,7 @@ struct transform_epilog_no_indices_storage
 {
   _CCCL_DEVICE _CCCL_FORCEINLINE void initialize() {}
 
-  _CCCL_DEVICE _CCCL_FORCEINLINE void set(int, ::cuda::std::int64_t) {}
+  _CCCL_DEVICE _CCCL_FORCEINLINE void set(int, int) {}
 };
 
 template <int BlockThreads,
@@ -297,14 +296,14 @@ template <int BlockThreads,
 _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalTransformEpilogKernel(
   _CCCL_GRID_CONSTANT const InputIteratorTs... d_in,
   _CCCL_GRID_CONSTANT const OutputIteratorT d_out,
-  _CCCL_GRID_CONSTANT const ::cuda::std::int64_t num_segments,
+  _CCCL_GRID_CONSTANT const int total_items,
   _CCCL_GRID_CONSTANT const int segment_size,
   TransformOpT transform_op,
   DeviceEpilogOpT device_epilog_op)
 {
   // Current implementation:
   // - the core transform path is flat and row-oriented
-  // - each block iteration covers a linear tile of BlockThreads * ItemsPerThread rows
+  // - each block covers a whole number of complete segments
   // - each thread owns ItemsPerThread consecutive rows inside that tile
   // - segment structure is preserved only through the per-item indices passed to the epilog
   // - `transform_op(index, values...)` or `transform_op(values...)` returns the per-item result
@@ -318,7 +317,7 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
   static_assert(sizeof...(InputIteratorTs) > 0, "TransformEpilog requires at least one input.");
 
   constexpr bool transform_accepts_index =
-    ::cuda::std::is_invocable_v<TransformOpT, ::cuda::std::int64_t, cub::detail::it_value_t<InputIteratorTs>...>;
+    ::cuda::std::is_invocable_v<TransformOpT, int, cub::detail::it_value_t<InputIteratorTs>...>;
 
   static_assert(
     transform_accepts_index || ::cuda::std::is_invocable_v<TransformOpT, cub::detail::it_value_t<InputIteratorTs>...>,
@@ -335,12 +334,11 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
   static_assert(::cuda::std::indirectly_writable<OutputIteratorT, const transform_result_t&>,
                 "OutputIteratorT must be indirectly writable from the transform result type.");
 
-  constexpr int warp_threads = 32;
   const auto block_hierarchy = ::cuda::hierarchy(::cuda::grid_dims(gridDim), ::cuda::block_dims<BlockThreads>());
   auto block_group           = ::cuda::experimental::this_block{block_hierarchy};
   using block_group_t        = decltype(block_group);
   using results_arg_t        = const transform_result_t(&)[ItemsPerThread];
-  using indices_arg_t        = const ::cuda::std::int64_t (&)[ItemsPerThread];
+  using indices_arg_t        = const int (&)[ItemsPerThread];
   constexpr bool epilog_accepts_indices =
     ::cuda::std::is_invocable_v<DeviceEpilogOpT, block_group_t, results_arg_t, indices_arg_t>;
 
@@ -358,140 +356,138 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
          transform_epilog_shared_input_values<ItemsPerThread, cub::detail::it_value_t<InputIteratorTs>>,
          transform_epilog_input_values<ItemsPerThread, cub::detail::it_value_t<InputIteratorTs>>>...>;
 
-  const auto total_items                  = num_segments * static_cast<::cuda::std::int64_t>(segment_size);
-  constexpr int items_per_block_iteration = BlockThreads * ItemsPerThread;
-  const auto block_item_stride            = static_cast<::cuda::std::int64_t>(gridDim.x) * items_per_block_iteration;
-  const auto block_item_base              = static_cast<::cuda::std::int64_t>(blockIdx.x) * items_per_block_iteration;
-  const auto linear_tid                   = static_cast<int>(threadIdx.x);
+  constexpr int max_items_per_block = BlockThreads * ItemsPerThread;
+  const int threads_per_segment     = segment_size / ItemsPerThread;
+  const int segments_per_block      = BlockThreads / threads_per_segment;
+  const int total_segments          = total_items / segment_size;
+  const int tile_segment_base       = static_cast<int>(blockIdx.x) * segments_per_block;
+  const int remaining_segments      = total_segments - tile_segment_base;
+  const int tile_segments           = remaining_segments < segments_per_block ? remaining_segments : segments_per_block;
+  const int tile_item_base          = tile_segment_base * segment_size;
+  const auto linear_tid             = static_cast<int>(threadIdx.x);
   __shared__ input_load_storage_t temp_storage;
 
-  for (::cuda::std::int64_t tile_item_base = block_item_base; tile_item_base < total_items;
-       tile_item_base += block_item_stride)
-  {
-    loaded_inputs_t loaded_inputs;
-    const bool full_tile       = tile_item_base + items_per_block_iteration <= total_items;
-    const auto remaining_items = total_items - tile_item_base;
-    const int tile_items       = full_tile ? items_per_block_iteration : static_cast<int>(remaining_items);
-    auto input_iterators       = ::cuda::std::make_tuple(d_in...);
+  loaded_inputs_t loaded_inputs;
+  const int tile_items      = tile_segments * segment_size;
+  const int tile_item_limit = tile_item_base + tile_items;
+  const bool full_tile      = tile_items == max_items_per_block;
+  auto input_iterators      = ::cuda::std::make_tuple(d_in...);
 
-    auto load_register_input =
+  auto load_register_input =
+    [&]<::cuda::std::size_t InputIndex, typename InputIteratorT>(
+      ::cuda::std::integral_constant<::cuda::std::size_t, InputIndex>, InputIteratorT input_iterator) {
+      transform_epilog_load_register_input<InputIndex, BlockThreads, ItemsPerThread>(
+        temp_storage, loaded_inputs, input_iterator, tile_item_base, full_tile, tile_items);
+    };
+
+  if constexpr (transform_epilog_any_load_to_shared<InputIteratorTs...>)
+  {
+    BlockLoadToShared<BlockThreads> load_to_shared{temp_storage.load_to_shared};
+
+    auto issue_load_to_shared =
       [&]<::cuda::std::size_t InputIndex, typename InputIteratorT>(
         ::cuda::std::integral_constant<::cuda::std::size_t, InputIndex>, InputIteratorT input_iterator) {
-        transform_epilog_load_register_input<InputIndex, BlockThreads, ItemsPerThread>(
-          temp_storage, loaded_inputs, input_iterator, tile_item_base, full_tile, tile_items);
+        if constexpr (transform_epilog_use_load_to_shared<InputIteratorT>)
+        {
+          using input_value_t = transform_epilog_input_value_t<InputIteratorT>;
+
+          constexpr int buffer_offset = input_load_storage_t::template shared_buffer_offset<InputIndex>();
+          constexpr int buffer_size   = input_load_storage_t::template shared_buffer_size<InputIndex>();
+
+          ::cuda::std::span<char> shared_buffer{temp_storage.shared_buffers + buffer_offset, buffer_size};
+          ::cuda::std::span<const input_value_t> input{
+            input_iterator + tile_item_base, static_cast<::cuda::std::size_t>(tile_items)};
+
+          ::cuda::std::get<InputIndex>(loaded_inputs).set(load_to_shared.CopyAsync(shared_buffer, input));
+        }
       };
 
-    if constexpr (transform_epilog_any_load_to_shared<InputIteratorTs...>)
-    {
-      BlockLoadToShared<BlockThreads> load_to_shared{temp_storage.load_to_shared};
+    [&]<::cuda::std::size_t... Is>(::cuda::std::index_sequence<Is...>) {
+      (issue_load_to_shared(::cuda::std::integral_constant<::cuda::std::size_t, Is>{},
+                            ::cuda::std::get<Is>(input_iterators)),
+       ...);
+    }(::cuda::std::index_sequence_for<InputIteratorTs...>{});
 
-      auto issue_load_to_shared =
-        [&]<::cuda::std::size_t InputIndex, typename InputIteratorT>(
-          ::cuda::std::integral_constant<::cuda::std::size_t, InputIndex>, InputIteratorT input_iterator) {
-          if constexpr (transform_epilog_use_load_to_shared<InputIteratorT>)
-          {
-            using input_value_t = transform_epilog_input_value_t<InputIteratorT>;
+    auto token = load_to_shared.Commit();
 
-            constexpr int buffer_offset = input_load_storage_t::template shared_buffer_offset<InputIndex>();
-            constexpr int buffer_size   = input_load_storage_t::template shared_buffer_size<InputIndex>();
+    [&]<::cuda::std::size_t... Is>(::cuda::std::index_sequence<Is...>) {
+      (load_register_input(::cuda::std::integral_constant<::cuda::std::size_t, Is>{},
+                           ::cuda::std::get<Is>(input_iterators)),
+       ...);
+    }(::cuda::std::index_sequence_for<InputIteratorTs...>{});
 
-            ::cuda::std::span<char> shared_buffer{temp_storage.shared_buffers + buffer_offset, buffer_size};
-            ::cuda::std::span<const input_value_t> input{
-              input_iterator + tile_item_base, static_cast<::cuda::std::size_t>(tile_items)};
+    load_to_shared.Wait(::cuda::std::move(token));
+  }
+  else
+  {
+    [&]<::cuda::std::size_t... Is>(::cuda::std::index_sequence<Is...>) {
+      (load_register_input(::cuda::std::integral_constant<::cuda::std::size_t, Is>{},
+                           ::cuda::std::get<Is>(input_iterators)),
+       ...);
+    }(::cuda::std::index_sequence_for<InputIteratorTs...>{});
+  }
 
-            ::cuda::std::get<InputIndex>(loaded_inputs).set(load_to_shared.CopyAsync(shared_buffer, input));
-          }
-        };
+  transform_result_t output_values[ItemsPerThread]{};
+  indices_storage_t indices_storage;
+  const int thread_item_base = tile_item_base + linear_tid * ItemsPerThread;
 
-      [&]<::cuda::std::size_t... Is>(::cuda::std::index_sequence<Is...>) {
-        (issue_load_to_shared(::cuda::std::integral_constant<::cuda::std::size_t, Is>{},
-                              ::cuda::std::get<Is>(input_iterators)),
-         ...);
-      }(::cuda::std::index_sequence_for<InputIteratorTs...>{});
+  indices_storage.initialize();
 
-      auto token = load_to_shared.Commit();
-
-      [&]<::cuda::std::size_t... Is>(::cuda::std::index_sequence<Is...>) {
-        (load_register_input(::cuda::std::integral_constant<::cuda::std::size_t, Is>{},
-                             ::cuda::std::get<Is>(input_iterators)),
-         ...);
-      }(::cuda::std::index_sequence_for<InputIteratorTs...>{});
-
-      load_to_shared.Wait(::cuda::std::move(token));
-    }
-    else
-    {
-      [&]<::cuda::std::size_t... Is>(::cuda::std::index_sequence<Is...>) {
-        (load_register_input(::cuda::std::integral_constant<::cuda::std::size_t, Is>{},
-                             ::cuda::std::get<Is>(input_iterators)),
-         ...);
-      }(::cuda::std::index_sequence_for<InputIteratorTs...>{});
-    }
-
-    transform_result_t output_values[ItemsPerThread]{};
-    indices_storage_t indices_storage;
-    const auto thread_item_base = tile_item_base + static_cast<::cuda::std::int64_t>(linear_tid) * ItemsPerThread;
-
-    indices_storage.initialize();
-
-    if (thread_item_base + ItemsPerThread <= total_items)
-    {
-      for (int item = 0; item < ItemsPerThread; ++item)
-      {
-        const auto item_index = thread_item_base + item;
-
-        output_values[item] = transform_epilog_invoke<transform_accepts_index>(
-          transform_op,
-          item_index,
-          loaded_inputs,
-          item,
-          linear_tid,
-          ::cuda::std::index_sequence_for<InputIteratorTs...>{});
-
-        indices_storage.set(item, item_index);
-      }
-    }
-    else
-    {
-      for (int item = 0; item < ItemsPerThread; ++item)
-      {
-        const auto item_index = thread_item_base + item;
-        if (item_index >= total_items)
-        {
-          continue;
-        }
-
-        output_values[item] = transform_epilog_invoke<transform_accepts_index>(
-          transform_op,
-          item_index,
-          loaded_inputs,
-          item,
-          linear_tid,
-          ::cuda::std::index_sequence_for<InputIteratorTs...>{});
-
-        indices_storage.set(item, item_index);
-      }
-    }
-
-    if constexpr (epilog_accepts_indices)
-    {
-      device_epilog_op(block_group, output_values, indices_storage.get());
-    }
-    else
-    {
-      device_epilog_op(block_group, output_values);
-    }
-
+  if (thread_item_base + ItemsPerThread <= tile_item_limit)
+  {
     for (int item = 0; item < ItemsPerThread; ++item)
     {
-      const auto item_index = thread_item_base + item;
-      if (item_index < total_items)
-      {
-        *(d_out + item_index) = output_values[item];
-      }
-    }
+      const int item_index = thread_item_base + item;
 
-    __syncthreads();
+      output_values[item] = transform_epilog_invoke<transform_accepts_index>(
+        transform_op,
+        item_index,
+        loaded_inputs,
+        item,
+        linear_tid,
+        ::cuda::std::index_sequence_for<InputIteratorTs...>{});
+
+      indices_storage.set(item, item_index);
+    }
+  }
+  else
+  {
+    for (int item = 0; item < ItemsPerThread; ++item)
+    {
+      const int item_index = thread_item_base + item;
+      if (item_index >= tile_item_limit)
+      {
+        continue;
+      }
+
+      output_values[item] = transform_epilog_invoke<transform_accepts_index>(
+        transform_op,
+        item_index,
+        loaded_inputs,
+        item,
+        linear_tid,
+        ::cuda::std::index_sequence_for<InputIteratorTs...>{});
+
+      indices_storage.set(item, item_index);
+    }
+  }
+
+  if constexpr (epilog_accepts_indices)
+  {
+    device_epilog_op(block_group, output_values, indices_storage.get());
+  }
+  else
+  {
+    device_epilog_op(block_group, output_values);
+  }
+
+  for (int item = 0; item < ItemsPerThread; ++item)
+  {
+    const int item_index = thread_item_base + item;
+    if (item_index < tile_item_limit)
+    {
+      *(d_out + item_index) = output_values[item];
+    }
   }
 }
 } // namespace detail::hierarchical

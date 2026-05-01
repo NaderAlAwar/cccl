@@ -19,8 +19,8 @@
 #include <cub/util_device.cuh>
 
 #include <cuda/__cmath/ceil_div.h>
-#include <cuda/std/__algorithm/min.h>
 #include <cuda/std/cstdint>
+#include <cuda/std/limits>
 #include <cuda/std/tuple>
 #include <cuda/std/type_traits>
 #include <cuda/std/utility>
@@ -161,7 +161,19 @@ struct DispatchHierarchicalTransformEpilog
 
     constexpr int warp_threads = 32;
 
-    if (segment_size <= 0 || segment_size > warp_threads)
+    if (num_segments < 0 || segment_size <= 0 || segment_size > warp_threads || segment_size % ItemsPerThread != 0)
+    {
+      return cudaErrorInvalidValue;
+    }
+
+    const int threads_per_segment = segment_size / ItemsPerThread;
+    if (threads_per_segment <= 0 || threads_per_segment > BlockThreads)
+    {
+      return cudaErrorInvalidValue;
+    }
+
+    const int segments_per_block = BlockThreads / threads_per_segment;
+    if (segments_per_block <= 0)
     {
       return cudaErrorInvalidValue;
     }
@@ -172,16 +184,27 @@ struct DispatchHierarchicalTransformEpilog
       return error;
     }
 
-    constexpr int items_per_block = BlockThreads * ItemsPerThread;
-    const auto total_items        = num_segments * static_cast<::cuda::std::int64_t>(segment_size);
-    const auto required_blocks    = ::cuda::ceil_div(total_items, static_cast<::cuda::std::int64_t>(items_per_block));
-    const auto grid_size = (::cuda::std::min) (required_blocks, static_cast<::cuda::std::int64_t>(max_grid_dim_x));
+    constexpr auto max_total_items = static_cast<::cuda::std::int64_t>((::cuda::std::numeric_limits<int>::max)());
 
-    launcher_factory(static_cast<int>(grid_size), BlockThreads, 0, stream)
+    if (num_segments > max_total_items / segment_size)
+    {
+      return cudaErrorInvalidValue;
+    }
+
+    const int total_items     = static_cast<int>(num_segments * static_cast<::cuda::std::int64_t>(segment_size));
+    const int total_segments  = static_cast<int>(num_segments);
+    const int required_blocks = ::cuda::ceil_div(total_segments, segments_per_block);
+
+    if (required_blocks > max_grid_dim_x)
+    {
+      return cudaErrorInvalidValue;
+    }
+
+    launcher_factory(required_blocks, BlockThreads, 0, stream)
       .doit(hierarchical_transform_epilog_kernel,
             ::cuda::std::get<Is>(d_in)...,
             d_out,
-            num_segments,
+            total_items,
             segment_size,
             transform_op,
             device_epilog_op);
