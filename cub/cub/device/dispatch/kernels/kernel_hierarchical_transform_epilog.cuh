@@ -15,7 +15,6 @@
 
 #include <cub/block/block_load.cuh>
 #include <cub/block/block_load_to_shared.cuh>
-#include <cub/block/block_store.cuh>
 #include <cub/device/dispatch/kernels/kernel_hierarchical_common.cuh>
 
 #include <cuda/std/cstdint>
@@ -358,18 +357,13 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
          transform_epilog_use_load_to_shared<InputIteratorTs>,
          transform_epilog_shared_input_values<ItemsPerThread, cub::detail::it_value_t<InputIteratorTs>>,
          transform_epilog_input_values<ItemsPerThread, cub::detail::it_value_t<InputIteratorTs>>>...>;
-  using block_store_t        = BlockStore<transform_result_t, BlockThreads, ItemsPerThread, BLOCK_STORE_WARP_TRANSPOSE>;
 
   const auto total_items                  = num_segments * static_cast<::cuda::std::int64_t>(segment_size);
   constexpr int items_per_block_iteration = BlockThreads * ItemsPerThread;
   const auto block_item_stride            = static_cast<::cuda::std::int64_t>(gridDim.x) * items_per_block_iteration;
   const auto block_item_base              = static_cast<::cuda::std::int64_t>(blockIdx.x) * items_per_block_iteration;
   const auto linear_tid                   = static_cast<int>(threadIdx.x);
-  __shared__ union
-  {
-    input_load_storage_t load;
-    typename block_store_t::TempStorage store;
-  } temp_storage;
+  __shared__ input_load_storage_t temp_storage;
 
   for (::cuda::std::int64_t tile_item_base = block_item_base; tile_item_base < total_items;
        tile_item_base += block_item_stride)
@@ -384,12 +378,12 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
       [&]<::cuda::std::size_t InputIndex, typename InputIteratorT>(
         ::cuda::std::integral_constant<::cuda::std::size_t, InputIndex>, InputIteratorT input_iterator) {
         transform_epilog_load_register_input<InputIndex, BlockThreads, ItemsPerThread>(
-          temp_storage.load, loaded_inputs, input_iterator, tile_item_base, full_tile, tile_items);
+          temp_storage, loaded_inputs, input_iterator, tile_item_base, full_tile, tile_items);
       };
 
     if constexpr (transform_epilog_any_load_to_shared<InputIteratorTs...>)
     {
-      BlockLoadToShared<BlockThreads> load_to_shared{temp_storage.load.load_to_shared};
+      BlockLoadToShared<BlockThreads> load_to_shared{temp_storage.load_to_shared};
 
       auto issue_load_to_shared =
         [&]<::cuda::std::size_t InputIndex, typename InputIteratorT>(
@@ -401,7 +395,7 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
             constexpr int buffer_offset = input_load_storage_t::template shared_buffer_offset<InputIndex>();
             constexpr int buffer_size   = input_load_storage_t::template shared_buffer_size<InputIndex>();
 
-            ::cuda::std::span<char> shared_buffer{temp_storage.load.shared_buffers + buffer_offset, buffer_size};
+            ::cuda::std::span<char> shared_buffer{temp_storage.shared_buffers + buffer_offset, buffer_size};
             ::cuda::std::span<const input_value_t> input{
               input_iterator + tile_item_base, static_cast<::cuda::std::size_t>(tile_items)};
 
@@ -488,20 +482,15 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
       device_epilog_op(block_group, output_values);
     }
 
-    if constexpr (transform_epilog_any_load_to_shared<InputIteratorTs...>)
+    for (int item = 0; item < ItemsPerThread; ++item)
     {
-      __syncthreads();
+      const auto item_index = thread_item_base + item;
+      if (item_index < total_items)
+      {
+        *(d_out + item_index) = output_values[item];
+      }
     }
 
-    if (full_tile)
-    {
-      block_store_t(temp_storage.store).Store(d_out + tile_item_base, output_values);
-    }
-    else
-    {
-      const auto remaining_items = total_items - tile_item_base;
-      block_store_t(temp_storage.store).Store(d_out + tile_item_base, output_values, static_cast<int>(remaining_items));
-    }
     __syncthreads();
   }
 }
