@@ -29,6 +29,13 @@ CUB_NAMESPACE_BEGIN
 
 namespace detail::hierarchical
 {
+struct NoopDeviceEpilogOp
+{
+  template <typename BlockGroupT, typename ResultsT>
+  _CCCL_DEVICE _CCCL_FORCEINLINE void operator()(BlockGroupT, ResultsT const&) const
+  {}
+};
+
 template <typename T>
 struct is_cuda_std_tuple : ::cuda::std::false_type
 {};
