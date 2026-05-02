@@ -18,6 +18,8 @@
 #include <cub/util_debug.cuh>
 #include <cub/util_device.cuh>
 
+#include <thrust/type_traits/is_trivially_relocatable.h>
+
 #include <cuda/__cmath/ceil_div.h>
 #include <cuda/std/cstdint>
 #include <cuda/std/limits>
@@ -45,21 +47,61 @@ struct is_cuda_std_tuple<::cuda::std::tuple<Ts...>> : ::cuda::std::true_type
 {};
 
 template <typename InputIteratorT>
+inline constexpr bool transform_epilog_should_assume_aligned_input =
+  ::cuda::std::is_pointer_v<::cuda::std::decay_t<InputIteratorT>>
+  && THRUST_NS_QUALIFIER::is_trivially_relocatable_v<
+    ::cuda::std::remove_cv_t<::cuda::std::remove_pointer_t<::cuda::std::decay_t<InputIteratorT>>>>;
+
+template <typename InputIteratorT>
+using transform_epilog_kernel_input_t = ::cuda::std::conditional_t<
+  transform_epilog_should_assume_aligned_input<InputIteratorT>,
+  transform_epilog_aligned_base_ptr<::cuda::std::remove_pointer_t<::cuda::std::decay_t<InputIteratorT>>>,
+  ::cuda::std::decay_t<InputIteratorT>>;
+
+template <typename InputIteratorT>
+struct transform_epilog_input_tuple
+{
+  using type = ::cuda::std::tuple<transform_epilog_kernel_input_t<InputIteratorT>>;
+};
+
+template <typename... InputIteratorTs>
+struct transform_epilog_input_tuple<::cuda::std::tuple<InputIteratorTs...>>
+{
+  using type = ::cuda::std::tuple<transform_epilog_kernel_input_t<InputIteratorTs>...>;
+};
+
+template <typename InputIteratorT>
 using transform_epilog_input_tuple_t =
-  ::cuda::std::conditional_t<is_cuda_std_tuple<::cuda::std::decay_t<InputIteratorT>>::value,
-                             ::cuda::std::decay_t<InputIteratorT>,
-                             ::cuda::std::tuple<::cuda::std::decay_t<InputIteratorT>>>;
+  typename transform_epilog_input_tuple<::cuda::std::decay_t<InputIteratorT>>::type;
+
+template <typename InputIteratorT>
+CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE auto transform_epilog_make_kernel_input(InputIteratorT&& d_in)
+{
+  if constexpr (transform_epilog_should_assume_aligned_input<InputIteratorT>)
+  {
+    return transform_epilog_make_aligned_base_ptr(d_in);
+  }
+  else
+  {
+    return ::cuda::std::forward<InputIteratorT>(d_in);
+  }
+}
 
 template <typename InputIteratorT>
 CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE auto make_transform_epilog_input_tuple(InputIteratorT&& d_in)
 {
   if constexpr (is_cuda_std_tuple<::cuda::std::decay_t<InputIteratorT>>::value)
   {
-    return ::cuda::std::forward<InputIteratorT>(d_in);
+    return ::cuda::std::apply(
+      []<typename... InputIteratorTs>(InputIteratorTs&&... input_iterators) {
+        return ::cuda::std::make_tuple(
+          transform_epilog_make_kernel_input(::cuda::std::forward<InputIteratorTs>(input_iterators))...);
+      },
+      ::cuda::std::forward<InputIteratorT>(d_in));
   }
   else
   {
-    return ::cuda::std::make_tuple(::cuda::std::forward<InputIteratorT>(d_in));
+    return ::cuda::std::make_tuple(transform_epilog_make_kernel_input(::cuda::std::forward<InputIteratorT>(d_in)));
   }
 }
 
@@ -194,6 +236,16 @@ struct DispatchHierarchicalTransformEpilog
     const int total_items     = static_cast<int>(num_segments * static_cast<::cuda::std::int64_t>(segment_size));
     const int total_segments  = static_cast<int>(num_segments);
     const int required_blocks = ::cuda::ceil_div(total_segments, segments_per_block);
+
+    const bool aligned_inputs_are_valid =
+      [&]<::cuda::std::size_t... InputIndices>(::cuda::std::index_sequence<InputIndices...>) {
+        return (... && transform_epilog_is_valid_aligned_input(::cuda::std::get<InputIndices>(d_in), total_items));
+      }(::cuda::std::make_index_sequence<::cuda::std::tuple_size_v<InputIteratorT>>{});
+
+    if (!aligned_inputs_are_valid)
+    {
+      return cudaErrorInvalidValue;
+    }
 
     if (required_blocks > max_grid_dim_x)
     {
