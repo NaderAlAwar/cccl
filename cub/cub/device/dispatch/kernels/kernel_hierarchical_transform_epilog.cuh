@@ -445,10 +445,11 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
   if constexpr (transform_epilog_all_load_to_shared<InputIteratorTs...>)
   {
     BlockLoadToShared<BlockThreads> load_to_shared{temp_storage.load_to_shared};
+    using load_request_t = cub::detail::BlockLoadToSharedCopyAsyncRequest<char, cub::detail::bulk_copy_min_align>;
 
-    auto issue_load_to_shared = [&]<::cuda::std::size_t InputIndex, typename InputIteratorT>(
-                                  ::cuda::std::integral_constant<::cuda::std::size_t, InputIndex>,
-                                  InputIteratorT input) {
+    auto make_load_to_shared_request =
+      [&]<::cuda::std::size_t InputIndex, typename InputIteratorT>(
+        ::cuda::std::integral_constant<::cuda::std::size_t, InputIndex>, InputIteratorT input) -> load_request_t {
       static_assert(transform_epilog_use_load_to_shared<InputIteratorT>);
 
       using input_value_t         = transform_epilog_input_value_t<InputIteratorT>;
@@ -463,12 +464,13 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
       _CCCL_ASSERT(bytes_to_copy % gmem_align == 0, "TransformEpilog raw input tiles must end on 16-byte boundaries.");
 
       ::cuda::std::span<char> shared_buffer{temp_storage.shared_buffers + buffer_offset, buffer_size};
-      (void) load_to_shared.template CopyAsync<char, gmem_align>(
-        shared_buffer, {gmem_src, static_cast<::cuda::std::size_t>(bytes_to_copy)});
+      return {shared_buffer, {gmem_src, static_cast<::cuda::std::size_t>(bytes_to_copy)}};
     };
 
     [&]<::cuda::std::size_t... Is>(::cuda::std::index_sequence<Is...>, InputIteratorTs... input_iterators) {
-      (issue_load_to_shared(::cuda::std::integral_constant<::cuda::std::size_t, Is>{}, input_iterators), ...);
+      load_request_t load_requests[] = {
+        make_load_to_shared_request(::cuda::std::integral_constant<::cuda::std::size_t, Is>{}, input_iterators)...};
+      load_to_shared.CopyAsyncBatch(load_requests);
     }(::cuda::std::index_sequence_for<InputIteratorTs...>{}, d_in...);
 
     auto token = load_to_shared.Commit();
