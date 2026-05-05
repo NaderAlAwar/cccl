@@ -86,12 +86,27 @@ struct BlockLoadToSharedCopyAsyncRequest
   ::cuda::std::span<const T> gmem_src;
 };
 
-template <int BlockDimX, int BlockDimY = 1, int BlockDimZ = 1>
+enum class BlockLoadToSharedMbarrierInit
+{
+  eager,
+  deferred,
+};
+
+struct BlockLoadToSharedDeferredInitT
+{};
+
+inline constexpr BlockLoadToSharedDeferredInitT BlockLoadToSharedDeferredInit{};
+
+template <int BlockDimX,
+          int BlockDimY                                      = 1,
+          int BlockDimZ                                      = 1,
+          BlockLoadToSharedMbarrierInit MbarrierInitStrategy = BlockLoadToSharedMbarrierInit::eager>
 struct BlockLoadToShared
 {
 private:
   /// Constants
-  static constexpr int block_threads = BlockDimX * BlockDimY * BlockDimZ;
+  static constexpr int block_threads           = BlockDimX * BlockDimY * BlockDimZ;
+  static constexpr bool deferred_mbarrier_init = MbarrierInitStrategy == BlockLoadToSharedMbarrierInit::deferred;
 
   // Helper for fallback to gmem->reg->smem
   struct alignas(detail::bulk_copy_min_align) vec_load_t
@@ -164,9 +179,22 @@ private:
   {
     {
       NV_IF_TARGET(NV_PROVIDES_SM_90,
-                   (if (__issue_thread()) { ::cuda::ptx::mbarrier_init(&temp_storage.mbarrier_handle, 1); }
+                   (if (__issue_thread()) { __init_mbarrier_from_issue_thread(); }
                     // TODO The following sync was added to avoid a racecheck posititive. Is it really needed?
                     __syncthreads();));
+    }
+  }
+
+  _CCCL_DEVICE_API _CCCL_FORCEINLINE void __init_mbarrier_from_issue_thread()
+  {
+    NV_IF_TARGET(NV_PROVIDES_SM_90, (::cuda::ptx::mbarrier_init(&temp_storage.mbarrier_handle, 1);));
+  }
+
+  _CCCL_DEVICE_API _CCCL_FORCEINLINE void __prepare_deferred_mbarrier_init()
+  {
+    if constexpr (deferred_mbarrier_init)
+    {
+      phase_parity = 0u;
     }
   }
 
@@ -314,13 +342,22 @@ private:
   _CCCL_DEVICE_API _CCCL_FORCEINLINE void
   __copy_aligned_async_bulk_batch(const RequestT (&requests)[NumRequests], ::cuda::std::index_sequence<Is...>)
   {
+    __prepare_deferred_mbarrier_init();
     ((num_bytes_bulk_total += __copy_request_num_bytes(requests[Is])), ...);
     if (__issue_thread())
     {
+      if constexpr (deferred_mbarrier_init)
+      {
+        __init_mbarrier_from_issue_thread();
+      }
       (__copy_aligned_async_bulk_issue(__copy_request_dst_ptr(requests[Is]),
                                        __copy_request_src_ptr(requests[Is]),
                                        __copy_request_num_bytes(requests[Is])),
        ...);
+    }
+    if constexpr (deferred_mbarrier_init)
+    {
+      __syncthreads();
     }
   }
 
@@ -329,8 +366,13 @@ private:
     const RequestT (&requests)[NumRequests], ::cuda::std::index_sequence<Is...>)
   {
     const uint32_t num_bytes_bulk = (uint32_t{0} + ... + static_cast<uint32_t>(__copy_request_num_bytes(requests[Is])));
+    __prepare_deferred_mbarrier_init();
     if (__issue_thread())
     {
+      if constexpr (deferred_mbarrier_init)
+      {
+        __init_mbarrier_from_issue_thread();
+      }
       (__copy_aligned_async_bulk_issue(__copy_request_dst_ptr(requests[Is]),
                                        __copy_request_src_ptr(requests[Is]),
                                        __copy_request_num_bytes(requests[Is])),
@@ -425,16 +467,33 @@ public:
   _CCCL_DEVICE_API _CCCL_FORCEINLINE BlockLoadToShared(TempStorage& temp_storage)
       : temp_storage(temp_storage.Alias())
   {
+    static_assert(!deferred_mbarrier_init,
+                  "Use the BlockLoadToSharedDeferredInit constructor for deferred mbarrier initialization.");
     _CCCL_ASSERT(::cuda::device::is_object_from(temp_storage, ::cuda::device::address_space::shared),
                  "temp_storage has to be in shared memory");
     __init_mbarrier();
   }
 
-  _CCCL_DEVICE_API BlockLoadToShared(const BlockLoadToShared<BlockDimX, BlockDimY, BlockDimZ>&) = delete;
+  //! @brief Collective constructor that defers mbarrier initialization to the batched copy API.
+  //!
+  //! This constructor is only valid with the deferred mbarrier initialization strategy. It is intended for complete
+  //! batched-copy paths that initialize the mbarrier immediately before issuing the bulk copies.
+  _CCCL_DEVICE_API _CCCL_FORCEINLINE BlockLoadToShared(TempStorage& temp_storage, BlockLoadToSharedDeferredInitT)
+      : temp_storage(temp_storage.Alias())
+  {
+    static_assert(deferred_mbarrier_init,
+                  "BlockLoadToSharedDeferredInit requires the deferred mbarrier initialization strategy.");
+    _CCCL_ASSERT(::cuda::device::is_object_from(temp_storage, ::cuda::device::address_space::shared),
+                 "temp_storage has to be in shared memory");
+  }
+
+  _CCCL_DEVICE_API
+  BlockLoadToShared(const BlockLoadToShared<BlockDimX, BlockDimY, BlockDimZ, MbarrierInitStrategy>&) = delete;
 
   //! @}
 
-  _CCCL_DEVICE_API BlockLoadToShared& operator=(const BlockLoadToShared<BlockDimX, BlockDimY, BlockDimZ>&) = delete;
+  _CCCL_DEVICE_API BlockLoadToShared&
+  operator=(const BlockLoadToShared<BlockDimX, BlockDimY, BlockDimZ, MbarrierInitStrategy>&) = delete;
 
   //! @brief Invalidates underlying @c mbarrier enabling reuse of its temporary storage.
   //! @note
@@ -471,8 +530,16 @@ public:
     __validate_copy_requests(requests, ::cuda::std::make_index_sequence<NumRequests>{});
 
 #ifdef CCCL_ENABLE_DEVICE_ASSERTIONS
-    _CCCL_ASSERT(state == State::ready_to_copy || state == State::ready_to_copy_or_commit,
-                 "Wait() must be called before another CopyAsyncBatch()");
+    if constexpr (deferred_mbarrier_init)
+    {
+      _CCCL_ASSERT(state == State::ready_to_copy,
+                   "Deferred-init CopyAsyncBatch() requires no prior uncommitted copies.");
+    }
+    else
+    {
+      _CCCL_ASSERT(state == State::ready_to_copy || state == State::ready_to_copy_or_commit,
+                   "Wait() must be called before another CopyAsyncBatch()");
+    }
     state = State::ready_to_copy_or_commit;
 #endif // CCCL_ENABLE_DEVICE_ASSERTIONS
 
@@ -536,6 +603,8 @@ public:
   [[nodiscard]] _CCCL_DEVICE_API _CCCL_FORCEINLINE ::cuda::std::span<T>
   CopyAsync(::cuda::std::span<char> smem_dst, ::cuda::std::span<const T> gmem_src)
   {
+    static_assert(!deferred_mbarrier_init,
+                  "Deferred mbarrier initialization is only supported by the batched copy APIs.");
     constexpr bool bulk_aligned = GmemAlign >= static_cast<::cuda::std::size_t>(detail::bulk_copy_min_align);
     const int num_bytes         = __copy_num_bytes(gmem_src);
     const auto dst_ptr          = ::cuda::std::data(smem_dst);

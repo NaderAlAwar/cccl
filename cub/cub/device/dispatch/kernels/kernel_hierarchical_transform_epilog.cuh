@@ -242,7 +242,7 @@ struct transform_epilog_input_load_storage
     transform_epilog_shared_buffer_total_size<items_per_block, InputIteratorTs...>();
 
   using block_load_storage_t = transform_epilog_block_load_storage_t<BlockThreads, ItemsPerThread, InputIteratorTs...>;
-  using block_load_to_shared_t = BlockLoadToShared<BlockThreads>;
+  using block_load_to_shared_t = BlockLoadToShared<BlockThreads, 1, 1, BlockLoadToSharedMbarrierInit::deferred>;
 
   typename block_load_to_shared_t::TempStorage load_to_shared;
   block_load_storage_t block_load;
@@ -502,7 +502,8 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
 
   if constexpr (transform_epilog_all_load_to_shared<InputIteratorTs...>)
   {
-    BlockLoadToShared<BlockThreads> load_to_shared{temp_storage.load_to_shared};
+    typename input_load_storage_t::block_load_to_shared_t load_to_shared{
+      temp_storage.load_to_shared, BlockLoadToSharedDeferredInit};
     using load_request_t = cub::detail::BlockLoadToSharedCopyAsyncRequest<char, cub::detail::bulk_copy_min_align>;
 
     auto make_load_to_shared_request =
