@@ -75,6 +75,30 @@ using transform_epilog_input_tuple_t =
   typename transform_epilog_input_tuple<::cuda::std::decay_t<InputIteratorT>>::type;
 
 template <typename InputIteratorT>
+struct transform_epilog_tuple_all_load_to_shared : ::cuda::std::false_type
+{};
+
+template <typename... InputIteratorTs>
+struct transform_epilog_tuple_all_load_to_shared<::cuda::std::tuple<InputIteratorTs...>>
+    : ::cuda::std::bool_constant<transform_epilog_all_load_to_shared<InputIteratorTs...>>
+{};
+
+template <typename InputIteratorT, int ItemsPerThread>
+inline constexpr bool transform_epilog_can_use_static_segment_32 =
+  (32 % ItemsPerThread == 0) && transform_epilog_tuple_all_load_to_shared<::cuda::std::decay_t<InputIteratorT>>::value;
+
+template <typename KernelSourceT, typename = void>
+struct transform_epilog_has_segment_32_kernel : ::cuda::std::false_type
+{};
+
+template <typename KernelSourceT>
+struct transform_epilog_has_segment_32_kernel<
+  KernelSourceT,
+  ::cuda::std::void_t<decltype(::cuda::std::declval<KernelSourceT>().HierarchicalTransformEpilogKernelSegment32())>>
+    : ::cuda::std::true_type
+{};
+
+template <typename InputIteratorT>
 CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE auto transform_epilog_make_kernel_input(InputIteratorT&& d_in)
 {
   if constexpr (transform_epilog_should_assume_aligned_input<InputIteratorT>)
@@ -129,12 +153,24 @@ struct DeviceHierarchicalTransformEpilogKernelSource<
 {
   CUB_DEFINE_KERNEL_GETTER(
     HierarchicalTransformEpilogKernel,
-    DeviceHierarchicalTransformEpilogKernel<BlockThreads,
-                                            ItemsPerThread,
-                                            OutputIteratorT,
-                                            TransformOpT,
-                                            DeviceEpilogOpT,
-                                            InputIteratorTs...>)
+    DeviceHierarchicalTransformEpilogKernel<
+      BlockThreads,
+      ItemsPerThread,
+      0,
+      OutputIteratorT,
+      TransformOpT,
+      DeviceEpilogOpT,
+      InputIteratorTs...>)
+  CUB_DEFINE_KERNEL_GETTER(
+    HierarchicalTransformEpilogKernelSegment32,
+    DeviceHierarchicalTransformEpilogKernel<
+      BlockThreads,
+      ItemsPerThread,
+      32,
+      OutputIteratorT,
+      TransformOpT,
+      DeviceEpilogOpT,
+      InputIteratorTs...>)
 };
 
 template <int BlockThreads,
@@ -276,8 +312,18 @@ struct DispatchHierarchicalTransformEpilog
 
   CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE cudaError_t Invoke()
   {
-    return InvokeKernel(kernel_source.HierarchicalTransformEpilogKernel(),
-                        ::cuda::std::make_index_sequence<::cuda::std::tuple_size_v<InputIteratorT>>{});
+    using input_indices_t = ::cuda::std::make_index_sequence<::cuda::std::tuple_size_v<InputIteratorT>>;
+
+    if constexpr (transform_epilog_can_use_static_segment_32<InputIteratorT, ItemsPerThread>
+                  && transform_epilog_has_segment_32_kernel<KernelSource>::value)
+    {
+      if (segment_size == 32)
+      {
+        return InvokeKernel(kernel_source.HierarchicalTransformEpilogKernelSegment32(), input_indices_t{});
+      }
+    }
+
+    return InvokeKernel(kernel_source.HierarchicalTransformEpilogKernel(), input_indices_t{});
   }
 };
 

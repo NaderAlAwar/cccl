@@ -355,8 +355,44 @@ struct transform_epilog_no_indices_storage
   _CCCL_DEVICE _CCCL_FORCEINLINE void set(int, int) {}
 };
 
+struct transform_epilog_tile
+{
+  int item_base;
+  int items;
+};
+
+template <int BlockThreads, int ItemsPerThread, int StaticSegmentSize>
+_CCCL_DEVICE _CCCL_FORCEINLINE transform_epilog_tile transform_epilog_get_tile(int total_items, int segment_size)
+{
+  constexpr int items_per_block = BlockThreads * ItemsPerThread;
+
+  if constexpr (StaticSegmentSize > 0)
+  {
+    static_assert(items_per_block % StaticSegmentSize == 0,
+                  "Static segment tiles must contain a whole number of segments.");
+
+    const int tile_item_base  = static_cast<int>(blockIdx.x) * items_per_block;
+    const int remaining_items = total_items - tile_item_base;
+    const int tile_items      = remaining_items < items_per_block ? remaining_items : items_per_block;
+    return {tile_item_base, tile_items};
+  }
+  else
+  {
+    const int threads_per_segment = segment_size / ItemsPerThread;
+    const int segments_per_block  = BlockThreads / threads_per_segment;
+    const int total_segments      = total_items / segment_size;
+    const int tile_segment_base   = static_cast<int>(blockIdx.x) * segments_per_block;
+    const int remaining_segments  = total_segments - tile_segment_base;
+    const int tile_segments       = remaining_segments < segments_per_block ? remaining_segments : segments_per_block;
+    const int tile_item_base      = tile_segment_base * segment_size;
+    const int tile_items          = tile_segments * segment_size;
+    return {tile_item_base, tile_items};
+  }
+}
+
 template <int BlockThreads,
           int ItemsPerThread,
+          int StaticSegmentSize,
           typename OutputIteratorT,
           typename TransformOpT,
           typename DeviceEpilogOpT,
@@ -428,18 +464,14 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
          transform_epilog_input_values<ItemsPerThread, transform_epilog_input_value_t<InputIteratorTs>>>...>;
 
   constexpr int max_items_per_block = BlockThreads * ItemsPerThread;
-  const int threads_per_segment     = segment_size / ItemsPerThread;
-  const int segments_per_block      = BlockThreads / threads_per_segment;
-  const int total_segments          = total_items / segment_size;
-  const int tile_segment_base       = static_cast<int>(blockIdx.x) * segments_per_block;
-  const int remaining_segments      = total_segments - tile_segment_base;
-  const int tile_segments           = remaining_segments < segments_per_block ? remaining_segments : segments_per_block;
-  const int tile_item_base          = tile_segment_base * segment_size;
   const auto linear_tid             = static_cast<int>(threadIdx.x);
   __shared__ input_load_storage_t temp_storage;
 
   loaded_inputs_t loaded_inputs;
-  const int tile_items      = tile_segments * segment_size;
+  const auto tile =
+    transform_epilog_get_tile<BlockThreads, ItemsPerThread, StaticSegmentSize>(total_items, segment_size);
+  const int tile_item_base  = tile.item_base;
+  const int tile_items      = tile.items;
   const int tile_item_limit = tile_item_base + tile_items;
 
   if constexpr (transform_epilog_all_load_to_shared<InputIteratorTs...>)
