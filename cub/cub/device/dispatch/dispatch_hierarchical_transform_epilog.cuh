@@ -151,12 +151,17 @@ struct DeviceHierarchicalTransformEpilogKernelSource<
   TransformOpT,
   DeviceEpilogOpT>
 {
+  static constexpr bool use_striped_no_epilog =
+    ::cuda::std::is_same_v<::cuda::std::decay_t<DeviceEpilogOpT>, NoopDeviceEpilogOp>
+    && transform_epilog_all_load_to_shared<InputIteratorTs...>;
+
   CUB_DEFINE_KERNEL_GETTER(
     HierarchicalTransformEpilogKernel,
     DeviceHierarchicalTransformEpilogKernel<
       BlockThreads,
       ItemsPerThread,
       0,
+      use_striped_no_epilog,
       OutputIteratorT,
       TransformOpT,
       DeviceEpilogOpT,
@@ -167,6 +172,7 @@ struct DeviceHierarchicalTransformEpilogKernelSource<
       BlockThreads,
       ItemsPerThread,
       32,
+      use_striped_no_epilog,
       OutputIteratorT,
       TransformOpT,
       DeviceEpilogOpT,

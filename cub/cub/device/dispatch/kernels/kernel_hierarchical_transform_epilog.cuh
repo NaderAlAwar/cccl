@@ -133,6 +133,11 @@ struct transform_epilog_shared_input_values
   {
     return values[linear_tid * ItemsPerThread + item];
   }
+
+  _CCCL_DEVICE _CCCL_FORCEINLINE decltype(auto) get_local(int local_item)
+  {
+    return values[local_item];
+  }
 };
 
 template <typename InputIteratorT>
@@ -324,6 +329,24 @@ _CCCL_DEVICE _CCCL_FORCEINLINE auto transform_epilog_invoke(
   }
 }
 
+template <bool TransformAcceptsIndex, typename TransformOpT, typename LoadedInputsT, ::cuda::std::size_t... Is>
+_CCCL_DEVICE _CCCL_FORCEINLINE auto transform_epilog_invoke_local(
+  TransformOpT& transform_op,
+  int item_index,
+  LoadedInputsT& loaded_inputs,
+  int local_item,
+  ::cuda::std::index_sequence<Is...>)
+{
+  if constexpr (TransformAcceptsIndex)
+  {
+    return transform_op(item_index, ::cuda::std::get<Is>(loaded_inputs).get_local(local_item)...);
+  }
+  else
+  {
+    return transform_op(::cuda::std::get<Is>(loaded_inputs).get_local(local_item)...);
+  }
+}
+
 template <int ItemsPerThread>
 struct transform_epilog_indices_storage
 {
@@ -393,6 +416,7 @@ _CCCL_DEVICE _CCCL_FORCEINLINE transform_epilog_tile transform_epilog_get_tile(i
 template <int BlockThreads,
           int ItemsPerThread,
           int StaticSegmentSize,
+          bool UseStripedNoEpilog,
           typename OutputIteratorT,
           typename TransformOpT,
           typename DeviceEpilogOpT,
@@ -419,6 +443,8 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
   static_assert(BlockThreads > 0, "BlockThreads must be positive.");
   static_assert(BlockThreads % 32 == 0, "BlockThreads must be a multiple of warp size.");
   static_assert(sizeof...(InputIteratorTs) > 0, "TransformEpilog requires at least one input.");
+  static_assert(!UseStripedNoEpilog || transform_epilog_all_load_to_shared<InputIteratorTs...>,
+                "The striped no-epilog fast path requires all inputs to use BlockLoadToShared.");
   static_assert(
     transform_epilog_all_load_to_shared<InputIteratorTs...> || transform_epilog_none_load_to_shared<InputIteratorTs...>,
     "TransformEpilog does not support mixed BlockLoadToShared/register input loading.");
@@ -544,6 +570,34 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
                            ::cuda::std::get<Is>(input_iterators)),
        ...);
     }(::cuda::std::index_sequence_for<InputIteratorTs...>{});
+  }
+
+  if constexpr (UseStripedNoEpilog)
+  {
+    auto process_tile = [&](auto full_tile) {
+      _CCCL_PRAGMA_UNROLL_FULL()
+      for (int item = 0; item < ItemsPerThread; ++item)
+      {
+        const int local_item = item * BlockThreads + linear_tid;
+        if (full_tile || local_item < tile_items)
+        {
+          const int item_index  = tile_item_base + local_item;
+          *(d_out + item_index) = transform_epilog_invoke_local<transform_accepts_index>(
+            transform_op, item_index, loaded_inputs, local_item, ::cuda::std::index_sequence_for<InputIteratorTs...>{});
+        }
+      }
+    };
+
+    if (tile_items == max_items_per_block)
+    {
+      process_tile(::cuda::std::true_type{});
+    }
+    else
+    {
+      process_tile(::cuda::std::false_type{});
+    }
+
+    return;
   }
 
   transform_result_t output_values[ItemsPerThread]{};
