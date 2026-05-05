@@ -467,13 +467,12 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
       return {shared_buffer, {gmem_src, static_cast<::cuda::std::size_t>(bytes_to_copy)}};
     };
 
-    [&]<::cuda::std::size_t... Is>(::cuda::std::index_sequence<Is...>, InputIteratorTs... input_iterators) {
-      load_request_t load_requests[] = {
-        make_load_to_shared_request(::cuda::std::integral_constant<::cuda::std::size_t, Is>{}, input_iterators)...};
-      load_to_shared.CopyAsyncBatch(load_requests);
-    }(::cuda::std::index_sequence_for<InputIteratorTs...>{}, d_in...);
-
-    auto token = load_to_shared.Commit();
+    auto token =
+      [&]<::cuda::std::size_t... Is>(::cuda::std::index_sequence<Is...>, InputIteratorTs... input_iterators) {
+        load_request_t load_requests[] = {
+          make_load_to_shared_request(::cuda::std::integral_constant<::cuda::std::size_t, Is>{}, input_iterators)...};
+        return load_to_shared.CopyAsyncBatchAndCommit(load_requests);
+      }(::cuda::std::index_sequence_for<InputIteratorTs...>{}, d_in...);
 
     using input_iterators_tuple_t = ::cuda::std::tuple<InputIteratorTs...>;
     auto bind_shared_input        = [&]<::cuda::std::size_t InputIndex>(

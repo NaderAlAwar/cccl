@@ -325,6 +325,27 @@ private:
   }
 
   template <typename RequestT, ::cuda::std::size_t NumRequests, ::cuda::std::size_t... Is>
+  _CCCL_DEVICE_API _CCCL_FORCEINLINE void __copy_aligned_async_bulk_batch_and_commit(
+    const RequestT (&requests)[NumRequests], ::cuda::std::index_sequence<Is...>)
+  {
+    const uint32_t num_bytes_bulk = (uint32_t{0} + ... + static_cast<uint32_t>(__copy_request_num_bytes(requests[Is])));
+    if (__issue_thread())
+    {
+      (__copy_aligned_async_bulk_issue(__copy_request_dst_ptr(requests[Is]),
+                                       __copy_request_src_ptr(requests[Is]),
+                                       __copy_request_num_bytes(requests[Is])),
+       ...);
+      ::cuda::ptx::mbarrier_arrive_expect_tx(
+        ::cuda::ptx::sem_release,
+        ::cuda::ptx::scope_cta,
+        ::cuda::ptx::space_shared,
+        &temp_storage.mbarrier_handle,
+        num_bytes_bulk);
+    }
+    __syncthreads();
+  }
+
+  template <typename RequestT, ::cuda::std::size_t NumRequests, ::cuda::std::size_t... Is>
   _CCCL_DEVICE_API _CCCL_FORCEINLINE void
   __copy_aligned_async_batch(const RequestT (&requests)[NumRequests], ::cuda::std::index_sequence<Is...>)
   {
@@ -462,6 +483,37 @@ public:
       (__copy_aligned_async_batch(requests, ::cuda::std::make_index_sequence<NumRequests>{});),
       NV_IS_DEVICE,
       (__copy_aligned_fallback_batch(requests, ::cuda::std::make_index_sequence<NumRequests>{});));
+  }
+
+  //! @brief Copy a complete batch of bulk-aligned global-to-shared memory requests and commit it.
+  //!
+  //! This is a complete-batch variant of @c CopyAsyncBatch: callers must not have prior uncommitted copies outstanding.
+  //! On SM90 it issues all bulk copies and the mbarrier arrive from the same elected-thread region.
+  template <typename RequestT, ::cuda::std::size_t NumRequests>
+  [[nodiscard]] _CCCL_DEVICE_API _CCCL_FORCEINLINE CommitToken
+  CopyAsyncBatchAndCommit(const RequestT (&requests)[NumRequests])
+  {
+    static_assert(NumRequests > 0);
+    static_assert(RequestT::gmem_align >= static_cast<::cuda::std::size_t>(detail::bulk_copy_min_align),
+                  "CopyAsyncBatchAndCommit currently supports only bulk-aligned requests.");
+
+    __validate_copy_requests(requests, ::cuda::std::make_index_sequence<NumRequests>{});
+
+#ifdef CCCL_ENABLE_DEVICE_ASSERTIONS
+    _CCCL_ASSERT(state == State::ready_to_copy, "CopyAsyncBatchAndCommit() requires no outstanding copies.");
+    state = State::committed;
+#endif // CCCL_ENABLE_DEVICE_ASSERTIONS
+
+    NV_DISPATCH_TARGET(
+      NV_PROVIDES_SM_90,
+      (__copy_aligned_async_bulk_batch_and_commit(requests, ::cuda::std::make_index_sequence<NumRequests>{});),
+      NV_PROVIDES_SM_80,
+      (__copy_aligned_async_batch(requests, ::cuda::std::make_index_sequence<NumRequests>{});
+       asm volatile("cp.async.commit_group ;" :: : "memory");),
+      NV_IS_DEVICE,
+      (__copy_aligned_fallback_batch(requests, ::cuda::std::make_index_sequence<NumRequests>{});));
+
+    return CommitToken{};
   }
 
   //! @brief Copy elements from global to shared memory
