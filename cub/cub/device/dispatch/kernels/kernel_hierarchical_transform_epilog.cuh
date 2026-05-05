@@ -18,6 +18,7 @@
 #include <cub/device/dispatch/kernels/kernel_hierarchical_common.cuh>
 
 #include <cuda/__memory/align_down.h>
+#include <cuda/__memory/is_aligned.h>
 #include <cuda/std/iterator>
 #include <cuda/std/span>
 #include <cuda/std/tuple>
@@ -28,6 +29,9 @@ CUB_NAMESPACE_BEGIN
 
 namespace detail::hierarchical
 {
+constexpr int transform_epilog_bulk_copy_alignment =
+  (CUB_PTX_ARCH >= 900 && CUB_PTX_ARCH < 1000) ? 128 : cub::detail::bulk_copy_min_align;
+
 template <typename T>
 struct transform_epilog_aligned_base_ptr
 {
@@ -42,7 +46,7 @@ CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE auto transform_epilog_make_aligned_base_p
   -> transform_epilog_aligned_base_ptr<T>
 {
   const auto raw_ptr  = reinterpret_cast<const char*>(ptr);
-  const auto base_ptr = ::cuda::align_down(raw_ptr, cub::detail::bulk_copy_min_align);
+  const auto base_ptr = ::cuda::align_down(raw_ptr, transform_epilog_bulk_copy_alignment);
   return {base_ptr, static_cast<int>(raw_ptr - base_ptr)};
 }
 
@@ -84,10 +88,9 @@ template <typename T>
 CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE bool
 transform_epilog_is_valid_aligned_input(const transform_epilog_aligned_base_ptr<T>& input, int total_items)
 {
-  constexpr int alignment = cub::detail::bulk_copy_min_align;
   const auto total_bytes =
     static_cast<::cuda::std::int64_t>(sizeof(typename transform_epilog_aligned_base_ptr<T>::value_type)) * total_items;
-  return input.head_padding == 0 && total_bytes % alignment == 0;
+  return input.head_padding == 0 && total_bytes % transform_epilog_bulk_copy_alignment == 0;
 }
 
 template <typename TransformOpT, bool AcceptsIndex, typename... InputValueTs>
@@ -170,7 +173,7 @@ _CCCL_HOST_DEVICE constexpr int transform_epilog_shared_buffer_align()
 {
   if constexpr (transform_epilog_use_load_to_shared<InputIteratorT>)
   {
-    return cub::detail::LoadToSharedBufferAlignBytes<transform_epilog_input_value_t<InputIteratorT>>();
+    return transform_epilog_bulk_copy_alignment;
   }
   else
   {
@@ -183,8 +186,8 @@ _CCCL_HOST_DEVICE constexpr int transform_epilog_shared_buffer_size()
 {
   if constexpr (transform_epilog_use_load_to_shared<InputIteratorT>)
   {
-    return cub::detail::LoadToSharedBufferSizeBytes<transform_epilog_input_value_t<InputIteratorT>,
-                                                    cub::detail::bulk_copy_min_align>(ItemsPerBlock);
+    return static_cast<int>(sizeof(transform_epilog_input_value_t<InputIteratorT>)) * ItemsPerBlock
+         + transform_epilog_bulk_copy_alignment;
   }
   else
   {
@@ -504,7 +507,7 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
   {
     typename input_load_storage_t::block_load_to_shared_t load_to_shared{
       temp_storage.load_to_shared, BlockLoadToSharedDeferredInit};
-    using load_request_t = cub::detail::BlockLoadToSharedCopyAsyncRequest<char, cub::detail::bulk_copy_min_align>;
+    using load_request_t = cub::detail::BlockLoadToSharedCopyAsyncRequest<char, transform_epilog_bulk_copy_alignment>;
 
     auto make_load_to_shared_request =
       [&]<::cuda::std::size_t InputIndex, typename InputIteratorT>(
@@ -512,15 +515,18 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
       static_assert(transform_epilog_use_load_to_shared<InputIteratorT>);
 
       using input_value_t         = transform_epilog_input_value_t<InputIteratorT>;
-      constexpr int gmem_align    = cub::detail::bulk_copy_min_align;
+      constexpr int gmem_align    = transform_epilog_bulk_copy_alignment;
       constexpr int buffer_offset = input_load_storage_t::template shared_buffer_offset<static_cast<int>(InputIndex)>();
       constexpr int buffer_size   = input_load_storage_t::template shared_buffer_size<static_cast<int>(InputIndex)>();
 
       const int bytes_to_copy    = static_cast<int>(sizeof(input_value_t)) * tile_items;
       const char* const gmem_src = input.ptr + static_cast<::cuda::std::size_t>(tile_item_base) * sizeof(input_value_t);
 
-      _CCCL_ASSERT(input.head_padding == 0, "TransformEpilog raw inputs must be 16-byte aligned.");
-      _CCCL_ASSERT(bytes_to_copy % gmem_align == 0, "TransformEpilog raw input tiles must end on 16-byte boundaries.");
+      _CCCL_ASSERT(input.head_padding == 0, "TransformEpilog raw inputs must satisfy the bulk copy alignment.");
+      _CCCL_ASSERT(bytes_to_copy % gmem_align == 0,
+                   "TransformEpilog raw input tiles must end on the bulk copy alignment.");
+      _CCCL_ASSERT(::cuda::is_aligned(temp_storage.shared_buffers + buffer_offset, gmem_align),
+                   "TransformEpilog raw shared tiles must satisfy the bulk copy alignment.");
 
       ::cuda::std::span<char> shared_buffer{temp_storage.shared_buffers + buffer_offset, buffer_size};
       return {shared_buffer, {gmem_src, static_cast<::cuda::std::size_t>(bytes_to_copy)}};
