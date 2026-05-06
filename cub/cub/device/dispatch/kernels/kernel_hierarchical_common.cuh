@@ -20,6 +20,8 @@
 #include <cub/block/block_reduce.cuh>
 #include <cub/util_type.cuh>
 
+#include <thrust/type_traits/is_trivially_relocatable.h>
+
 #include <cuda/hierarchy>
 #include <cuda/std/cstdint>
 #include <cuda/std/functional>
@@ -32,9 +34,13 @@ CUB_NAMESPACE_BEGIN
 
 namespace detail::hierarchical
 {
+template <typename T>
+inline constexpr bool hierarchical_transform_stageable_value_v =
+  THRUST_NS_QUALIFIER::is_trivially_relocatable_v<::cuda::std::remove_cv_t<T>>;
+
 template <typename InputIteratorT>
-inline constexpr bool shared_input_staging_supported_v =
-  ::cuda::std::is_trivially_copyable_v<cub::detail::it_value_t<InputIteratorT>>;
+inline constexpr bool hierarchical_transform_stageable_input_v =
+  hierarchical_transform_stageable_value_v<cub::detail::it_value_t<InputIteratorT>>;
 
 template <typename RandomAccessIteratorT>
 class thread_segment_range

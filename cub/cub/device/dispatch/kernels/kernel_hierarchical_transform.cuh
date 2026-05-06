@@ -49,9 +49,7 @@ template <int BlockThreads,
 _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalTransformKernel(
   _CCCL_GRID_CONSTANT const InputIteratorT d_in,
   _CCCL_GRID_CONSTANT const OutputIteratorT d_out,
-  _CCCL_GRID_CONSTANT const int num_segments,
   _CCCL_GRID_CONSTANT const int segment_size,
-  _CCCL_GRID_CONSTANT const bool use_shared_input_staging,
   SegmentOpT segment_op,
   ElementTransformOpT element_transform_op)
 {
@@ -60,20 +58,27 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
   // - each thread receives a contiguous slice of that segment via `thread_segment_range`
   // - `segment_op` is responsible for any block-wide combine it needs and should return the final segment result on
   //   every thread in the block group
-  // - when enabled, the block first stages the segment into shared memory via tiled `BlockLoad`
+  // - the block first stages the segment into shared memory via tiled `BlockLoad`
   // - the kernel then applies `element_transform_op` to each item, passing the segment result, the segment-local item
   //   index, and the item value
 
   using block_hierarchy_t = decltype(::cuda::hierarchy(::cuda::grid_dims(dim3{}), ::cuda::block_dims<BlockThreads>()));
   using block_group_t     = ::cuda::experimental::this_block<block_hierarchy_t>;
-  using input_range_t     = thread_segment_range<InputIteratorT>;
+  using value_t           = cub::detail::it_value_t<InputIteratorT>;
+  using input_range_t     = thread_segment_range<value_t*>;
   using segment_result_t = ::cuda::std::decay_t<::cuda::std::invoke_result_t<SegmentOpT, block_group_t, input_range_t>>;
-  using value_t          = cub::detail::it_value_t<InputIteratorT>;
   using block_load_t     = BlockLoad<value_t, BlockThreads, ItemsPerThread, BLOCK_LOAD_STRIPED>;
   using block_store_t    = BlockStore<value_t, BlockThreads, ItemsPerThread, BLOCK_STORE_STRIPED>;
 
+  // There is a subtle difference with the epilog case. There we did
+  // IPT because each thread was doing ipt items. Here each thread
+  // does do IPT items but it also loads other stuff so it cal
+  // calculate the RMS. So here, BlockLoad does not need to be tied to
+  // IPT in the same way.
   constexpr int tile_items = BlockThreads * ItemsPerThread;
 
+  static_assert(hierarchical_transform_stageable_input_v<InputIteratorT>,
+                "TransformProlog requires input values to be trivially relocatable.");
   static_assert(!::cuda::std::is_void_v<segment_result_t>, "segment_op must return one scalar result per segment.");
   extern __shared__ char shared_segment_buffer_base[];
 
@@ -85,7 +90,6 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
 
   const auto block_hierarchy   = ::cuda::hierarchy(::cuda::grid_dims(gridDim), ::cuda::block_dims<BlockThreads>());
   auto block_group             = ::cuda::experimental::this_block{block_hierarchy};
-  auto output_range            = make_thread_segment_range<BlockThreads>(d_out + segment_offset, segment_size);
   auto apply_element_transform = [&](const segment_result_t& segment_result, int index_in_segment, auto&& value) {
     using input_ref_t = decltype(value);
 
@@ -102,78 +106,58 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
     }
   };
 
-  auto transform_segment = [&](auto input_range) {
-    const segment_result_t segment_result = segment_op(block_group, input_range);
+  constexpr int shared_buffer_alignment = alignof(value_t);
+  char* aligned_shared_buffer = align_dynamic_shared_buffer<shared_buffer_alignment>(shared_segment_buffer_base);
+  value_t* shared_segment     = reinterpret_cast<value_t*>(aligned_shared_buffer);
 
-    for (int item_idx = 0; item_idx < input_range.size(); ++item_idx)
-    {
-      const int index_in_segment = input_range.offset() + item_idx;
-      output_range[item_idx]     = apply_element_transform(segment_result, index_in_segment, input_range[item_idx]);
-    }
-  };
-
-  if constexpr (shared_input_staging_supported_v<InputIteratorT>)
+  for (int tile_base = 0; tile_base < segment_size; tile_base += tile_items)
   {
-    if (use_shared_input_staging)
+    const int valid_items = (::cuda::std::min) (tile_items, segment_size - tile_base);
+    value_t items[ItemsPerThread];
+
+    // TODO: very important, consider using block load to shared for
+    // speedups.
+
+    block_load_t().Load(segment_begin + tile_base, items, valid_items);
+
+    _CCCL_PRAGMA_UNROLL_FULL()
+    for (int item = 0; item < ItemsPerThread; ++item)
     {
-      constexpr int shared_buffer_alignment = alignof(value_t);
-      char* aligned_shared_buffer = align_dynamic_shared_buffer<shared_buffer_alignment>(shared_segment_buffer_base);
-      value_t* shared_segment     = reinterpret_cast<value_t*>(aligned_shared_buffer);
+      const int tile_local_index = thread_rank + item * BlockThreads;
 
-      for (int tile_base = 0; tile_base < segment_size; tile_base += tile_items)
+      if (tile_local_index < valid_items)
       {
-        const int valid_items = (::cuda::std::min) (tile_items, segment_size - tile_base);
-        value_t items[ItemsPerThread];
-
-        // TODO: very important, consider using block load to shared for
-        // speedups.
-
-        block_load_t().Load(segment_begin + tile_base, items, valid_items);
-
-        _CCCL_PRAGMA_UNROLL_FULL()
-        for (int item = 0; item < ItemsPerThread; ++item)
-        {
-          const int tile_local_index = thread_rank + item * BlockThreads;
-
-          if (tile_local_index < valid_items)
-          {
-            shared_segment[tile_base + tile_local_index] = items[item];
-          }
-        }
+        shared_segment[tile_base + tile_local_index] = items[item];
       }
-
-      block_group.sync();
-
-      auto input_range                      = make_thread_segment_range<BlockThreads>(shared_segment, segment_size);
-      const segment_result_t segment_result = segment_op(block_group, input_range);
-
-      for (int tile_base = 0; tile_base < segment_size; tile_base += tile_items)
-      {
-        const int valid_items = (::cuda::std::min) (tile_items, segment_size - tile_base);
-        value_t output_items[ItemsPerThread];
-
-        _CCCL_PRAGMA_UNROLL_FULL()
-        for (int item = 0; item < ItemsPerThread; ++item)
-        {
-          const int tile_local_index = thread_rank + item * BlockThreads;
-          output_items[item]         = value_t{};
-
-          if (tile_local_index < valid_items)
-          {
-            const int index_in_segment = tile_base + tile_local_index;
-            output_items[item] =
-              apply_element_transform(segment_result, index_in_segment, shared_segment[index_in_segment]);
-          }
-        }
-
-        block_store_t().Store(d_out + segment_offset + tile_base, output_items, valid_items);
-      }
-
-      return;
     }
   }
 
-  transform_segment(make_thread_segment_range<BlockThreads>(segment_begin, segment_size));
+  block_group.sync();
+
+  auto input_range                      = make_thread_segment_range<BlockThreads>(shared_segment, segment_size);
+  const segment_result_t segment_result = segment_op(block_group, input_range);
+
+  for (int tile_base = 0; tile_base < segment_size; tile_base += tile_items)
+  {
+    const int valid_items = (::cuda::std::min) (tile_items, segment_size - tile_base);
+    value_t output_items[ItemsPerThread];
+
+    _CCCL_PRAGMA_UNROLL_FULL()
+    for (int item = 0; item < ItemsPerThread; ++item)
+    {
+      const int tile_local_index = thread_rank + item * BlockThreads;
+      output_items[item]         = value_t{};
+
+      if (tile_local_index < valid_items)
+      {
+        const int index_in_segment = tile_base + tile_local_index;
+        output_items[item] =
+          apply_element_transform(segment_result, index_in_segment, shared_segment[index_in_segment]);
+      }
+    }
+
+    block_store_t().Store(d_out + segment_offset + tile_base, output_items, valid_items);
+  }
 }
 } // namespace detail::hierarchical
 

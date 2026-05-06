@@ -61,6 +61,8 @@ struct DispatchHierarchicalTransform
 {
   static_assert(BlockThreads > 0, "BlockThreads must be positive.");
   static_assert(ItemsPerThread > 0, "ItemsPerThread must be positive.");
+  static_assert(hierarchical_transform_stageable_input_v<InputIteratorT>,
+                "TransformProlog requires input values to be trivially relocatable.");
 
   InputIteratorT d_in;
   OutputIteratorT d_out;
@@ -104,40 +106,41 @@ struct DispatchHierarchicalTransform
   CUB_RUNTIME_FUNCTION _CCCL_VISIBILITY_HIDDEN _CCCL_FORCEINLINE cudaError_t
   InvokeKernel(DeviceHierarchicalTransformKernelT hierarchical_transform_kernel)
   {
-    if (num_segments == 0 || segment_size == 0)
+    if (num_segments == 0)
     {
       return cudaSuccess;
     }
 
-    bool use_shared_input_staging = false;
-    int launch_dynamic_smem_bytes = 0;
-
-    if constexpr (shared_input_staging_supported_v<InputIteratorT>)
+    if (num_segments < 0 || segment_size <= 0)
     {
-      using value_t = cub::detail::it_value_t<InputIteratorT>;
+      return cudaErrorInvalidValue;
+    }
 
-      constexpr int shared_buffer_alignment = alignof(value_t);
-      constexpr int alignment_padding       = shared_buffer_alignment > 16 ? (shared_buffer_alignment - 16) : 0;
+    using value_t = cub::detail::it_value_t<InputIteratorT>;
 
-      const auto requested_shared_bytes =
-        static_cast<::cuda::std::size_t>(segment_size) * sizeof(value_t) + alignment_padding;
+    constexpr int shared_buffer_alignment = alignof(value_t);
+    constexpr int alignment_padding       = shared_buffer_alignment > 16 ? (shared_buffer_alignment - 16) : 0;
 
-      int max_dynamic_smem_size = 0;
-      if (const auto error =
-            CubDebug(launcher_factory.max_dynamic_smem_size_for(max_dynamic_smem_size, hierarchical_transform_kernel)))
-      {
-        return error;
-      }
+    const auto requested_shared_bytes =
+      static_cast<::cuda::std::size_t>(segment_size) * sizeof(value_t) + alignment_padding;
 
-      if (requested_shared_bytes <= static_cast<::cuda::std::size_t>(max_dynamic_smem_size))
-      {
-        use_shared_input_staging  = true;
-        launch_dynamic_smem_bytes = static_cast<int>(requested_shared_bytes);
+    int max_dynamic_smem_size = 0;
+    if (const auto error =
+          CubDebug(launcher_factory.max_dynamic_smem_size_for(max_dynamic_smem_size, hierarchical_transform_kernel)))
+    {
+      return error;
+    }
 
-        NV_IF_TARGET(NV_IS_HOST,
-                     (if (const auto error = CubDebug(launcher_factory.set_max_dynamic_smem_size_for(
-                            hierarchical_transform_kernel, launch_dynamic_smem_bytes))) { return error; }))
-      }
+    if (requested_shared_bytes <= static_cast<::cuda::std::size_t>(max_dynamic_smem_size))
+    {
+      NV_IF_TARGET(NV_IS_HOST,
+                   (if (const auto error = CubDebug(launcher_factory.set_max_dynamic_smem_size_for(
+                          hierarchical_transform_kernel, static_cast<int>(requested_shared_bytes)))) { return error; }))
+    }
+    else
+    {
+      // TransformProlog currently requires staging the complete segment in dynamic shared memory.
+      return cudaErrorInvalidValue;
     }
 
     int max_grid_dim_x = 0;
@@ -156,13 +159,12 @@ struct DispatchHierarchicalTransform
       const auto num_current_segments = (::cuda::std::min) (num_segments_per_invocation, num_segments - segment_offset);
       const auto item_offset          = segment_offset * static_cast<::cuda::std::int64_t>(segment_size);
 
-      launcher_factory(static_cast<int>(num_current_segments), BlockThreads, launch_dynamic_smem_bytes, stream)
+      launcher_factory(
+        static_cast<int>(num_current_segments), BlockThreads, static_cast<int>(requested_shared_bytes), stream)
         .doit(hierarchical_transform_kernel,
               d_in + item_offset,
               d_out + item_offset,
-              static_cast<int>(num_current_segments),
               segment_size,
-              use_shared_input_staging,
               segment_op,
               element_transform_op);
 

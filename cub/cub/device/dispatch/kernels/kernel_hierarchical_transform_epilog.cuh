@@ -135,7 +135,7 @@ struct transform_epilog_shared_input_values
 template <typename InputIteratorT>
 inline constexpr bool transform_epilog_use_load_to_shared =
   transform_epilog_is_aligned_base_ptr_v<InputIteratorT>
-  && THRUST_NS_QUALIFIER::is_trivially_relocatable_v<transform_epilog_input_value_t<InputIteratorT>>;
+  && hierarchical_transform_stageable_value_v<transform_epilog_input_value_t<InputIteratorT>>;
 
 template <typename... InputIteratorTs>
 inline constexpr bool transform_epilog_all_load_to_shared =
