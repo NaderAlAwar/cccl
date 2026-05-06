@@ -26,11 +26,9 @@
 
 #include <benchmarks/common/generate_input.hpp>
 #include <cudf/column/column.hpp>
-#include <cudf/column/column_device_view.cuh>
 #include <cudf/column/column_factories.hpp>
 #include <cudf/copying.hpp>
 #include <cudf/detail/device_scalar.hpp>
-#include <cudf/detail/iterator.cuh>
 #include <cudf/utilities/default_stream.hpp>
 #include <rmm/device_buffer.hpp>
 
@@ -121,9 +119,29 @@ try
   auto* d_valid_count = valid_count.data();
 
   auto nullable_transform_op =
-    [] __device__(cuda::std::optional<DataType> lhs_value, cuda::std::optional<DataType> rhs_value, bool select_lhs)
-    -> cuda::std::optional<DataType> {
-    return select_lhs ? lhs_value : rhs_value;
+    [lhs_mask = lhs.null_mask(), rhs_mask = rhs.null_mask(), decision_mask = decision.null_mask()] __device__(
+      int index, DataType lhs_value, DataType rhs_value, bool decision_value) -> cuda::std::optional<DataType> {
+    auto is_valid = [] __device__(const cudf::bitmask_type* mask, int row) {
+      return mask == nullptr || ((mask[row / mask_word_bits] >> (row % mask_word_bits)) & 1u) != 0;
+    };
+
+    const bool select_lhs = is_valid(decision_mask, index) && decision_value;
+    if (select_lhs)
+    {
+      if (is_valid(lhs_mask, index))
+      {
+        return cuda::std::optional<DataType>{lhs_value};
+      }
+
+      return cuda::std::nullopt;
+    }
+
+    if (is_valid(rhs_mask, index))
+    {
+      return cuda::std::optional<DataType>{rhs_value};
+    }
+
+    return cuda::std::nullopt;
   };
   auto non_null_transform_op = [] __device__(DataType lhs_value, DataType rhs_value, bool select_lhs) -> DataType {
     return select_lhs ? lhs_value : rhs_value;
@@ -195,17 +213,9 @@ try
 
   if constexpr (HasNulls)
   {
-    auto lhs_dv     = cudf::column_device_view::create(lhs, stream);
-    auto rhs_dv     = cudf::column_device_view::create(rhs, stream);
-    auto decision_d = cudf::column_device_view::create(decision, stream);
-
-    auto lhs_iter = cudf::detail::make_optional_iterator<DataType>(*lhs_dv, cudf::nullate::YES{});
-    auto rhs_iter = cudf::detail::make_optional_iterator<DataType>(*rhs_dv, cudf::nullate::YES{});
-    auto indices  = cuda::counting_iterator<cudf::size_type>{0};
-    auto filter_values =
-      cuda::make_transform_iterator(indices, [decision = *decision_d] __device__(cudf::size_type index) -> bool {
-        return decision.is_valid_nocheck(index) && decision.element<bool>(index);
-      });
+    auto* lhs_values      = lhs.data<DataType>();
+    auto* rhs_values      = rhs.data<DataType>();
+    auto* decision_values = decision.data<bool>();
     auto output_iterator =
       cuda::make_transform_output_iterator(d_output, [] __device__(cuda::std::optional<DataType> result) -> DataType {
         return result.value_or(DataType{});
@@ -218,7 +228,7 @@ try
       timer.start();
 
       cub::DeviceSegmentedTransform::TransformEpilog(
-        cuda::std::make_tuple(lhs_iter, rhs_iter, filter_values),
+        cuda::std::make_tuple(lhs_values, rhs_values, decision_values),
         output_iterator,
         num_words,
         mask_word_bits,

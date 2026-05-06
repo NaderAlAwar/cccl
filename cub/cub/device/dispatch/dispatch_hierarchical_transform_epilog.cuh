@@ -113,14 +113,19 @@ CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE auto transform_epilog_make_kernel_input(I
   }
   else
   {
-    return ::cuda::std::forward<InputIteratorT>(d_in);
+    static_assert(transform_epilog_should_assume_aligned_input<InputIteratorT>,
+                  "TransformEpilog requires all transform inputs to be raw pointers to trivially relocatable types.");
   }
 }
 
 template <typename InputIteratorT>
 CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE auto make_transform_epilog_input_tuple(InputIteratorT&& d_in)
 {
-  if constexpr (is_cuda_std_tuple<::cuda::std::decay_t<InputIteratorT>>::value)
+  if constexpr (transform_epilog_tuple_all_load_to_shared<::cuda::std::decay_t<InputIteratorT>>::value)
+  {
+    return ::cuda::std::forward<InputIteratorT>(d_in);
+  }
+  else if constexpr (is_cuda_std_tuple<::cuda::std::decay_t<InputIteratorT>>::value)
   {
     return ::cuda::std::apply(
       []<typename... InputIteratorTs>(InputIteratorTs&&... input_iterators) {
@@ -157,6 +162,9 @@ struct DeviceHierarchicalTransformEpilogKernelSource<
   TransformOpT,
   DeviceEpilogOpT>
 {
+  static_assert(transform_epilog_all_load_to_shared<InputIteratorTs...>,
+                "TransformEpilog requires all transform inputs to be raw pointers to trivially relocatable types.");
+
   static constexpr bool use_striped_no_epilog =
     ::cuda::std::is_same_v<::cuda::std::decay_t<DeviceEpilogOpT>, NoopDeviceEpilogOp>
     && transform_epilog_all_load_to_shared<InputIteratorTs...>;
@@ -204,6 +212,8 @@ struct DispatchHierarchicalTransformEpilog
   static_assert(BlockThreads > 0, "BlockThreads must be positive.");
   static_assert(ItemsPerThread > 0, "ItemsPerThread must be positive.");
   static_assert(BlockThreads % 32 == 0, "BlockThreads must be a multiple of warp size.");
+  static_assert(transform_epilog_tuple_all_load_to_shared<::cuda::std::decay_t<InputIteratorT>>::value,
+                "TransformEpilog requires all transform inputs to be raw pointers to trivially relocatable types.");
 
   InputIteratorT d_in;
   OutputIteratorT d_out;
@@ -378,6 +388,9 @@ CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE cudaError_t dispatch_transform_epilog(
   KernelSource kernel_source             = {},
   KernelLauncherFactory launcher_factory = {})
 {
+  static_assert(transform_epilog_tuple_all_load_to_shared<InputIteratorTupleT>::value,
+                "TransformEpilog requires all transform inputs to be raw pointers to trivially relocatable types.");
+
   return dispatch_transform_epilog<
     BlockThreads,
     ItemsPerThread,
@@ -425,6 +438,9 @@ CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE cudaError_t dispatch_transform_epilog(
   KernelSource kernel_source             = {},
   KernelLauncherFactory launcher_factory = {})
 {
+  static_assert(transform_epilog_tuple_all_load_to_shared<InputIteratorTupleT>::value,
+                "TransformEpilog requires all transform inputs to be raw pointers to trivially relocatable types.");
+
   return DispatchHierarchicalTransformEpilog<
            BlockThreads,
            ItemsPerThread,

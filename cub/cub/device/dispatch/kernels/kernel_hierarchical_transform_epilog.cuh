@@ -13,9 +13,9 @@
 #  pragma system_header
 #endif // no system header
 
-#include <cub/block/block_load.cuh>
 #include <cub/block/block_load_to_shared.cuh>
 #include <cub/device/dispatch/kernels/kernel_hierarchical_common.cuh>
+#include <cub/util_type.cuh>
 
 #include <cuda/__memory/align_down.h>
 #include <cuda/__memory/is_aligned.h>
@@ -110,17 +110,6 @@ struct transform_epilog_result<TransformOpT, false, InputValueTs...>
 };
 
 template <int ItemsPerThread, typename InputValueT>
-struct transform_epilog_input_values
-{
-  InputValueT values[ItemsPerThread];
-
-  _CCCL_DEVICE _CCCL_FORCEINLINE decltype(auto) get(int item, int)
-  {
-    return values[item];
-  }
-};
-
-template <int ItemsPerThread, typename InputValueT>
 struct transform_epilog_shared_input_values
 {
   using value_t = ::cuda::std::remove_cv_t<InputValueT>;
@@ -144,20 +133,9 @@ struct transform_epilog_shared_input_values
 };
 
 template <typename InputIteratorT>
-inline constexpr BlockLoadAlgorithm transform_epilog_load_algorithm =
-  transform_epilog_is_aligned_base_ptr_v<InputIteratorT>
-      || ::cuda::std::is_pointer_v<::cuda::std::decay_t<InputIteratorT>>
-    ? BLOCK_LOAD_DIRECT
-    : BLOCK_LOAD_WARP_TRANSPOSE;
-
-template <typename InputIteratorT>
 inline constexpr bool transform_epilog_use_load_to_shared =
   transform_epilog_is_aligned_base_ptr_v<InputIteratorT>
   && THRUST_NS_QUALIFIER::is_trivially_relocatable_v<transform_epilog_input_value_t<InputIteratorT>>;
-
-template <typename... InputIteratorTs>
-inline constexpr bool transform_epilog_none_load_to_shared =
-  (... && !transform_epilog_use_load_to_shared<InputIteratorTs>);
 
 template <typename... InputIteratorTs>
 inline constexpr bool transform_epilog_all_load_to_shared =
@@ -171,28 +149,14 @@ _CCCL_HOST_DEVICE constexpr int transform_epilog_align_up(int value, int alignme
 template <int ItemsPerBlock, typename InputIteratorT>
 _CCCL_HOST_DEVICE constexpr int transform_epilog_shared_buffer_align()
 {
-  if constexpr (transform_epilog_use_load_to_shared<InputIteratorT>)
-  {
-    return transform_epilog_bulk_copy_alignment;
-  }
-  else
-  {
-    return 1;
-  }
+  return transform_epilog_bulk_copy_alignment;
 }
 
 template <int ItemsPerBlock, typename InputIteratorT>
 _CCCL_HOST_DEVICE constexpr int transform_epilog_shared_buffer_size()
 {
-  if constexpr (transform_epilog_use_load_to_shared<InputIteratorT>)
-  {
-    return static_cast<int>(sizeof(transform_epilog_input_value_t<InputIteratorT>)) * ItemsPerBlock
-         + transform_epilog_bulk_copy_alignment;
-  }
-  else
-  {
-    return 0;
-  }
+  return static_cast<int>(sizeof(transform_epilog_input_value_t<InputIteratorT>)) * ItemsPerBlock
+       + transform_epilog_bulk_copy_alignment;
 }
 
 template <int ItemsPerBlock, typename... InputIteratorTs>
@@ -228,14 +192,6 @@ _CCCL_HOST_DEVICE constexpr int transform_epilog_shared_buffer_offset()
 }
 
 template <int BlockThreads, int ItemsPerThread, typename... InputIteratorTs>
-using transform_epilog_block_load_storage_t =
-  ::cuda::std::aligned_union_t<0,
-                               typename BlockLoad<transform_epilog_input_value_t<InputIteratorTs>,
-                                                  BlockThreads,
-                                                  ItemsPerThread,
-                                                  transform_epilog_load_algorithm<InputIteratorTs>>::TempStorage...>;
-
-template <int BlockThreads, int ItemsPerThread, typename... InputIteratorTs>
 struct transform_epilog_input_load_storage
 {
   static constexpr int items_per_block = BlockThreads * ItemsPerThread;
@@ -244,11 +200,9 @@ struct transform_epilog_input_load_storage
   static constexpr int shared_buffer_bytes =
     transform_epilog_shared_buffer_total_size<items_per_block, InputIteratorTs...>();
 
-  using block_load_storage_t = transform_epilog_block_load_storage_t<BlockThreads, ItemsPerThread, InputIteratorTs...>;
   using block_load_to_shared_t = BlockLoadToShared<BlockThreads>;
 
   typename block_load_to_shared_t::TempStorage load_to_shared;
-  block_load_storage_t block_load;
   alignas(shared_buffer_align) char shared_buffers[shared_buffer_bytes == 0 ? 1 : shared_buffer_bytes];
 
   template <int Index>
@@ -264,54 +218,6 @@ struct transform_epilog_input_load_storage
     return transform_epilog_shared_buffer_size<items_per_block, input_iterator_t>();
   }
 };
-
-template <typename BlockLoadStorageT, typename BlockLoadTempStorageT>
-_CCCL_DEVICE _CCCL_FORCEINLINE auto transform_epilog_alias_load_storage(BlockLoadStorageT& load_storage)
-  -> BlockLoadTempStorageT&
-{
-  return reinterpret_cast<BlockLoadTempStorageT&>(load_storage);
-}
-
-template <int Index,
-          int BlockThreads,
-          int ItemsPerThread,
-          typename LoadStorageT,
-          typename LoadedInputsT,
-          typename InputIteratorT>
-_CCCL_DEVICE _CCCL_FORCEINLINE void transform_epilog_load_register_input(
-  LoadStorageT& load_storage,
-  LoadedInputsT& loaded_inputs,
-  InputIteratorT d_in,
-  int tile_item_base,
-  bool full_tile,
-  int remaining_items)
-{
-  if constexpr (!transform_epilog_use_load_to_shared<InputIteratorT>)
-  {
-    using input_value_t = transform_epilog_input_value_t<InputIteratorT>;
-    using block_load_t =
-      BlockLoad<input_value_t, BlockThreads, ItemsPerThread, transform_epilog_load_algorithm<InputIteratorT>>;
-
-    auto& values  = ::cuda::std::get<Index>(loaded_inputs).values;
-    auto input    = d_in + tile_item_base;
-    auto& storage = transform_epilog_alias_load_storage<typename LoadStorageT::block_load_storage_t,
-                                                        typename block_load_t::TempStorage>(load_storage.block_load);
-
-    if (full_tile)
-    {
-      block_load_t(storage).Load(input, values);
-    }
-    else
-    {
-      block_load_t(storage).Load(input, values, remaining_items);
-    }
-
-    if constexpr (transform_epilog_load_algorithm<InputIteratorT> == BLOCK_LOAD_WARP_TRANSPOSE)
-    {
-      __syncthreads();
-    }
-  }
-}
 
 template <bool TransformAcceptsIndex, typename TransformOpT, typename LoadedInputsT, ::cuda::std::size_t... Is>
 _CCCL_DEVICE _CCCL_FORCEINLINE auto transform_epilog_invoke(
@@ -448,9 +354,8 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
   static_assert(sizeof...(InputIteratorTs) > 0, "TransformEpilog requires at least one input.");
   static_assert(!UseStripedNoEpilog || transform_epilog_all_load_to_shared<InputIteratorTs...>,
                 "The striped no-epilog fast path requires all inputs to use BlockLoadToShared.");
-  static_assert(
-    transform_epilog_all_load_to_shared<InputIteratorTs...> || transform_epilog_none_load_to_shared<InputIteratorTs...>,
-    "TransformEpilog does not support mixed BlockLoadToShared/register input loading.");
+  static_assert(transform_epilog_all_load_to_shared<InputIteratorTs...>,
+                "TransformEpilog requires raw pointer inputs with trivially relocatable value types.");
 
   constexpr bool transform_accepts_index =
     ::cuda::std::is_invocable_v<TransformOpT, int, transform_epilog_input_value_t<InputIteratorTs>...>;
@@ -487,10 +392,8 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
                                transform_epilog_indices_storage<ItemsPerThread>,
                                transform_epilog_no_indices_storage>;
   using input_load_storage_t = transform_epilog_input_load_storage<BlockThreads, ItemsPerThread, InputIteratorTs...>;
-  using loaded_inputs_t      = ::cuda::std::tuple<::cuda::std::conditional_t<
-         transform_epilog_use_load_to_shared<InputIteratorTs>,
-         transform_epilog_shared_input_values<ItemsPerThread, transform_epilog_input_value_t<InputIteratorTs>>,
-         transform_epilog_input_values<ItemsPerThread, transform_epilog_input_value_t<InputIteratorTs>>>...>;
+  using loaded_inputs_t      = ::cuda::std::tuple<
+         transform_epilog_shared_input_values<ItemsPerThread, transform_epilog_input_value_t<InputIteratorTs>>...>;
 
   constexpr int max_items_per_block = BlockThreads * ItemsPerThread;
   const auto linear_tid             = static_cast<int>(threadIdx.x);
@@ -503,43 +406,40 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
   const int tile_items      = tile.items;
   const int tile_item_limit = tile_item_base + tile_items;
 
-  if constexpr (transform_epilog_all_load_to_shared<InputIteratorTs...>)
-  {
-    typename input_load_storage_t::block_load_to_shared_t load_to_shared{temp_storage.load_to_shared};
+  typename input_load_storage_t::block_load_to_shared_t load_to_shared{temp_storage.load_to_shared};
 
-    auto issue_load_to_shared = [&]<::cuda::std::size_t InputIndex, typename InputIteratorT>(
-                                  ::cuda::std::integral_constant<::cuda::std::size_t, InputIndex>,
-                                  InputIteratorT input) {
-      static_assert(transform_epilog_use_load_to_shared<InputIteratorT>);
+  auto issue_load_to_shared = [&]<::cuda::std::size_t InputIndex, typename InputIteratorT>(
+                                ::cuda::std::integral_constant<::cuda::std::size_t, InputIndex>, InputIteratorT input) {
+    static_assert(transform_epilog_use_load_to_shared<InputIteratorT>);
 
-      using input_value_t         = transform_epilog_input_value_t<InputIteratorT>;
-      constexpr int gmem_align    = transform_epilog_bulk_copy_alignment;
-      constexpr int buffer_offset = input_load_storage_t::template shared_buffer_offset<static_cast<int>(InputIndex)>();
-      constexpr int buffer_size   = input_load_storage_t::template shared_buffer_size<static_cast<int>(InputIndex)>();
+    using input_value_t         = transform_epilog_input_value_t<InputIteratorT>;
+    constexpr int gmem_align    = transform_epilog_bulk_copy_alignment;
+    constexpr int buffer_offset = input_load_storage_t::template shared_buffer_offset<static_cast<int>(InputIndex)>();
+    constexpr int buffer_size   = input_load_storage_t::template shared_buffer_size<static_cast<int>(InputIndex)>();
 
-      const int bytes_to_copy    = static_cast<int>(sizeof(input_value_t)) * tile_items;
-      const char* const gmem_src = input.ptr + static_cast<::cuda::std::size_t>(tile_item_base) * sizeof(input_value_t);
+    const int bytes_to_copy    = static_cast<int>(sizeof(input_value_t)) * tile_items;
+    const char* const gmem_src = input.ptr + static_cast<::cuda::std::size_t>(tile_item_base) * sizeof(input_value_t);
 
-      _CCCL_ASSERT(input.head_padding == 0, "TransformEpilog raw inputs must satisfy the bulk copy alignment.");
-      _CCCL_ASSERT(bytes_to_copy % gmem_align == 0,
-                   "TransformEpilog raw input tiles must end on the bulk copy alignment.");
-      _CCCL_ASSERT(::cuda::is_aligned(temp_storage.shared_buffers + buffer_offset, gmem_align),
-                   "TransformEpilog raw shared tiles must satisfy the bulk copy alignment.");
+    _CCCL_ASSERT(input.head_padding == 0, "TransformEpilog raw inputs must satisfy the bulk copy alignment.");
+    _CCCL_ASSERT(bytes_to_copy % gmem_align == 0,
+                 "TransformEpilog raw input tiles must end on the bulk copy alignment.");
+    _CCCL_ASSERT(::cuda::is_aligned(temp_storage.shared_buffers + buffer_offset, gmem_align),
+                 "TransformEpilog raw shared tiles must satisfy the bulk copy alignment.");
 
-      ::cuda::std::span<char> shared_buffer{temp_storage.shared_buffers + buffer_offset, buffer_size};
-      ::cuda::std::span<const char> gmem_span{gmem_src, static_cast<::cuda::std::size_t>(bytes_to_copy)};
-      load_to_shared.template CopyAsync<char, transform_epilog_bulk_copy_alignment>(shared_buffer, gmem_span);
-    };
+    ::cuda::std::span<char> shared_buffer{temp_storage.shared_buffers + buffer_offset, buffer_size};
+    ::cuda::std::span<const char> gmem_span{gmem_src, static_cast<::cuda::std::size_t>(bytes_to_copy)};
+    load_to_shared.template CopyAsync<char, transform_epilog_bulk_copy_alignment>(shared_buffer, gmem_span);
+  };
 
-    [&]<::cuda::std::size_t... Is>(::cuda::std::index_sequence<Is...>, InputIteratorTs... input_iterators) {
-      (issue_load_to_shared(::cuda::std::integral_constant<::cuda::std::size_t, Is>{}, input_iterators), ...);
-    }(::cuda::std::index_sequence_for<InputIteratorTs...>{}, d_in...);
+  [&]<::cuda::std::size_t... Is>(::cuda::std::index_sequence<Is...>, InputIteratorTs... input_iterators) {
+    (issue_load_to_shared(::cuda::std::integral_constant<::cuda::std::size_t, Is>{}, input_iterators), ...);
+  }(::cuda::std::index_sequence_for<InputIteratorTs...>{}, d_in...);
 
-    auto token = load_to_shared.Commit();
+  auto token = load_to_shared.Commit();
 
-    using input_iterators_tuple_t = ::cuda::std::tuple<InputIteratorTs...>;
-    auto bind_shared_input        = [&]<::cuda::std::size_t InputIndex>(
-                               ::cuda::std::integral_constant<::cuda::std::size_t, InputIndex>) {
+  using input_iterators_tuple_t = ::cuda::std::tuple<InputIteratorTs...>;
+  auto bind_shared_input =
+    [&]<::cuda::std::size_t InputIndex>(::cuda::std::integral_constant<::cuda::std::size_t, InputIndex>) {
       using input_iterator_t = typename ::cuda::std::tuple_element<InputIndex, input_iterators_tuple_t>::type;
       static_assert(transform_epilog_use_load_to_shared<input_iterator_t>);
 
@@ -550,32 +450,11 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
       ::cuda::std::get<InputIndex>(loaded_inputs).set({shared_values, static_cast<::cuda::std::size_t>(tile_items)});
     };
 
-    [&]<::cuda::std::size_t... Is>(::cuda::std::index_sequence<Is...>) {
-      (bind_shared_input(::cuda::std::integral_constant<::cuda::std::size_t, Is>{}), ...);
-    }(::cuda::std::index_sequence_for<InputIteratorTs...>{});
+  [&]<::cuda::std::size_t... Is>(::cuda::std::index_sequence<Is...>) {
+    (bind_shared_input(::cuda::std::integral_constant<::cuda::std::size_t, Is>{}), ...);
+  }(::cuda::std::index_sequence_for<InputIteratorTs...>{});
 
-    load_to_shared.Wait(::cuda::std::move(token));
-  }
-  else
-  {
-    static_assert(transform_epilog_none_load_to_shared<InputIteratorTs...>);
-
-    auto input_iterators = ::cuda::std::make_tuple(d_in...);
-    const bool full_tile = tile_items == max_items_per_block;
-
-    auto load_register_input =
-      [&]<::cuda::std::size_t InputIndex, typename InputIteratorT>(
-        ::cuda::std::integral_constant<::cuda::std::size_t, InputIndex>, InputIteratorT input_iterator) {
-        transform_epilog_load_register_input<InputIndex, BlockThreads, ItemsPerThread>(
-          temp_storage, loaded_inputs, input_iterator, tile_item_base, full_tile, tile_items);
-      };
-
-    [&]<::cuda::std::size_t... Is>(::cuda::std::index_sequence<Is...>) {
-      (load_register_input(::cuda::std::integral_constant<::cuda::std::size_t, Is>{},
-                           ::cuda::std::get<Is>(input_iterators)),
-       ...);
-    }(::cuda::std::index_sequence_for<InputIteratorTs...>{});
-  }
+  load_to_shared.Wait(::cuda::std::move(token));
 
   if constexpr (UseStripedNoEpilog)
   {
