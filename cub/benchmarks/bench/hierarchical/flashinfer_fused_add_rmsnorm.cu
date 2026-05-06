@@ -26,8 +26,13 @@ struct convert_op
 };
 
 template <typename T>
-thrust::device_vector<T> make_bounded_vector(std::size_t elements)
+thrust::device_vector<T> make_bounded_vector(std::size_t elements, bool zero_data)
 {
+  if (zero_data)
+  {
+    return thrust::device_vector<T>(elements, T{});
+  }
+
   thrust::device_vector<float> source = generate(elements, bit_entropy::_1_000, -1.0f, 1.0f);
 
   if constexpr (cuda::std::is_same_v<T, float>)
@@ -63,14 +68,15 @@ try
 {
   const int batch_size  = static_cast<int>(state.get_int64("BatchSize"));
   const int hidden_size = static_cast<int>(state.get_int64("HiddenSize"));
+  const bool zero_data  = state.get_int64("ZeroData") != 0;
   const auto elements   = static_cast<std::size_t>(batch_size) * static_cast<std::size_t>(hidden_size);
   const auto bytes      = elements * sizeof(T);
 
-  thrust::device_vector<T> input_master    = make_bounded_vector<T>(elements);
-  thrust::device_vector<T> residual_master = make_bounded_vector<T>(elements);
+  thrust::device_vector<T> input_master    = make_bounded_vector<T>(elements, zero_data);
+  thrust::device_vector<T> residual_master = make_bounded_vector<T>(elements, zero_data);
   thrust::device_vector<T> input_working(elements, thrust::no_init);
   thrust::device_vector<T> residual_working(elements, thrust::no_init);
-  thrust::device_vector<T> weight = make_bounded_vector<T>(static_cast<std::size_t>(hidden_size));
+  thrust::device_vector<T> weight = make_bounded_vector<T>(static_cast<std::size_t>(hidden_size), zero_data);
 
   auto* d_input_master     = thrust::raw_pointer_cast(input_master.data());
   auto* d_residual_master  = thrust::raw_pointer_cast(residual_master.data());
@@ -129,4 +135,5 @@ NVBENCH_BENCH_TYPES(flashinfer_fused_add_rmsnorm, NVBENCH_TYPE_AXES(value_types)
   .set_name("flashinfer_fused_add_rmsnorm")
   .set_type_axes_names({"T{ct}"})
   .add_int64_axis("BatchSize", {64, 8192, 20000, 75000, 150000, 299000})
+  .add_int64_axis("ZeroData", {0, 1})
   .add_int64_axis("HiddenSize", {2880, 7168});

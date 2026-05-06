@@ -10,6 +10,7 @@
 
 #include <stdexcept>
 
+#include <cuda_runtime_api.h>
 #include <nvbench_helper.cuh>
 
 #include "rmsnorm_check.cuh"
@@ -26,8 +27,13 @@ struct convert_op
 };
 
 template <typename T>
-thrust::device_vector<T> make_bounded_vector(std::size_t elements)
+thrust::device_vector<T> make_bounded_vector(std::size_t elements, bool zero_data)
 {
+  if (zero_data)
+  {
+    return thrust::device_vector<T>(elements, T{});
+  }
+
   thrust::device_vector<float> source = generate(elements, bit_entropy::_1_000, -1.0f, 1.0f);
 
   if constexpr (cuda::std::is_same_v<T, float>)
@@ -48,12 +54,13 @@ try
 {
   const int batch_size  = static_cast<int>(state.get_int64("BatchSize"));
   const int hidden_size = static_cast<int>(state.get_int64("HiddenSize"));
+  const bool zero_data  = state.get_int64("ZeroData") != 0;
 
   const auto elements = static_cast<std::size_t>(batch_size) * static_cast<std::size_t>(hidden_size);
 
-  thrust::device_vector<T> input = make_bounded_vector<T>(elements);
+  thrust::device_vector<T> input = make_bounded_vector<T>(elements, zero_data);
   thrust::device_vector<T> output(elements, thrust::no_init);
-  thrust::device_vector<T> weight = make_bounded_vector<T>(static_cast<std::size_t>(hidden_size));
+  thrust::device_vector<T> weight = make_bounded_vector<T>(static_cast<std::size_t>(hidden_size), zero_data);
 
   auto* d_input  = thrust::raw_pointer_cast(input.data());
   auto* d_output = thrust::raw_pointer_cast(output.data());
@@ -63,6 +70,35 @@ try
   state.add_global_memory_reads<T>(elements, "Input");
   state.add_global_memory_reads<T>(hidden_size, "Weight");
   state.add_global_memory_writes<T>(elements);
+
+  auto segment_op = [hidden_size, eps = rms_norm_eps] __device__(auto group, const auto& range) -> float {
+    float partial_sum = 0.0f;
+
+    // with a proper range can be range based for loop
+    for (int item = 0; item < range.size(); ++item)
+    {
+      const float value = static_cast<float>(range[item]);
+      partial_sum += value * value;
+    }
+
+    const float sum_of_squares = cuda::device::reduce(group, partial_sum, cuda::std::plus<>{});
+
+    return rsqrtf(sum_of_squares / static_cast<float>(hidden_size) + eps);
+  };
+  auto element_transform_op = [d_weight] __device__(float rms_rcp, int index_in_segment, T x) {
+    const float scale = static_cast<float>(d_weight[index_in_segment]) * rms_rcp;
+
+    return static_cast<T>(static_cast<float>(x) * scale);
+  };
+
+  const cudaError_t warmup_error = cub::DeviceSegmentedTransform::TransformProlog(
+    d_input, d_output, batch_size, hidden_size, segment_op, element_transform_op);
+  if (warmup_error == cudaErrorInvalidValue)
+  {
+    state.skip("Skipping: segment does not fit in dynamic shared memory.");
+    return;
+  }
+  cudaDeviceSynchronize();
 
   state.exec(nvbench::exec_tag::no_batch, [&](nvbench::launch& launch) {
     cub::DeviceSegmentedTransform::TransformProlog(
@@ -74,25 +110,8 @@ try
       // Can we make range hierarchical? i.e., range would be an object that is
       // constructed by the kernel, passed in. Mental model is two iterators, begin
       // and end.
-      [hidden_size, eps = rms_norm_eps] __device__(auto group, const auto& range) -> float {
-        float partial_sum = 0.0f;
-
-        // with a proper range can be range based for loop
-        for (int item = 0; item < range.size(); ++item)
-        {
-          const float value = static_cast<float>(range[item]);
-          partial_sum += value * value;
-        }
-
-        const float sum_of_squares = cuda::device::reduce(group, partial_sum, cuda::std::plus<>{});
-
-        return rsqrtf(sum_of_squares / static_cast<float>(hidden_size) + eps);
-      },
-      [d_weight] __device__(float rms_rcp, int index_in_segment, T x) {
-        const float scale = static_cast<float>(d_weight[index_in_segment]) * rms_rcp;
-
-        return static_cast<T>(static_cast<float>(x) * scale);
-      },
+      segment_op,
+      element_transform_op,
       launch.get_stream());
   });
 
@@ -124,5 +143,8 @@ using value_types =
 NVBENCH_BENCH_TYPES(hierarchical_rmsnorm, NVBENCH_TYPE_AXES(value_types))
   .set_name("hierarchical_rmsnorm")
   .set_type_axes_names({"T{ct}"})
-  .add_int64_axis("BatchSize", {64, 8192, 20000, 75000, 150000, 299000})
-  .add_int64_axis("HiddenSize", {2880, 7168});
+  .add_int64_axis("BatchSize", {64, 800, 150000})
+  .add_int64_axis("ZeroData", {0, 1})
+  .add_int64_axis("HiddenSize",
+                  {512,  768,  896,  1024, 1152, 1280, 1536, 1600, 2048, 2304,  2560,  2880,  3072,  3584,  3840,
+                   4096, 4608, 4868, 5120, 6144, 6656, 7168, 8192, 9736, 12288, 12980, 16384, 18432, 19472, 39572});
