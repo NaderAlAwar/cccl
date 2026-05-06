@@ -24,6 +24,7 @@ from rmsnorm_common import (  # noqa: E402
     add_rmsnorm_counters,
     allocate_rmsnorm_tensors,
     as_torch_stream,
+    check_rmsnorm_correctness,
     is_oom_error,
     require_torch,
     torch_dtype,
@@ -65,6 +66,7 @@ def bench_pytorch_rmsnorm(state: bench.State) -> None:
             eps=RMS_NORM_EPS,
         )
     torch.cuda.synchronize(state.get_device())
+    check_rmsnorm_correctness(torch, x, weight, result[0], dtype_name)
 
     def launcher(launch: bench.Launch) -> None:
         stream = as_torch_stream(torch, launch.get_stream(), state.get_device())

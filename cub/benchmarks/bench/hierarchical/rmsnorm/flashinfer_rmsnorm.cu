@@ -71,6 +71,11 @@ try
   const int hidden_size = static_cast<int>(state.get_int64("HiddenSize"));
   const bool zero_data  = state.get_int64("ZeroData") != 0;
   const auto elements   = static_cast<std::size_t>(batch_size) * static_cast<std::size_t>(hidden_size);
+  if (rmsnorm_check::should_skip_large_tensor_on_affected_arch(state, elements))
+  {
+    state.skip("Skipping: large RMSNorm tensors above 2^31 elements on sm_90/sm_100.");
+    return;
+  }
 
   thrust::device_vector<T> input = make_bounded_vector<T>(elements, zero_data);
   thrust::device_vector<T> output(elements, thrust::no_init);

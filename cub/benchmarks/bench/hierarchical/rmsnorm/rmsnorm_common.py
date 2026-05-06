@@ -71,6 +71,74 @@ def torch_dtype(torch: Any, dtype_name: str):
     raise ValueError(f"Unsupported dtype axis value: {dtype_name}")
 
 
+def rmsnorm_correctness_tolerance(dtype_name: str) -> float:
+    if dtype_name == "F32":
+        return 1e-4
+    if dtype_name == "F16":
+        return 5e-2
+    if dtype_name == "BF16":
+        return 8e-2
+    raise ValueError(f"Unsupported dtype axis value: {dtype_name}")
+
+
+def check_rmsnorm_correctness(
+    torch: Any,
+    x: Any,
+    weight: Any,
+    out: Any,
+    dtype_name: str,
+    max_rows: int = 8,
+) -> None:
+    batch_size = int(x.shape[0])
+    row_count = min(batch_size, max_rows)
+    if row_count <= 0:
+        return
+
+    tolerance = rmsnorm_correctness_tolerance(dtype_name)
+
+    with torch.no_grad():
+        # Bound the reference allocation so the largest benchmark cases remain runnable.
+        if row_count == 1:
+            row_indices = torch.zeros((1,), dtype=torch.int64, device=x.device)
+        else:
+            row_indices = torch.arange(row_count, dtype=torch.int64, device=x.device)
+            row_indices = (row_indices * (batch_size - 1)) // (row_count - 1)
+
+        x_ref = x.index_select(0, row_indices).float()
+        weight_ref = weight.float()
+        expected = (
+            x_ref
+            * torch.rsqrt(torch.mean(x_ref * x_ref, dim=1, keepdim=True) + RMS_NORM_EPS)
+            * weight_ref
+        )
+        actual = out.index_select(0, row_indices).float()
+
+        finite = torch.isfinite(actual)
+        abs_diff = torch.abs(actual - expected)
+        rel_diff = abs_diff / torch.clamp(torch.abs(expected), min=1.0)
+        failed = (~finite) | ((abs_diff > tolerance) & (rel_diff > tolerance))
+
+        if bool(failed.any().item()):
+            first_sample, first_col = failed.nonzero(as_tuple=False)[0].tolist()
+            first_row = int(row_indices[first_sample].item())
+            report_abs_diff = torch.nan_to_num(
+                abs_diff, nan=float("inf"), posinf=float("inf")
+            )
+            report_rel_diff = torch.nan_to_num(
+                rel_diff, nan=float("inf"), posinf=float("inf")
+            )
+            raise AssertionError(
+                "RMSNorm correctness check failed: "
+                f"dtype={dtype_name} rows_checked={row_count} "
+                f"first_failure=({first_row}, {first_col}) "
+                f"actual={float(actual[first_sample, first_col].item()):.6g} "
+                f"expected={float(expected[first_sample, first_col].item()):.6g} "
+                f"max_abs_diff={float(report_abs_diff.max().item()):.6g} "
+                f"max_rel_diff={float(report_rel_diff.max().item()):.6g} "
+                f"tolerance={tolerance:.6g}"
+            )
+
+
 def as_torch_stream(torch: Any, cs: bench.CudaStream, device: int):
     return torch.cuda.ExternalStream(cs.addressof(), device=device)
 

@@ -24,6 +24,7 @@ from rmsnorm_common import (  # noqa: E402
     add_rmsnorm_counters,
     allocate_rmsnorm_tensors,
     as_torch_stream,
+    check_rmsnorm_correctness,
     is_oom_error,
     require_torch,
     torch_dtype,
@@ -37,6 +38,10 @@ def require_flashinfer_cutedsl(state: bench.State):
         state.skip("Skipping: FlashInfer CuTe DSL RMSNorm is not available.")
         return None
     return rmsnorm_cute
+
+
+def should_skip_large_tensor(tensor_size: int) -> bool:
+    return tensor_size > (1 << 31)
 
 
 def bench_flashinfer_cutedsl_rmsnorm(state: bench.State) -> None:
@@ -53,6 +58,12 @@ def bench_flashinfer_cutedsl_rmsnorm(state: bench.State) -> None:
     batch_size = int(state.get_int64("BatchSize"))
     hidden_size = int(state.get_int64("HiddenSize"))
     zero_data = state.get_int64("ZeroData") != 0
+    if should_skip_large_tensor(batch_size * hidden_size):
+        state.skip(
+            "Skipping: FlashInfer CuTe DSL RMSNorm hits cudaErrorIllegalAddress "
+            "for this benchmark shape with more than 2^31 elements."
+        )
+        return
 
     try:
         x, weight, out = allocate_rmsnorm_tensors(
@@ -78,6 +89,7 @@ def bench_flashinfer_cutedsl_rmsnorm(state: bench.State) -> None:
             state.skip("Skipping: out of memory.")
             return
         raise
+    check_rmsnorm_correctness(torch, x, weight, out, dtype_name)
 
     def launcher(launch: bench.Launch) -> None:
         stream = as_torch_stream(torch, launch.get_stream(), state.get_device())

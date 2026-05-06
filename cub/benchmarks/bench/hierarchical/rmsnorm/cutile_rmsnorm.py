@@ -27,6 +27,7 @@ from rmsnorm_common import (  # noqa: E402
     add_rmsnorm_counters,
     allocate_rmsnorm_tensors,
     as_torch_stream,
+    check_rmsnorm_correctness,
     is_oom_error,
     require_torch,
     torch_dtype,
@@ -44,9 +45,17 @@ def next_power_of_2(n: int) -> int:
     return n + 1
 
 
-@functools.cache
-def get_cutile_kernels():
+def get_cutile_module():
     import cuda.tile as ct
+
+    return ct
+
+
+@functools.cache
+def get_standard_kernel(tile_size: int, hidden_size: int):
+    ct = get_cutile_module()
+    tile_shape = (1, tile_size)
+    weight_shape = (tile_size,)
 
     @ct.kernel(occupancy=ct.ByTarget(sm_100=16))
     def rms_norm_kernel(
@@ -54,18 +63,15 @@ def get_cutile_kernels():
         w,
         out,
         rstd,
-        n: ct.Constant[int],
-        eps: ct.Constant[float],
-        tile_size: ct.Constant[int],
     ):
         row = ct.bid(0)
-        rms = ct.full((1, tile_size), 0.0, dtype=np.float32)
+        rms = ct.full(tile_shape, 0.0, dtype=np.float32)
         num_tiles = ct.cdiv(x.shape[1], tile_size)
         for j in range(0, num_tiles):
             xj = ct.load(
                 x,
                 index=(row, j),
-                shape=(1, tile_size),
+                shape=tile_shape,
                 allow_tma=False,
                 latency=1,
                 padding_mode=ct.PaddingMode.ZERO,
@@ -73,14 +79,16 @@ def get_cutile_kernels():
             xj = ct.astype(xj, np.float32)
             rms += xj * xj
 
-        rms = ct.rsqrt(ct.sum(rms, axis=1, keepdims=False) / n + eps)
+        rms = ct.rsqrt(
+            ct.sum(rms, axis=1, keepdims=False) / hidden_size + RMS_NORM_EPS
+        )
         ct.store(rstd, index=(row,), tile=rms)
 
         for j in range(0, num_tiles):
             wj = ct.load(
                 w,
                 index=(j,),
-                shape=(tile_size,),
+                shape=weight_shape,
                 allow_tma=False,
                 latency=1,
                 padding_mode=ct.PaddingMode.ZERO,
@@ -89,7 +97,7 @@ def get_cutile_kernels():
             xj = ct.load(
                 x,
                 index=(row, j),
-                shape=(1, tile_size),
+                shape=tile_shape,
                 allow_tma=False,
                 latency=1,
                 padding_mode=ct.PaddingMode.ZERO,
@@ -98,19 +106,24 @@ def get_cutile_kernels():
             yj = ct.astype(xj * rms * wj, x.dtype)
             ct.store(out, index=(row, j), tile=yj, allow_tma=False, latency=1)
 
+    return rms_norm_kernel
+
+
+@functools.cache
+def get_gather_kernel(tile_size: int, hidden_size: int):
+    ct = get_cutile_module()
+    tile_shape = (tile_size,)
+
     @ct.kernel
     def rms_norm_kernel_gather(
         x,
         w,
         out,
         rstd,
-        n: ct.Constant[int],
-        eps: ct.Constant[float],
-        tile_size: ct.Constant[int],
     ):
         row = ct.bid(0)
-        rms = ct.full((tile_size,), 0.0, dtype=np.float32)
-        num_tiles = ct.cdiv(n, tile_size)
+        rms = ct.full(tile_shape, 0.0, dtype=np.float32)
+        num_tiles = ct.cdiv(hidden_size, tile_size)
         offsets = ct.arange(tile_size, dtype=np.int32)
         for j in range(0, num_tiles):
             offs = j * tile_size + offsets
@@ -118,7 +131,9 @@ def get_cutile_kernels():
             xj = ct.astype(xj, np.float32)
             rms += xj * xj
 
-        rms = ct.rsqrt(ct.sum(rms, axis=0, keepdims=False) / n + eps)
+        rms = ct.rsqrt(
+            ct.sum(rms, axis=0, keepdims=False) / hidden_size + RMS_NORM_EPS
+        )
         ct.scatter(rstd, row, rms)
 
         for j in range(0, num_tiles):
@@ -130,14 +145,22 @@ def get_cutile_kernels():
             yj = ct.astype(xj * rms * wj, x.dtype)
             ct.scatter(out, (row, offs), yj, latency=1)
 
+    return rms_norm_kernel_gather
+
+
+@functools.cache
+def get_static_persistent_kernel(tile_size_m: int, tile_size_n: int):
+    ct = get_cutile_module()
+    weight_shape = (tile_size_n,)
+    tile_shape = (tile_size_m, tile_size_n)
+    rms_shape = (tile_size_m, 1)
+    weight_broadcast_shape = (1, tile_size_n)
+
     @ct.kernel
     def rms_norm_kernel_static_persistent(
         x,
         out,
         w,
-        tile_size_m: ct.Constant[int],
-        tile_size_n: ct.Constant[int],
-        eps: ct.Constant[float],
     ):
         bid = ct.bid(0)
         m = x.shape[0]
@@ -146,7 +169,7 @@ def get_cutile_kernels():
         w_tile = ct.load(
             w,
             index=(0,),
-            shape=(tile_size_n,),
+            shape=weight_shape,
             padding_mode=ct.PaddingMode.ZERO,
         )
         w_tile = ct.astype(w_tile, np.float32)
@@ -156,40 +179,32 @@ def get_cutile_kernels():
             x_tile = ct.load(
                 x,
                 index=(current_bid, 0),
-                shape=(tile_size_m, tile_size_n),
+                shape=tile_shape,
                 latency=10,
                 padding_mode=ct.PaddingMode.ZERO,
             )
             x_tile = ct.astype(x_tile, np.float32)
             x2_sum = ct.sum(ct.mul(x_tile, x_tile), axis=1, keepdims=True)
-            n_f32 = ct.full((tile_size_m, 1), n * 1.0, dtype=np.float32)
-            eps_tensor = ct.full((tile_size_m, 1), eps, dtype=np.float32)
+            n_f32 = ct.full(rms_shape, n * 1.0, dtype=np.float32)
+            eps_tensor = ct.full(rms_shape, RMS_NORM_EPS, dtype=np.float32)
             rsqrt_var = ct.rsqrt(ct.truediv(x2_sum, n_f32) + eps_tensor)
-            w_broadcasted = ct.reshape(w_tile, (1, tile_size_n))
+            w_broadcasted = ct.reshape(w_tile, weight_broadcast_shape)
             y = ct.astype(ct.mul(ct.mul(x_tile, rsqrt_var), w_broadcasted), x.dtype)
             ct.store(out, index=(current_bid, 0), tile=y, allow_tma=False, latency=3)
 
-    return (
-        ct,
-        rms_norm_kernel,
-        rms_norm_kernel_gather,
-        rms_norm_kernel_static_persistent,
-    )
+    return rms_norm_kernel_static_persistent
 
 
 def require_cutile(state: bench.State):
     try:
-        return get_cutile_kernels()
+        return get_cutile_module()
     except (ImportError, AttributeError):
         state.skip("Skipping: cuda.tile is not available.")
         return None
 
 
 def launch_cutile_rmsnorm(torch, x, weight, out, mode: str) -> None:
-    cutile = get_cutile_kernels()
-    ct, rms_norm_kernel, rms_norm_kernel_gather, rms_norm_kernel_static_persistent = (
-        cutile
-    )
+    ct = get_cutile_module()
     m, n = x.shape
 
     if mode == "static_persistent":
@@ -205,24 +220,24 @@ def launch_cutile_rmsnorm(torch, x, weight, out, mode: str) -> None:
             else:
                 tile_size_m = 4
         grid_size = min(num_sms, ceil(m / tile_size_m) * ceil(n / tile_size_n))
+        kernel = get_static_persistent_kernel(tile_size_m, tile_size_n)
         ct.launch(
             torch.cuda.current_stream(),
             (grid_size,),
-            rms_norm_kernel_static_persistent,
-            (x, out, weight, tile_size_m, tile_size_n, RMS_NORM_EPS),
+            kernel,
+            (x, out, weight),
         )
         return
 
     rstd = torch.empty((m,), dtype=torch.float32, device=x.device)
     max_fused_size = 2048 // x.element_size()
     tile_size = min(max_fused_size, next_power_of_2(n))
-    kernel = rms_norm_kernel_gather if mode == "gather" else rms_norm_kernel
-    ct.launch(
-        torch.cuda.current_stream(),
-        (m,),
-        kernel,
-        (x, weight, out, rstd, n, RMS_NORM_EPS, tile_size),
+    kernel = (
+        get_gather_kernel(tile_size, n)
+        if mode == "gather"
+        else get_standard_kernel(tile_size, n)
     )
+    ct.launch(torch.cuda.current_stream(), (m,), kernel, (x, weight, out, rstd))
 
 
 def bench_cutile_rmsnorm(state: bench.State) -> None:
@@ -268,6 +283,7 @@ def bench_cutile_rmsnorm(state: bench.State) -> None:
             state.skip("Skipping: out of memory.")
             return
         raise
+    check_rmsnorm_correctness(torch, x, weight, out, dtype_name)
 
     def launcher(launch: bench.Launch) -> None:
         stream = as_torch_stream(torch, launch.get_stream(), state.get_device())
