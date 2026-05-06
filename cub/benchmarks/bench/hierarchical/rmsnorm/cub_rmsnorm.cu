@@ -88,7 +88,7 @@ thrust::device_vector<T> make_bounded_vector(std::size_t elements, bool zero_dat
 }
 
 template <typename T>
-void rmsnorm(nvbench::state& state, nvbench::type_list<T>)
+void cub_rmsnorm(nvbench::state& state, nvbench::type_list<T>)
 try
 {
   const int batch_size  = static_cast<int>(state.get_int64("BatchSize"));
@@ -167,8 +167,8 @@ using value_types =
                      >;
 #endif
 
-NVBENCH_BENCH_TYPES(rmsnorm, NVBENCH_TYPE_AXES(value_types))
-  .set_name("rmsnorm")
+NVBENCH_BENCH_TYPES(cub_rmsnorm, NVBENCH_TYPE_AXES(value_types))
+  .set_name("cub_rmsnorm")
   .set_type_axes_names({"T{ct}"})
   .add_int64_axis("BatchSize", {64, 800, 150000})
   .add_int64_axis("ZeroData", {0, 1})
