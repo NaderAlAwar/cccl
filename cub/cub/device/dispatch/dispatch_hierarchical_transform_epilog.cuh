@@ -83,9 +83,15 @@ struct transform_epilog_tuple_all_load_to_shared<::cuda::std::tuple<InputIterato
     : ::cuda::std::bool_constant<transform_epilog_all_load_to_shared<InputIteratorTs...>>
 {};
 
-template <typename InputIteratorT, int ItemsPerThread>
+template <typename InputIteratorT, typename DeviceEpilogOpT>
+inline constexpr bool transform_epilog_can_use_flat_no_epilog =
+  ::cuda::std::is_same_v<::cuda::std::decay_t<DeviceEpilogOpT>, NoopDeviceEpilogOp>
+  && transform_epilog_tuple_all_load_to_shared<::cuda::std::decay_t<InputIteratorT>>::value;
+
+template <typename InputIteratorT, int ItemsPerThread, typename DeviceEpilogOpT>
 inline constexpr bool transform_epilog_can_use_static_segment_32 =
-  (32 % ItemsPerThread == 0) && transform_epilog_tuple_all_load_to_shared<::cuda::std::decay_t<InputIteratorT>>::value;
+  transform_epilog_tuple_all_load_to_shared<::cuda::std::decay_t<InputIteratorT>>::value
+  && ((32 % ItemsPerThread == 0) || transform_epilog_can_use_flat_no_epilog<InputIteratorT, DeviceEpilogOpT>);
 
 template <typename KernelSourceT, typename = void>
 struct transform_epilog_has_segment_32_kernel : ::cuda::std::false_type
@@ -234,7 +240,7 @@ struct DispatchHierarchicalTransformEpilog
       , launcher_factory(launcher_factory)
   {}
 
-  template <typename DeviceHierarchicalTransformEpilogKernelT, ::cuda::std::size_t... Is>
+  template <bool UseFlatTile, typename DeviceHierarchicalTransformEpilogKernelT, ::cuda::std::size_t... Is>
   CUB_RUNTIME_FUNCTION _CCCL_VISIBILITY_HIDDEN _CCCL_FORCEINLINE cudaError_t InvokeKernel(
     DeviceHierarchicalTransformEpilogKernelT hierarchical_transform_epilog_kernel, ::cuda::std::index_sequence<Is...>)
   {
@@ -245,27 +251,9 @@ struct DispatchHierarchicalTransformEpilog
 
     constexpr int warp_threads = 32;
 
-    if (num_segments < 0 || segment_size <= 0 || segment_size > warp_threads || segment_size % ItemsPerThread != 0)
+    if (num_segments < 0 || segment_size <= 0 || segment_size > warp_threads)
     {
       return cudaErrorInvalidValue;
-    }
-
-    const int threads_per_segment = segment_size / ItemsPerThread;
-    if (threads_per_segment <= 0 || threads_per_segment > BlockThreads)
-    {
-      return cudaErrorInvalidValue;
-    }
-
-    const int segments_per_block = BlockThreads / threads_per_segment;
-    if (segments_per_block <= 0)
-    {
-      return cudaErrorInvalidValue;
-    }
-
-    int max_grid_dim_x = 0;
-    if (const auto error = CubDebug(launcher_factory.MaxGridDimX(max_grid_dim_x)))
-    {
-      return error;
     }
 
     constexpr auto max_total_items = static_cast<::cuda::std::int64_t>((::cuda::std::numeric_limits<int>::max)());
@@ -275,9 +263,40 @@ struct DispatchHierarchicalTransformEpilog
       return cudaErrorInvalidValue;
     }
 
-    const int total_items     = static_cast<int>(num_segments * static_cast<::cuda::std::int64_t>(segment_size));
-    const int total_segments  = static_cast<int>(num_segments);
-    const int required_blocks = ::cuda::ceil_div(total_segments, segments_per_block);
+    const int total_items = static_cast<int>(num_segments * static_cast<::cuda::std::int64_t>(segment_size));
+
+    int required_blocks = 0;
+    if constexpr (UseFlatTile)
+    {
+      required_blocks = ::cuda::ceil_div(total_items, BlockThreads * ItemsPerThread);
+    }
+    else
+    {
+      if (segment_size % ItemsPerThread != 0)
+      {
+        return cudaErrorInvalidValue;
+      }
+
+      const int threads_per_segment = segment_size / ItemsPerThread;
+      if (threads_per_segment <= 0 || threads_per_segment > BlockThreads)
+      {
+        return cudaErrorInvalidValue;
+      }
+
+      const int segments_per_block = BlockThreads / threads_per_segment;
+      if (segments_per_block <= 0)
+      {
+        return cudaErrorInvalidValue;
+      }
+
+      required_blocks = ::cuda::ceil_div(static_cast<int>(num_segments), segments_per_block);
+    }
+
+    int max_grid_dim_x = 0;
+    if (const auto error = CubDebug(launcher_factory.MaxGridDimX(max_grid_dim_x)))
+    {
+      return error;
+    }
 
     const bool aligned_inputs_are_valid =
       [&]<::cuda::std::size_t... InputIndices>(::cuda::std::index_sequence<InputIndices...>) {
@@ -320,21 +339,23 @@ struct DispatchHierarchicalTransformEpilog
   {
     using input_indices_t = ::cuda::std::make_index_sequence<::cuda::std::tuple_size_v<InputIteratorT>>;
 
-    if constexpr (transform_epilog_can_use_static_segment_32<InputIteratorT, ItemsPerThread>
+    if constexpr (transform_epilog_can_use_static_segment_32<InputIteratorT, ItemsPerThread, DeviceEpilogOpT>
                   && transform_epilog_has_segment_32_kernel<KernelSource>::value)
     {
       if (segment_size == 32)
       {
-        return InvokeKernel(kernel_source.HierarchicalTransformEpilogKernelSegment32(), input_indices_t{});
+        constexpr bool use_flat_tile = transform_epilog_can_use_flat_no_epilog<InputIteratorT, DeviceEpilogOpT>;
+        return InvokeKernel<use_flat_tile>(
+          kernel_source.HierarchicalTransformEpilogKernelSegment32(), input_indices_t{});
       }
     }
 
-    return InvokeKernel(kernel_source.HierarchicalTransformEpilogKernel(), input_indices_t{});
+    return InvokeKernel<false>(kernel_source.HierarchicalTransformEpilogKernel(), input_indices_t{});
   }
 };
 
 template <int BlockThreads   = 256,
-          int ItemsPerThread = 1,
+          int ItemsPerThread = 5,
           typename InputIteratorT,
           typename OutputIteratorT,
           typename TransformOpT,

@@ -245,7 +245,7 @@ struct transform_epilog_input_load_storage
     transform_epilog_shared_buffer_total_size<items_per_block, InputIteratorTs...>();
 
   using block_load_storage_t = transform_epilog_block_load_storage_t<BlockThreads, ItemsPerThread, InputIteratorTs...>;
-  using block_load_to_shared_t = BlockLoadToShared<BlockThreads, 1, 1, BlockLoadToSharedMbarrierInit::deferred>;
+  using block_load_to_shared_t = BlockLoadToShared<BlockThreads>;
 
   typename block_load_to_shared_t::TempStorage load_to_shared;
   block_load_storage_t block_load;
@@ -505,13 +505,11 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
 
   if constexpr (transform_epilog_all_load_to_shared<InputIteratorTs...>)
   {
-    typename input_load_storage_t::block_load_to_shared_t load_to_shared{
-      temp_storage.load_to_shared, BlockLoadToSharedDeferredInit};
-    using load_request_t = cub::detail::BlockLoadToSharedCopyAsyncRequest<char, transform_epilog_bulk_copy_alignment>;
+    typename input_load_storage_t::block_load_to_shared_t load_to_shared{temp_storage.load_to_shared};
 
-    auto make_load_to_shared_request =
-      [&]<::cuda::std::size_t InputIndex, typename InputIteratorT>(
-        ::cuda::std::integral_constant<::cuda::std::size_t, InputIndex>, InputIteratorT input) -> load_request_t {
+    auto issue_load_to_shared = [&]<::cuda::std::size_t InputIndex, typename InputIteratorT>(
+                                  ::cuda::std::integral_constant<::cuda::std::size_t, InputIndex>,
+                                  InputIteratorT input) {
       static_assert(transform_epilog_use_load_to_shared<InputIteratorT>);
 
       using input_value_t         = transform_epilog_input_value_t<InputIteratorT>;
@@ -529,15 +527,15 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
                    "TransformEpilog raw shared tiles must satisfy the bulk copy alignment.");
 
       ::cuda::std::span<char> shared_buffer{temp_storage.shared_buffers + buffer_offset, buffer_size};
-      return {shared_buffer, {gmem_src, static_cast<::cuda::std::size_t>(bytes_to_copy)}};
+      ::cuda::std::span<const char> gmem_span{gmem_src, static_cast<::cuda::std::size_t>(bytes_to_copy)};
+      load_to_shared.template CopyAsync<char, transform_epilog_bulk_copy_alignment>(shared_buffer, gmem_span);
     };
 
-    auto token =
-      [&]<::cuda::std::size_t... Is>(::cuda::std::index_sequence<Is...>, InputIteratorTs... input_iterators) {
-        load_request_t load_requests[] = {
-          make_load_to_shared_request(::cuda::std::integral_constant<::cuda::std::size_t, Is>{}, input_iterators)...};
-        return load_to_shared.CopyAsyncBatchAndCommit(load_requests);
-      }(::cuda::std::index_sequence_for<InputIteratorTs...>{}, d_in...);
+    [&]<::cuda::std::size_t... Is>(::cuda::std::index_sequence<Is...>, InputIteratorTs... input_iterators) {
+      (issue_load_to_shared(::cuda::std::integral_constant<::cuda::std::size_t, Is>{}, input_iterators), ...);
+    }(::cuda::std::index_sequence_for<InputIteratorTs...>{}, d_in...);
+
+    auto token = load_to_shared.Commit();
 
     using input_iterators_tuple_t = ::cuda::std::tuple<InputIteratorTs...>;
     auto bind_shared_input        = [&]<::cuda::std::size_t InputIndex>(

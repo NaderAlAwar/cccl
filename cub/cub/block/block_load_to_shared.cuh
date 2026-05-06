@@ -25,7 +25,6 @@
 
 #include <cuda/__cmath/round_down.h>
 #include <cuda/__cmath/round_up.h>
-#include <cuda/__memcpy_async/elect_one.h>
 #include <cuda/__memory/address_space.h>
 #include <cuda/__memory/align_up.h>
 #include <cuda/__memory/is_aligned.h>
@@ -43,7 +42,6 @@
 #include <cuda/std/__iterator/size.h>
 #include <cuda/std/cstdint>
 #include <cuda/std/span>
-#include <cuda/std/utility>
 
 #include <nv/target>
 
@@ -76,37 +74,12 @@ namespace detail
 //! - By guaranteeing 16 byte alignment and size multiple for the global span, a faster path is taken and less shared
 //!   memory is needed for the destination buffer.
 //! @endrst
-template <typename T, ::cuda::std::size_t GmemAlign = alignof(T)>
-struct BlockLoadToSharedCopyAsyncRequest
-{
-  using value_type                                = T;
-  static constexpr ::cuda::std::size_t gmem_align = GmemAlign;
-
-  ::cuda::std::span<char> smem_dst;
-  ::cuda::std::span<const T> gmem_src;
-};
-
-enum class BlockLoadToSharedMbarrierInit
-{
-  eager,
-  deferred,
-};
-
-struct BlockLoadToSharedDeferredInitT
-{};
-
-inline constexpr BlockLoadToSharedDeferredInitT BlockLoadToSharedDeferredInit{};
-
-template <int BlockDimX,
-          int BlockDimY                                      = 1,
-          int BlockDimZ                                      = 1,
-          BlockLoadToSharedMbarrierInit MbarrierInitStrategy = BlockLoadToSharedMbarrierInit::eager>
+template <int BlockDimX, int BlockDimY = 1, int BlockDimZ = 1>
 struct BlockLoadToShared
 {
 private:
   /// Constants
-  static constexpr int block_threads           = BlockDimX * BlockDimY * BlockDimZ;
-  static constexpr bool deferred_mbarrier_init = MbarrierInitStrategy == BlockLoadToSharedMbarrierInit::deferred;
+  static constexpr int block_threads = BlockDimX * BlockDimY * BlockDimZ;
 
   // Helper for fallback to gmem->reg->smem
   struct alignas(detail::bulk_copy_min_align) vec_load_t
@@ -150,10 +123,6 @@ private:
   {
     // Otherwise elect.sync in the last warp with a full mask is UB.
     static_assert(block_threads % cub::detail::warp_threads == 0, "The block size must be a multiple of the warp size");
-    if constexpr (BlockDimY == 1 && BlockDimZ == 1)
-    {
-      return linear_tid == 0;
-    }
     NV_DISPATCH_TARGET(
       NV_PROVIDES_SM_90,
       ( // Use last warp to try to avoid having the elected thread also working on the peeling in the first warp.
@@ -162,74 +131,43 @@ private:
       (return linear_tid == 0;));
   }
 
-  _CCCL_DEVICE_API _CCCL_FORCEINLINE bool __issue_thread() const
-  {
-    if constexpr (BlockDimY == 1 && BlockDimZ == 1)
-    {
-      NV_DISPATCH_TARGET(
-        NV_PROVIDES_SM_90, (return ::cuda::device::__block_elect_one();), NV_IS_DEVICE, (return linear_tid == 0;));
-    }
-    else
-    {
-      return elected;
-    }
-  }
-
   _CCCL_DEVICE_API _CCCL_FORCEINLINE void __init_mbarrier()
   {
     {
       NV_IF_TARGET(NV_PROVIDES_SM_90,
-                   (if (__issue_thread()) { __init_mbarrier_from_issue_thread(); }
+                   (if (elected) { ::cuda::ptx::mbarrier_init(&temp_storage.mbarrier_handle, 1); }
                     // TODO The following sync was added to avoid a racecheck posititive. Is it really needed?
                     __syncthreads();));
     }
   }
 
-  _CCCL_DEVICE_API _CCCL_FORCEINLINE void __init_mbarrier_from_issue_thread()
-  {
-    NV_IF_TARGET(NV_PROVIDES_SM_90, (::cuda::ptx::mbarrier_init(&temp_storage.mbarrier_handle, 1);));
-  }
-
-  _CCCL_DEVICE_API _CCCL_FORCEINLINE void __prepare_deferred_mbarrier_init()
-  {
-    if constexpr (deferred_mbarrier_init)
-    {
-      phase_parity = 0u;
-    }
-  }
-
-  _CCCL_DEVICE_API _CCCL_FORCEINLINE void
-  __copy_aligned_async_bulk_issue(char* smem_dst, const char* gmem_src, int num_bytes)
-  {
-#if __cccl_ptx_isa >= 860
-    NV_IF_TARGET(
-      NV_PROVIDES_SM_90,
-      (::cuda::ptx::cp_async_bulk(
-         ::cuda::ptx::space_shared,
-         ::cuda::ptx::space_global,
-         smem_dst,
-         gmem_src,
-         num_bytes,
-         &temp_storage.mbarrier_handle);));
-#else
-    NV_IF_TARGET(
-      NV_PROVIDES_SM_90,
-      (::cuda::ptx::cp_async_bulk(
-         ::cuda::ptx::space_cluster,
-         ::cuda::ptx::space_global,
-         smem_dst,
-         gmem_src,
-         num_bytes,
-         &temp_storage.mbarrier_handle);));
-#endif // __cccl_ptx_isa >= 800
-  }
-
   _CCCL_DEVICE_API _CCCL_FORCEINLINE void __copy_aligned_async_bulk(char* smem_dst, const char* gmem_src, int num_bytes)
   {
-    num_bytes_bulk_total += num_bytes;
-    if (__issue_thread())
+    if (elected)
     {
-      __copy_aligned_async_bulk_issue(smem_dst, gmem_src, num_bytes);
+#if __cccl_ptx_isa >= 860
+      NV_IF_TARGET(
+        NV_PROVIDES_SM_90,
+        (::cuda::ptx::cp_async_bulk(
+           ::cuda::ptx::space_shared,
+           ::cuda::ptx::space_global,
+           smem_dst,
+           gmem_src,
+           num_bytes,
+           &temp_storage.mbarrier_handle);));
+#else
+      NV_IF_TARGET(
+        NV_PROVIDES_SM_90,
+        (::cuda::ptx::cp_async_bulk(
+           ::cuda::ptx::space_cluster,
+           ::cuda::ptx::space_global,
+           smem_dst,
+           gmem_src,
+           num_bytes,
+           &temp_storage.mbarrier_handle);));
+#endif // __cccl_ptx_isa >= 800
+      // Needed for arrival on mbarrier in Commit()
+      num_bytes_bulk_total += num_bytes;
     }
   }
 
@@ -269,158 +207,6 @@ private:
       (__copy_aligned_async(smem_dst, gmem_src, num_bytes);),
       NV_IS_DEVICE,
       (__copy_aligned_fallback(smem_dst, gmem_src, num_bytes);));
-  }
-
-  template <typename T>
-  _CCCL_DEVICE_API _CCCL_FORCEINLINE static int __copy_num_bytes(::cuda::std::span<const T> gmem_src)
-  {
-    // Avoid 64b multiplication in span::size_bytes()
-    return static_cast<int>(sizeof(T)) * static_cast<int>(::cuda::std::size(gmem_src));
-  }
-
-  template <typename T, ::cuda::std::size_t GmemAlign>
-  _CCCL_DEVICE_API _CCCL_FORCEINLINE static void __validate_copy_async_args(
-    ::cuda::std::span<char> smem_dst, char* dst_ptr, const char* src_ptr, int num_bytes, ::cuda::std::size_t num_items)
-  {
-    static_assert(THRUST_NS_QUALIFIER::is_trivially_relocatable_v<T>);
-    static_assert(::cuda::__is_valid_alignment<T>(GmemAlign));
-    _CCCL_ASSERT(dst_ptr == nullptr || ::cuda::device::is_address_from(dst_ptr, ::cuda::device::address_space::shared),
-                 "Destination address needs to point to shared memory");
-    _CCCL_ASSERT(src_ptr == nullptr || ::cuda::device::is_address_from(src_ptr, ::cuda::device::address_space::global),
-                 "Source address needs to point to global memory");
-    _CCCL_ASSERT((src_ptr != nullptr && dst_ptr != nullptr) || num_bytes == 0,
-                 "Only when the source range is empty are nullptrs allowed");
-    _CCCL_ASSERT(::cuda::is_aligned(src_ptr, GmemAlign),
-                 "Begin of global memory range needs to be aligned according to GmemAlign.");
-    _CCCL_ASSERT(::cuda::is_aligned(src_ptr + num_bytes, GmemAlign),
-                 "End of global memory range needs to be aligned according to GmemAlign.");
-    _CCCL_ASSERT(::cuda::is_aligned(dst_ptr, cub::detail::LoadToSharedBufferAlignBytes<T>()),
-                 "Shared memory needs to be 16 byte aligned.");
-    _CCCL_ASSERT((static_cast<int>(::cuda::std::size(smem_dst))
-                  >= cub::detail::LoadToSharedBufferSizeBytes<T, GmemAlign>(num_items)),
-                 "Shared memory destination buffer must have enough space");
-  }
-
-  template <typename RequestT>
-  _CCCL_DEVICE_API _CCCL_FORCEINLINE static int __copy_request_num_bytes(const RequestT& request)
-  {
-    return __copy_num_bytes<typename RequestT::value_type>(request.gmem_src);
-  }
-
-  template <typename RequestT>
-  _CCCL_DEVICE_API _CCCL_FORCEINLINE static char* __copy_request_dst_ptr(const RequestT& request)
-  {
-    return ::cuda::std::data(request.smem_dst);
-  }
-
-  template <typename RequestT>
-  _CCCL_DEVICE_API _CCCL_FORCEINLINE static const char* __copy_request_src_ptr(const RequestT& request)
-  {
-    return ::cuda::ptr_rebind<char>(::cuda::std::data(request.gmem_src));
-  }
-
-  template <typename RequestT>
-  _CCCL_DEVICE_API _CCCL_FORCEINLINE static void __validate_copy_request(const RequestT& request)
-  {
-    using T = typename RequestT::value_type;
-    __validate_copy_async_args<T, RequestT::gmem_align>(
-      request.smem_dst,
-      __copy_request_dst_ptr(request),
-      __copy_request_src_ptr(request),
-      __copy_request_num_bytes(request),
-      ::cuda::std::size(request.gmem_src));
-  }
-
-  template <typename RequestT, ::cuda::std::size_t NumRequests, ::cuda::std::size_t... Is>
-  _CCCL_DEVICE_API _CCCL_FORCEINLINE static void
-  __validate_copy_requests(const RequestT (&requests)[NumRequests], ::cuda::std::index_sequence<Is...>)
-  {
-    (__validate_copy_request(requests[Is]), ...);
-  }
-
-  template <typename RequestT, ::cuda::std::size_t NumRequests, ::cuda::std::size_t... Is>
-  _CCCL_DEVICE_API _CCCL_FORCEINLINE void
-  __copy_aligned_async_bulk_batch(const RequestT (&requests)[NumRequests], ::cuda::std::index_sequence<Is...>)
-  {
-    __prepare_deferred_mbarrier_init();
-    ((num_bytes_bulk_total += __copy_request_num_bytes(requests[Is])), ...);
-    if (__issue_thread())
-    {
-      if constexpr (deferred_mbarrier_init)
-      {
-        __init_mbarrier_from_issue_thread();
-      }
-      (__copy_aligned_async_bulk_issue(__copy_request_dst_ptr(requests[Is]),
-                                       __copy_request_src_ptr(requests[Is]),
-                                       __copy_request_num_bytes(requests[Is])),
-       ...);
-    }
-    if constexpr (deferred_mbarrier_init)
-    {
-      __syncthreads();
-    }
-  }
-
-  template <typename RequestT, ::cuda::std::size_t NumRequests, ::cuda::std::size_t... Is>
-  _CCCL_DEVICE_API _CCCL_FORCEINLINE void __copy_aligned_async_bulk_batch_and_commit(
-    const RequestT (&requests)[NumRequests], ::cuda::std::index_sequence<Is...>)
-  {
-    const uint32_t num_bytes_bulk = (uint32_t{0} + ... + static_cast<uint32_t>(__copy_request_num_bytes(requests[Is])));
-    __prepare_deferred_mbarrier_init();
-    if (__issue_thread())
-    {
-      if constexpr (deferred_mbarrier_init)
-      {
-        __init_mbarrier_from_issue_thread();
-      }
-      (__copy_aligned_async_bulk_issue(__copy_request_dst_ptr(requests[Is]),
-                                       __copy_request_src_ptr(requests[Is]),
-                                       __copy_request_num_bytes(requests[Is])),
-       ...);
-      ::cuda::ptx::mbarrier_arrive_expect_tx(
-        ::cuda::ptx::sem_release,
-        ::cuda::ptx::scope_cta,
-        ::cuda::ptx::space_shared,
-        &temp_storage.mbarrier_handle,
-        num_bytes_bulk);
-    }
-    __syncthreads();
-  }
-
-  template <typename RequestT, ::cuda::std::size_t NumRequests, ::cuda::std::size_t... Is>
-  _CCCL_DEVICE_API _CCCL_FORCEINLINE void
-  __copy_aligned_async_batch(const RequestT (&requests)[NumRequests], ::cuda::std::index_sequence<Is...>)
-  {
-    (__copy_aligned_async(__copy_request_dst_ptr(requests[Is]),
-                          __copy_request_src_ptr(requests[Is]),
-                          __copy_request_num_bytes(requests[Is])),
-     ...);
-  }
-
-  template <typename RequestT, ::cuda::std::size_t NumRequests, ::cuda::std::size_t... Is>
-  _CCCL_DEVICE_API _CCCL_FORCEINLINE void
-  __copy_aligned_fallback_batch(const RequestT (&requests)[NumRequests], ::cuda::std::index_sequence<Is...>)
-  {
-    (__copy_aligned_fallback(__copy_request_dst_ptr(requests[Is]),
-                             __copy_request_src_ptr(requests[Is]),
-                             __copy_request_num_bytes(requests[Is])),
-     ...);
-  }
-
-  _CCCL_DEVICE_API _CCCL_FORCEINLINE void __commit_async_bulk()
-  {
-    const uint32_t num_bytes_bulk = num_bytes_bulk_total;
-    num_bytes_bulk_total          = 0u;
-    if (__issue_thread())
-    {
-      ::cuda::ptx::mbarrier_arrive_expect_tx(
-        ::cuda::ptx::sem_release,
-        ::cuda::ptx::scope_cta,
-        ::cuda::ptx::space_shared,
-        &temp_storage.mbarrier_handle,
-        num_bytes_bulk);
-    }
-    __syncthreads();
   }
 
   // Dispatch to fallback for waiting pre TMA/SM_90
@@ -467,33 +253,16 @@ public:
   _CCCL_DEVICE_API _CCCL_FORCEINLINE BlockLoadToShared(TempStorage& temp_storage)
       : temp_storage(temp_storage.Alias())
   {
-    static_assert(!deferred_mbarrier_init,
-                  "Use the BlockLoadToSharedDeferredInit constructor for deferred mbarrier initialization.");
     _CCCL_ASSERT(::cuda::device::is_object_from(temp_storage, ::cuda::device::address_space::shared),
                  "temp_storage has to be in shared memory");
     __init_mbarrier();
   }
 
-  //! @brief Collective constructor that defers mbarrier initialization to the batched copy API.
-  //!
-  //! This constructor is only valid with the deferred mbarrier initialization strategy. It is intended for complete
-  //! batched-copy paths that initialize the mbarrier immediately before issuing the bulk copies.
-  _CCCL_DEVICE_API _CCCL_FORCEINLINE BlockLoadToShared(TempStorage& temp_storage, BlockLoadToSharedDeferredInitT)
-      : temp_storage(temp_storage.Alias())
-  {
-    static_assert(deferred_mbarrier_init,
-                  "BlockLoadToSharedDeferredInit requires the deferred mbarrier initialization strategy.");
-    _CCCL_ASSERT(::cuda::device::is_object_from(temp_storage, ::cuda::device::address_space::shared),
-                 "temp_storage has to be in shared memory");
-  }
-
-  _CCCL_DEVICE_API
-  BlockLoadToShared(const BlockLoadToShared<BlockDimX, BlockDimY, BlockDimZ, MbarrierInitStrategy>&) = delete;
+  _CCCL_DEVICE_API BlockLoadToShared(const BlockLoadToShared<BlockDimX, BlockDimY, BlockDimZ>&) = delete;
 
   //! @}
 
-  _CCCL_DEVICE_API BlockLoadToShared&
-  operator=(const BlockLoadToShared<BlockDimX, BlockDimY, BlockDimZ, MbarrierInitStrategy>&) = delete;
+  _CCCL_DEVICE_API BlockLoadToShared& operator=(const BlockLoadToShared<BlockDimX, BlockDimY, BlockDimZ>&) = delete;
 
   //! @brief Invalidates underlying @c mbarrier enabling reuse of its temporary storage.
   //! @note
@@ -508,79 +277,12 @@ public:
 #endif // CCCL_ENABLE_DEVICE_ASSERTIONS
     // Make sure all threads are done interacting with the mbarrier
     __syncthreads();
-    if (__issue_thread())
+    if (elected)
     {
       NV_IF_TARGET(NV_PROVIDES_SM_90, ::cuda::ptx::mbarrier_inval(&temp_storage.mbarrier_handle););
     }
     // Make sure the elected thread is done invalidating the mbarrier
     __syncthreads();
-  }
-
-  //! @brief Copy multiple bulk-aligned global-to-shared memory requests.
-  //!
-  //! This overload preserves the same span validation as @c CopyAsync. On SM90 it issues all bulk copies from one
-  //! elected-thread region so callers with several independent ranges can avoid repeating that setup per range.
-  template <typename RequestT, ::cuda::std::size_t NumRequests>
-  _CCCL_DEVICE_API _CCCL_FORCEINLINE void CopyAsyncBatch(const RequestT (&requests)[NumRequests])
-  {
-    static_assert(NumRequests > 0);
-    static_assert(RequestT::gmem_align >= static_cast<::cuda::std::size_t>(detail::bulk_copy_min_align),
-                  "CopyAsyncBatch currently supports only bulk-aligned requests.");
-
-    __validate_copy_requests(requests, ::cuda::std::make_index_sequence<NumRequests>{});
-
-#ifdef CCCL_ENABLE_DEVICE_ASSERTIONS
-    if constexpr (deferred_mbarrier_init)
-    {
-      _CCCL_ASSERT(state == State::ready_to_copy,
-                   "Deferred-init CopyAsyncBatch() requires no prior uncommitted copies.");
-    }
-    else
-    {
-      _CCCL_ASSERT(state == State::ready_to_copy || state == State::ready_to_copy_or_commit,
-                   "Wait() must be called before another CopyAsyncBatch()");
-    }
-    state = State::ready_to_copy_or_commit;
-#endif // CCCL_ENABLE_DEVICE_ASSERTIONS
-
-    NV_DISPATCH_TARGET(
-      NV_PROVIDES_SM_90,
-      (__copy_aligned_async_bulk_batch(requests, ::cuda::std::make_index_sequence<NumRequests>{});),
-      NV_PROVIDES_SM_80,
-      (__copy_aligned_async_batch(requests, ::cuda::std::make_index_sequence<NumRequests>{});),
-      NV_IS_DEVICE,
-      (__copy_aligned_fallback_batch(requests, ::cuda::std::make_index_sequence<NumRequests>{});));
-  }
-
-  //! @brief Copy a complete batch of bulk-aligned global-to-shared memory requests and commit it.
-  //!
-  //! This is a complete-batch variant of @c CopyAsyncBatch: callers must not have prior uncommitted copies outstanding.
-  //! On SM90 it issues all bulk copies and the mbarrier arrive from the same elected-thread region.
-  template <typename RequestT, ::cuda::std::size_t NumRequests>
-  [[nodiscard]] _CCCL_DEVICE_API _CCCL_FORCEINLINE CommitToken
-  CopyAsyncBatchAndCommit(const RequestT (&requests)[NumRequests])
-  {
-    static_assert(NumRequests > 0);
-    static_assert(RequestT::gmem_align >= static_cast<::cuda::std::size_t>(detail::bulk_copy_min_align),
-                  "CopyAsyncBatchAndCommit currently supports only bulk-aligned requests.");
-
-    __validate_copy_requests(requests, ::cuda::std::make_index_sequence<NumRequests>{});
-
-#ifdef CCCL_ENABLE_DEVICE_ASSERTIONS
-    _CCCL_ASSERT(state == State::ready_to_copy, "CopyAsyncBatchAndCommit() requires no outstanding copies.");
-    state = State::committed;
-#endif // CCCL_ENABLE_DEVICE_ASSERTIONS
-
-    NV_DISPATCH_TARGET(
-      NV_PROVIDES_SM_90,
-      (__copy_aligned_async_bulk_batch_and_commit(requests, ::cuda::std::make_index_sequence<NumRequests>{});),
-      NV_PROVIDES_SM_80,
-      (__copy_aligned_async_batch(requests, ::cuda::std::make_index_sequence<NumRequests>{});
-       asm volatile("cp.async.commit_group ;" :: : "memory");),
-      NV_IS_DEVICE,
-      (__copy_aligned_fallback_batch(requests, ::cuda::std::make_index_sequence<NumRequests>{});));
-
-    return CommitToken{};
   }
 
   //! @brief Copy elements from global to shared memory
@@ -603,13 +305,28 @@ public:
   [[nodiscard]] _CCCL_DEVICE_API _CCCL_FORCEINLINE ::cuda::std::span<T>
   CopyAsync(::cuda::std::span<char> smem_dst, ::cuda::std::span<const T> gmem_src)
   {
-    static_assert(!deferred_mbarrier_init,
-                  "Deferred mbarrier initialization is only supported by the batched copy APIs.");
+    static_assert(THRUST_NS_QUALIFIER::is_trivially_relocatable_v<T>);
+    static_assert(::cuda::__is_valid_alignment<T>(GmemAlign));
     constexpr bool bulk_aligned = GmemAlign >= static_cast<::cuda::std::size_t>(detail::bulk_copy_min_align);
-    const int num_bytes         = __copy_num_bytes(gmem_src);
-    const auto dst_ptr          = ::cuda::std::data(smem_dst);
-    const auto src_ptr          = ::cuda::ptr_rebind<char>(::cuda::std::data(gmem_src));
-    __validate_copy_async_args<T, GmemAlign>(smem_dst, dst_ptr, src_ptr, num_bytes, ::cuda::std::size(gmem_src));
+    // Avoid 64b multiplication in span::size_bytes()
+    const int num_bytes = static_cast<int>(sizeof(T)) * static_cast<int>(size(gmem_src));
+    const auto dst_ptr  = data(smem_dst);
+    const auto src_ptr  = ::cuda::ptr_rebind<char>(data(gmem_src));
+    _CCCL_ASSERT(dst_ptr == nullptr || ::cuda::device::is_address_from(dst_ptr, ::cuda::device::address_space::shared),
+                 "Destination address needs to point to shared memory");
+    _CCCL_ASSERT(src_ptr == nullptr || ::cuda::device::is_address_from(src_ptr, ::cuda::device::address_space::global),
+                 "Source address needs to point to global memory");
+    _CCCL_ASSERT((src_ptr != nullptr && dst_ptr != nullptr) || num_bytes == 0,
+                 "Only when the source range is empty are nullptrs allowed");
+    _CCCL_ASSERT(::cuda::is_aligned(src_ptr, GmemAlign),
+                 "Begin of global memory range needs to be aligned according to GmemAlign.");
+    _CCCL_ASSERT(::cuda::is_aligned(src_ptr + num_bytes, GmemAlign),
+                 "End of global memory range needs to be aligned according to GmemAlign.");
+    _CCCL_ASSERT(::cuda::is_aligned(dst_ptr, cub::detail::LoadToSharedBufferAlignBytes<T>()),
+                 "Shared memory needs to be 16 byte aligned.");
+    _CCCL_ASSERT(
+      (static_cast<int>(size(smem_dst)) >= cub::detail::LoadToSharedBufferSizeBytes<T, GmemAlign>(size(gmem_src))),
+      "Shared memory destination buffer must have enough space");
 #ifdef CCCL_ENABLE_DEVICE_ASSERTIONS
     _CCCL_ASSERT(state == State::ready_to_copy || state == State::ready_to_copy_or_commit,
                  "Wait() must be called before another CopyAsync()");
@@ -661,10 +378,20 @@ public:
     state = State::committed;
 #endif // CCCL_ENABLE_DEVICE_ASSERTIONS
 
-    NV_DISPATCH_TARGET(NV_PROVIDES_SM_90,
-                       (__commit_async_bulk();),
-                       NV_PROVIDES_SM_80,
-                       (asm volatile("cp.async.commit_group ;" :: : "memory");));
+    NV_DISPATCH_TARGET(
+      NV_PROVIDES_SM_90,
+      (if (elected) {
+        ::cuda::ptx::mbarrier_arrive_expect_tx(
+          ::cuda::ptx::sem_release,
+          ::cuda::ptx::scope_cta,
+          ::cuda::ptx::space_shared,
+          &temp_storage.mbarrier_handle,
+          num_bytes_bulk_total);
+        num_bytes_bulk_total = 0u;
+      } //
+       __syncthreads();),
+      NV_PROVIDES_SM_80,
+      (asm volatile("cp.async.commit_group ;" :: : "memory");));
 
     // Token's mere purpose currently is to prevent calling Wait() without a
     // prior Commit()
