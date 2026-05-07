@@ -166,11 +166,13 @@ struct DispatchHierarchicalTransform
 
     using value_t = cub::detail::it_value_t<InputIteratorT>;
 
-    constexpr int shared_buffer_alignment = transform_prolog_load_to_shared_buffer_alignment<value_t>();
-    constexpr int alignment_padding       = shared_buffer_alignment > 16 ? (shared_buffer_alignment - 16) : 0;
+    const int bulk_copy_alignment    = transform_prolog_bulk_copy_alignment_for_ptx(ptx_version);
+    const int shared_buffer_alignment = transform_prolog_load_to_shared_buffer_alignment<value_t>(bulk_copy_alignment);
+    const int alignment_padding       = shared_buffer_alignment > 16 ? (shared_buffer_alignment - 16) : 0;
 
     const auto requested_shared_bytes =
-      static_cast<::cuda::std::size_t>(transform_prolog_load_to_shared_buffer_size<value_t>(segment_size))
+      static_cast<::cuda::std::size_t>(
+        transform_prolog_load_to_shared_buffer_size<value_t>(segment_size, bulk_copy_alignment))
       + alignment_padding;
 
     int max_dynamic_smem_size = 0;
@@ -490,11 +492,13 @@ struct DispatchHierarchicalTransform
 
       using value_t = cub::detail::it_value_t<InputIteratorT>;
 
-      const int chunk_items                 = ::cuda::ceil_div(segment_size, cluster_size);
-      constexpr int shared_buffer_alignment = transform_prolog_load_to_shared_buffer_alignment<value_t>();
-      constexpr int alignment_padding       = shared_buffer_alignment > 16 ? (shared_buffer_alignment - 16) : 0;
+      const int chunk_items            = ::cuda::ceil_div(segment_size, cluster_size);
+      const int bulk_copy_alignment    = transform_prolog_bulk_copy_alignment_for_ptx(ptx_version);
+      const int shared_buffer_alignment = transform_prolog_load_to_shared_buffer_alignment<value_t>(bulk_copy_alignment);
+      const int alignment_padding       = shared_buffer_alignment > 16 ? (shared_buffer_alignment - 16) : 0;
       const auto cluster_shared_bytes =
-        static_cast<::cuda::std::size_t>(transform_prolog_load_to_shared_buffer_size<value_t>(chunk_items))
+        static_cast<::cuda::std::size_t>(
+          transform_prolog_load_to_shared_buffer_size<value_t>(chunk_items, bulk_copy_alignment))
         + alignment_padding;
 
       if (cluster_shared_bytes > static_cast<::cuda::std::size_t>(max_dynamic_smem_size))
@@ -559,10 +563,12 @@ struct DispatchHierarchicalTransform
 
     using value_t = cub::detail::it_value_t<InputIteratorT>;
 
-    constexpr int shared_buffer_alignment = transform_prolog_load_to_shared_buffer_alignment<value_t>();
-    constexpr int alignment_padding       = shared_buffer_alignment > 16 ? (shared_buffer_alignment - 16) : 0;
+    const int bulk_copy_alignment    = transform_prolog_bulk_copy_alignment_for_ptx(ptx_version);
+    const int shared_buffer_alignment = transform_prolog_load_to_shared_buffer_alignment<value_t>(bulk_copy_alignment);
+    const int alignment_padding       = shared_buffer_alignment > 16 ? (shared_buffer_alignment - 16) : 0;
     const auto requested_shared_bytes =
-      static_cast<::cuda::std::size_t>(transform_prolog_load_to_shared_buffer_size<value_t>(segment_size))
+      static_cast<::cuda::std::size_t>(
+        transform_prolog_load_to_shared_buffer_size<value_t>(segment_size, bulk_copy_alignment))
       + alignment_padding;
 
     int max_grid_dim_x = 0;
