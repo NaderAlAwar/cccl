@@ -166,11 +166,12 @@ struct DispatchHierarchicalTransform
 
     using value_t = cub::detail::it_value_t<InputIteratorT>;
 
-    constexpr int shared_buffer_alignment = alignof(value_t);
+    constexpr int shared_buffer_alignment = transform_prolog_load_to_shared_buffer_alignment<value_t>();
     constexpr int alignment_padding       = shared_buffer_alignment > 16 ? (shared_buffer_alignment - 16) : 0;
 
     const auto requested_shared_bytes =
-      static_cast<::cuda::std::size_t>(segment_size) * sizeof(value_t) + alignment_padding;
+      static_cast<::cuda::std::size_t>(transform_prolog_load_to_shared_buffer_size<value_t>(segment_size))
+      + alignment_padding;
 
     int max_dynamic_smem_size = 0;
     if (const auto error =
@@ -490,10 +491,10 @@ struct DispatchHierarchicalTransform
       using value_t = cub::detail::it_value_t<InputIteratorT>;
 
       const int chunk_items                 = ::cuda::ceil_div(segment_size, cluster_size);
-      constexpr int shared_buffer_alignment = cub::detail::LoadToSharedBufferAlignBytes<value_t>();
+      constexpr int shared_buffer_alignment = transform_prolog_load_to_shared_buffer_alignment<value_t>();
       constexpr int alignment_padding       = shared_buffer_alignment > 16 ? (shared_buffer_alignment - 16) : 0;
       const auto cluster_shared_bytes =
-        static_cast<::cuda::std::size_t>(cub::detail::LoadToSharedBufferSizeBytes<value_t>(chunk_items))
+        static_cast<::cuda::std::size_t>(transform_prolog_load_to_shared_buffer_size<value_t>(chunk_items))
         + alignment_padding;
 
       if (cluster_shared_bytes > static_cast<::cuda::std::size_t>(max_dynamic_smem_size))
@@ -558,10 +559,11 @@ struct DispatchHierarchicalTransform
 
     using value_t = cub::detail::it_value_t<InputIteratorT>;
 
-    constexpr int shared_buffer_alignment = alignof(value_t);
+    constexpr int shared_buffer_alignment = transform_prolog_load_to_shared_buffer_alignment<value_t>();
     constexpr int alignment_padding       = shared_buffer_alignment > 16 ? (shared_buffer_alignment - 16) : 0;
     const auto requested_shared_bytes =
-      static_cast<::cuda::std::size_t>(segment_size) * sizeof(value_t) + alignment_padding;
+      static_cast<::cuda::std::size_t>(transform_prolog_load_to_shared_buffer_size<value_t>(segment_size))
+      + alignment_padding;
 
     int max_grid_dim_x = 0;
     if (const auto error = CubDebug(launcher_factory.MaxGridDimX(max_grid_dim_x)))

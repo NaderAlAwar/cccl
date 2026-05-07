@@ -19,6 +19,7 @@
 #include <cub/device/dispatch/kernels/kernel_hierarchical_common.cuh>
 
 #include <cuda/__cmath/round_up.h>
+#include <cuda/__memory/align_down.h>
 #include <cuda/std/cstddef>
 #include <cuda/std/span>
 #include <cuda/std/utility>
@@ -27,6 +28,45 @@ CUB_NAMESPACE_BEGIN
 
 namespace detail::hierarchical
 {
+constexpr int transform_prolog_bulk_copy_alignment =
+  (CUB_PTX_ARCH >= 900 && CUB_PTX_ARCH < 1000) ? 128 : cub::detail::bulk_copy_min_align;
+
+template <typename T>
+_CCCL_HOST_DEVICE constexpr int transform_prolog_load_to_shared_buffer_alignment()
+{
+  constexpr int buffer_alignment = cub::detail::LoadToSharedBufferAlignBytes<T>();
+  return transform_prolog_bulk_copy_alignment > buffer_alignment
+         ? transform_prolog_bulk_copy_alignment
+         : buffer_alignment;
+}
+
+template <typename T>
+_CCCL_HOST_DEVICE constexpr int transform_prolog_load_to_shared_buffer_size(int items)
+{
+  if (items == 0)
+  {
+    return 0;
+  }
+
+  const auto payload_bytes = static_cast<::cuda::std::size_t>(items) * static_cast<::cuda::std::size_t>(sizeof(T));
+  constexpr int max_head_padding = transform_prolog_bulk_copy_alignment - 1;
+  return cub::detail::LoadToSharedBufferSizeBytes<char>(payload_bytes + max_head_padding);
+}
+
+_CCCL_DEVICE _CCCL_FORCEINLINE const char*
+transform_prolog_align_copy_source(const char* source, ::cuda::std::size_t bytes_before_source, int& head_padding)
+{
+  const char* const aligned_source = ::cuda::align_down(source, transform_prolog_bulk_copy_alignment);
+  head_padding                     = static_cast<int>(source - aligned_source);
+  if (static_cast<::cuda::std::size_t>(head_padding) <= bytes_before_source)
+  {
+    return aligned_source;
+  }
+
+  head_padding = 0;
+  return source;
+}
+
 template <int Alignment>
 _CCCL_DEVICE _CCCL_FORCEINLINE char* align_dynamic_shared_buffer(char* shared_buffer_base)
 {
@@ -70,8 +110,8 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
   using value_t           = cub::detail::it_value_t<InputIteratorT>;
   using input_range_t     = thread_segment_range<value_t*>;
   using segment_result_t = ::cuda::std::decay_t<::cuda::std::invoke_result_t<SegmentOpT, block_group_t, input_range_t>>;
-  using block_load_t     = BlockLoad<value_t, BlockThreads, ItemsPerThread, BLOCK_LOAD_STRIPED>;
-  using block_store_t    = BlockStore<value_t, BlockThreads, ItemsPerThread, BLOCK_STORE_STRIPED>;
+  using block_load_to_shared_t = BlockLoadToShared<BlockThreads>;
+  using block_store_t          = BlockStore<value_t, BlockThreads, ItemsPerThread, BLOCK_STORE_STRIPED>;
 
   // There is a subtle difference with the epilog case. There we did
   // IPT because each thread was doing ipt items. Here each thread
@@ -84,6 +124,7 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
                 "TransformProlog requires input values to be trivially relocatable.");
   static_assert(!::cuda::std::is_void_v<segment_result_t>, "segment_op must return one scalar result per segment.");
   extern __shared__ char shared_segment_buffer_base[];
+  __shared__ typename block_load_to_shared_t::TempStorage load_to_shared_storage;
 
   const int segment_id = static_cast<int>(blockIdx.x);
   const auto segment_offset =
@@ -109,31 +150,31 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
     }
   };
 
-  constexpr int shared_buffer_alignment = alignof(value_t);
-  char* aligned_shared_buffer = align_dynamic_shared_buffer<shared_buffer_alignment>(shared_segment_buffer_base);
-  value_t* shared_segment     = reinterpret_cast<value_t*>(aligned_shared_buffer);
+  constexpr int shared_buffer_alignment = transform_prolog_load_to_shared_buffer_alignment<value_t>();
+  char* aligned_shared_buffer     = align_dynamic_shared_buffer<shared_buffer_alignment>(shared_segment_buffer_base);
+  const char* const segment_src   = reinterpret_cast<const char*>(segment_begin);
+  const char* aligned_segment_src = segment_src;
+  int source_head_padding         = 0;
+  int bytes_to_copy               = 0;
 
-  for (int tile_base = 0; tile_base < segment_size; tile_base += tile_items)
+  // Align the bulk copy source to the preferred boundary, then ignore the copied head bytes by shifting the shared
+  // pointer back to the logical segment.
+  if (segment_size > 0)
   {
-    const int valid_items = (::cuda::std::min) (tile_items, segment_size - tile_base);
-    value_t items[ItemsPerThread];
-
-    // TODO: very important, consider using block load to shared for
-    // speedups.
-
-    block_load_t().Load(segment_begin + tile_base, items, valid_items);
-
-    _CCCL_PRAGMA_UNROLL_FULL()
-    for (int item = 0; item < ItemsPerThread; ++item)
-    {
-      const int tile_local_index = thread_rank + item * BlockThreads;
-
-      if (tile_local_index < valid_items)
-      {
-        shared_segment[tile_base + tile_local_index] = items[item];
-      }
-    }
+    aligned_segment_src =
+      transform_prolog_align_copy_source(segment_src, segment_offset * sizeof(value_t), source_head_padding);
+    bytes_to_copy = source_head_padding + segment_size * static_cast<int>(sizeof(value_t));
   }
+
+  const int shared_buffer_bytes = cub::detail::LoadToSharedBufferSizeBytes<char>(bytes_to_copy);
+
+  block_load_to_shared_t load_to_shared{load_to_shared_storage};
+  ::cuda::std::span<char> shared_buffer{aligned_shared_buffer, static_cast<::cuda::std::size_t>(shared_buffer_bytes)};
+  ::cuda::std::span<const char> input_buffer{aligned_segment_src, static_cast<::cuda::std::size_t>(bytes_to_copy)};
+  auto staged_bytes = load_to_shared.CopyAsync(shared_buffer, input_buffer);
+  auto token        = load_to_shared.Commit();
+  load_to_shared.Wait(::cuda::std::move(token));
+  value_t* shared_segment = reinterpret_cast<value_t*>(staged_bytes.data() + source_head_padding);
 
   block_group.sync();
 
@@ -239,18 +280,32 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
     }
   };
 
-  constexpr int shared_buffer_alignment = cub::detail::LoadToSharedBufferAlignBytes<value_t>();
+  constexpr int shared_buffer_alignment = transform_prolog_load_to_shared_buffer_alignment<value_t>();
   char* aligned_shared_buffer   = align_dynamic_shared_buffer<shared_buffer_alignment>(shared_segment_buffer_base);
-  const int shared_buffer_bytes = cub::detail::LoadToSharedBufferSizeBytes<value_t>(local_items);
+  const char* const chunk_src   = reinterpret_cast<const char*>(segment_begin + chunk_begin);
+  const char* aligned_chunk_src = chunk_src;
+  int source_head_padding       = 0;
+  int bytes_to_copy             = 0;
+
+  // Align the bulk copy source to the preferred boundary, then ignore the copied head bytes by shifting the shared
+  // pointer back to the logical chunk.
+  if (local_items > 0)
+  {
+    const auto bytes_before_chunk = (segment_offset + static_cast<::cuda::std::size_t>(chunk_begin)) * sizeof(value_t);
+    aligned_chunk_src     = transform_prolog_align_copy_source(chunk_src, bytes_before_chunk, source_head_padding);
+    const int chunk_bytes = local_items * static_cast<int>(sizeof(value_t));
+    bytes_to_copy         = source_head_padding + chunk_bytes;
+  }
+
+  const int shared_buffer_bytes = cub::detail::LoadToSharedBufferSizeBytes<char>(bytes_to_copy);
 
   block_load_to_shared_t load_to_shared{load_to_shared_storage};
   ::cuda::std::span<char> shared_buffer{aligned_shared_buffer, static_cast<::cuda::std::size_t>(shared_buffer_bytes)};
-  ::cuda::std::span<const value_t> input_buffer{
-    segment_begin + chunk_begin, static_cast<::cuda::std::size_t>(local_items)};
-  auto staged_segment = load_to_shared.CopyAsync(shared_buffer, input_buffer);
-  auto token          = load_to_shared.Commit();
+  ::cuda::std::span<const char> input_buffer{aligned_chunk_src, static_cast<::cuda::std::size_t>(bytes_to_copy)};
+  auto staged_bytes = load_to_shared.CopyAsync(shared_buffer, input_buffer);
+  auto token        = load_to_shared.Commit();
   load_to_shared.Wait(::cuda::std::move(token));
-  value_t* shared_segment = staged_segment.data();
+  value_t* shared_segment = reinterpret_cast<value_t*>(staged_bytes.data() + source_head_padding);
 
   block_group.sync();
 
