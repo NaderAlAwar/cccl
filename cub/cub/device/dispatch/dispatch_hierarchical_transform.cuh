@@ -30,8 +30,10 @@ CUB_NAMESPACE_BEGIN
 
 namespace detail::hierarchical
 {
-constexpr int transform_prolog_cluster_smem_threshold    = 64 * 1024;
-constexpr int transform_prolog_max_portable_cluster_size = 8;
+constexpr int transform_prolog_cluster_smem_threshold      = 64 * 1024;
+constexpr int transform_prolog_max_portable_cluster_size   = 8;
+constexpr int transform_prolog_cluster_large_block_threads = 512;
+constexpr int transform_prolog_cluster_policy_cache_size   = 8;
 
 template <int BlockThreads, typename InputIteratorT, typename SegmentOpT>
 inline constexpr bool hierarchical_transform_cluster_segment_op_v = ::cuda::std::is_invocable_v<
@@ -100,6 +102,30 @@ struct DispatchHierarchicalTransform
 
   KernelSource kernel_source;
   KernelLauncherFactory launcher_factory;
+
+  struct cluster_candidate_t
+  {
+    int block_threads{0};
+    int active_clusters{0};
+    int active_warps{0};
+  };
+
+  struct cluster_policy_t
+  {
+    int block_threads{0};
+    int active_clusters{0};
+    int active_warps{0};
+  };
+
+  struct cluster_policy_cache_t
+  {
+    bool valid{false};
+    int device{-1};
+    int cluster_size{0};
+    int chunk_items{0};
+    ::cuda::std::size_t cluster_shared_bytes{0};
+    cluster_policy_t policy{};
+  };
 
   CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE DispatchHierarchicalTransform(
     InputIteratorT d_in,
@@ -204,6 +230,207 @@ struct DispatchHierarchicalTransform
     return cudaSuccess;
   }
 
+  template <int CandidateBlockThreads, typename DeviceHierarchicalTransformClusterKernelT>
+  CUB_RUNTIME_FUNCTION _CCCL_VISIBILITY_HIDDEN _CCCL_FORCEINLINE cudaError_t InvokeClusterKernel(
+    DeviceHierarchicalTransformClusterKernelT hierarchical_transform_cluster_kernel,
+    int cluster_size,
+    int chunk_items,
+    ::cuda::std::size_t cluster_shared_bytes,
+    int max_grid_dim_x)
+  {
+    NV_IF_TARGET(
+      NV_IS_HOST,
+      (if (const auto error = CubDebug(launcher_factory.set_max_dynamic_smem_size_for(
+             hierarchical_transform_cluster_kernel, static_cast<int>(cluster_shared_bytes)))) { return error; }),
+      (return cudaErrorNotSupported;))
+
+    cudaLaunchAttribute launch_attribute{};
+    launch_attribute.id               = cudaLaunchAttributeClusterDimension;
+    launch_attribute.val.clusterDim.x = static_cast<unsigned int>(cluster_size);
+    launch_attribute.val.clusterDim.y = 1;
+    launch_attribute.val.clusterDim.z = 1;
+
+    const auto max_segments_per_invocation =
+      (::cuda::std::min) (static_cast<::cuda::std::int64_t>(max_grid_dim_x / cluster_size),
+                          static_cast<::cuda::std::int64_t>(::cuda::std::numeric_limits<int>::max() / cluster_size));
+
+    if (max_segments_per_invocation <= 0)
+    {
+      return cudaErrorInvalidValue;
+    }
+
+    for (::cuda::std::int64_t segment_offset = 0; segment_offset < num_segments;
+         segment_offset += max_segments_per_invocation)
+    {
+      const auto num_current_segments = (::cuda::std::min) (max_segments_per_invocation, num_segments - segment_offset);
+      const auto item_offset          = segment_offset * static_cast<::cuda::std::int64_t>(segment_size);
+
+      cudaLaunchConfig_t launch_config{};
+      launch_config.gridDim          = dim3(static_cast<unsigned int>(num_current_segments * cluster_size), 1, 1);
+      launch_config.blockDim         = dim3(CandidateBlockThreads, 1, 1);
+      launch_config.dynamicSmemBytes = cluster_shared_bytes;
+      launch_config.stream           = stream;
+      launch_config.attrs            = &launch_attribute;
+      launch_config.numAttrs         = 1;
+
+      if (const auto error = CubDebug(cudaLaunchKernelEx(
+            &launch_config,
+            hierarchical_transform_cluster_kernel,
+            d_in + item_offset,
+            d_out + item_offset,
+            segment_size,
+            cluster_size,
+            chunk_items,
+            segment_op,
+            element_transform_op)))
+      {
+        return error;
+      }
+
+      if (const auto error = CubDebug(cudaPeekAtLastError()))
+      {
+        return error;
+      }
+
+      if (const auto error = CubDebug(detail::DebugSyncStream(stream)))
+      {
+        return error;
+      }
+    }
+
+    return cudaSuccess;
+  }
+
+  template <int CandidateBlockThreads, typename DeviceHierarchicalTransformClusterKernelT>
+  CUB_RUNTIME_FUNCTION _CCCL_VISIBILITY_HIDDEN _CCCL_FORCEINLINE cudaError_t QueryClusterCandidate(
+    DeviceHierarchicalTransformClusterKernelT hierarchical_transform_cluster_kernel,
+    int cluster_size,
+    ::cuda::std::size_t cluster_shared_bytes,
+    cluster_candidate_t& candidate)
+  {
+    candidate = cluster_candidate_t{CandidateBlockThreads, 0, 0};
+
+    int max_dynamic_smem_size = 0;
+    if (const auto error = CubDebug(
+          launcher_factory.max_dynamic_smem_size_for(max_dynamic_smem_size, hierarchical_transform_cluster_kernel)))
+    {
+      return error;
+    }
+
+    if (cluster_shared_bytes > static_cast<::cuda::std::size_t>(max_dynamic_smem_size))
+    {
+      return cudaErrorInvalidValue;
+    }
+
+    NV_IF_TARGET(
+      NV_IS_HOST,
+      (if (const auto error = CubDebug(launcher_factory.set_max_dynamic_smem_size_for(
+             hierarchical_transform_cluster_kernel, static_cast<int>(cluster_shared_bytes)))) { return error; }),
+      (return cudaErrorNotSupported;))
+
+    cudaLaunchAttribute launch_attribute{};
+    launch_attribute.id               = cudaLaunchAttributeClusterDimension;
+    launch_attribute.val.clusterDim.x = static_cast<unsigned int>(cluster_size);
+    launch_attribute.val.clusterDim.y = 1;
+    launch_attribute.val.clusterDim.z = 1;
+
+    cudaLaunchConfig_t occupancy_config{};
+    occupancy_config.gridDim          = dim3(static_cast<unsigned int>(cluster_size), 1, 1);
+    occupancy_config.blockDim         = dim3(CandidateBlockThreads, 1, 1);
+    occupancy_config.dynamicSmemBytes = cluster_shared_bytes;
+    occupancy_config.attrs            = &launch_attribute;
+    occupancy_config.numAttrs         = 1;
+
+    int active_clusters = 0;
+    if (const auto error = CubDebug(
+          cudaOccupancyMaxActiveClusters(&active_clusters, hierarchical_transform_cluster_kernel, &occupancy_config)))
+    {
+      return error;
+    }
+
+    if (active_clusters <= 0)
+    {
+      return cudaErrorInvalidValue;
+    }
+
+    candidate.active_clusters = active_clusters;
+    candidate.active_warps    = active_clusters * cluster_size * (CandidateBlockThreads / cub::detail::warp_threads);
+    return cudaSuccess;
+  }
+
+  template <typename DeviceHierarchicalTransformClusterKernelT>
+  CUB_RUNTIME_FUNCTION _CCCL_VISIBILITY_HIDDEN _CCCL_FORCEINLINE cudaError_t SelectClusterPolicy(
+    DeviceHierarchicalTransformClusterKernelT hierarchical_transform_cluster_kernel,
+    int current_device,
+    int cluster_size,
+    int chunk_items,
+    ::cuda::std::size_t cluster_shared_bytes,
+    cluster_policy_t& policy)
+  {
+    NV_IF_TARGET(
+      NV_IS_HOST,
+      ({
+        static cluster_policy_cache_t cached_policies[transform_prolog_cluster_policy_cache_size]{};
+        static int next_cached_policy = 0;
+
+        for (const auto& cached_policy : cached_policies)
+        {
+          if (cached_policy.valid && cached_policy.device == current_device
+              && cached_policy.cluster_size == cluster_size && cached_policy.chunk_items == chunk_items
+              && cached_policy.cluster_shared_bytes == cluster_shared_bytes)
+          {
+            policy = cached_policy.policy;
+            return cudaSuccess;
+          }
+        }
+
+        cluster_candidate_t selected_candidate{};
+        if (const auto error = QueryClusterCandidate<BlockThreads>(
+              hierarchical_transform_cluster_kernel, cluster_size, cluster_shared_bytes, selected_candidate))
+        {
+          return error;
+        }
+
+        if constexpr (BlockThreads != transform_prolog_cluster_large_block_threads
+                      && hierarchical_transform_cluster_segment_op_v<transform_prolog_cluster_large_block_threads,
+                                                                     InputIteratorT,
+                                                                     SegmentOpT>)
+        {
+          if (chunk_items >= transform_prolog_cluster_large_block_threads)
+          {
+            using large_kernel_source_t = DeviceHierarchicalTransformKernelSource<
+              transform_prolog_cluster_large_block_threads,
+              ItemsPerThread,
+              InputIteratorT,
+              OutputIteratorT,
+              SegmentOpT,
+              ElementTransformOpT>;
+
+            cluster_candidate_t large_candidate{};
+            const auto large_error = QueryClusterCandidate<transform_prolog_cluster_large_block_threads>(
+              large_kernel_source_t{}.HierarchicalTransformClusterKernel(),
+              cluster_size,
+              cluster_shared_bytes,
+              large_candidate);
+
+            if (large_error == cudaSuccess && large_candidate.active_warps > selected_candidate.active_warps)
+            {
+              selected_candidate = large_candidate;
+            }
+          }
+        }
+
+        policy = cluster_policy_t{
+          selected_candidate.block_threads, selected_candidate.active_clusters, selected_candidate.active_warps};
+
+        cached_policies[next_cached_policy] =
+          cluster_policy_cache_t{true, current_device, cluster_size, chunk_items, cluster_shared_bytes, policy};
+        next_cached_policy = (next_cached_policy + 1) % transform_prolog_cluster_policy_cache_size;
+        return cudaSuccess;
+      }),
+      (return cudaErrorNotSupported;))
+  }
+
   template <typename DeviceHierarchicalTransformClusterKernelT>
   CUB_RUNTIME_FUNCTION _CCCL_VISIBILITY_HIDDEN _CCCL_FORCEINLINE cudaError_t InvokeClusterKernel(
     DeviceHierarchicalTransformClusterKernelT hierarchical_transform_cluster_kernel,
@@ -273,87 +500,44 @@ struct DispatchHierarchicalTransform
         return cudaErrorInvalidValue;
       }
 
-      NV_IF_TARGET(
-        NV_IS_HOST,
-        (if (const auto error = CubDebug(launcher_factory.set_max_dynamic_smem_size_for(
-               hierarchical_transform_cluster_kernel, static_cast<int>(cluster_shared_bytes)))) { return error; }),
-        (return cudaErrorNotSupported;))
-
-      cudaLaunchAttribute launch_attribute{};
-      launch_attribute.id               = cudaLaunchAttributeClusterDimension;
-      launch_attribute.val.clusterDim.x = static_cast<unsigned int>(cluster_size);
-      launch_attribute.val.clusterDim.y = 1;
-      launch_attribute.val.clusterDim.z = 1;
-
-      cudaLaunchConfig_t occupancy_config{};
-      occupancy_config.gridDim          = dim3(static_cast<unsigned int>(cluster_size), 1, 1);
-      occupancy_config.blockDim         = dim3(BlockThreads, 1, 1);
-      occupancy_config.dynamicSmemBytes = cluster_shared_bytes;
-      occupancy_config.attrs            = &launch_attribute;
-      occupancy_config.numAttrs         = 1;
-
-      int active_clusters = 0;
-      if (const auto error = CubDebug(
-            cudaOccupancyMaxActiveClusters(&active_clusters, hierarchical_transform_cluster_kernel, &occupancy_config)))
+      cluster_policy_t cluster_policy{};
+      if (const auto error = SelectClusterPolicy(
+            hierarchical_transform_cluster_kernel,
+            current_device,
+            cluster_size,
+            chunk_items,
+            cluster_shared_bytes,
+            cluster_policy))
       {
         return error;
       }
 
-      if (active_clusters <= 0)
+      if constexpr (BlockThreads != transform_prolog_cluster_large_block_threads
+                    && hierarchical_transform_cluster_segment_op_v<transform_prolog_cluster_large_block_threads,
+                                                                   InputIteratorT,
+                                                                   SegmentOpT>)
       {
-        return cudaErrorInvalidValue;
-      }
-
-      const auto max_segments_per_invocation =
-        (::cuda::std::min) (static_cast<::cuda::std::int64_t>(max_grid_dim_x / cluster_size),
-                            static_cast<::cuda::std::int64_t>(::cuda::std::numeric_limits<int>::max() / cluster_size));
-
-      if (max_segments_per_invocation <= 0)
-      {
-        return cudaErrorInvalidValue;
-      }
-
-      for (::cuda::std::int64_t segment_offset = 0; segment_offset < num_segments;
-           segment_offset += max_segments_per_invocation)
-      {
-        const auto num_current_segments =
-          (::cuda::std::min) (max_segments_per_invocation, num_segments - segment_offset);
-        const auto item_offset = segment_offset * static_cast<::cuda::std::int64_t>(segment_size);
-
-        cudaLaunchConfig_t launch_config{};
-        launch_config.gridDim          = dim3(static_cast<unsigned int>(num_current_segments * cluster_size), 1, 1);
-        launch_config.blockDim         = dim3(BlockThreads, 1, 1);
-        launch_config.dynamicSmemBytes = cluster_shared_bytes;
-        launch_config.stream           = stream;
-        launch_config.attrs            = &launch_attribute;
-        launch_config.numAttrs         = 1;
-
-        if (const auto error = CubDebug(cudaLaunchKernelEx(
-              &launch_config,
-              hierarchical_transform_cluster_kernel,
-              d_in + item_offset,
-              d_out + item_offset,
-              segment_size,
-              cluster_size,
-              chunk_items,
-              segment_op,
-              element_transform_op)))
+        if (cluster_policy.block_threads == transform_prolog_cluster_large_block_threads)
         {
-          return error;
-        }
+          using large_kernel_source_t = DeviceHierarchicalTransformKernelSource<
+            transform_prolog_cluster_large_block_threads,
+            ItemsPerThread,
+            InputIteratorT,
+            OutputIteratorT,
+            SegmentOpT,
+            ElementTransformOpT>;
 
-        if (const auto error = CubDebug(cudaPeekAtLastError()))
-        {
-          return error;
-        }
-
-        if (const auto error = CubDebug(detail::DebugSyncStream(stream)))
-        {
-          return error;
+          return InvokeClusterKernel<transform_prolog_cluster_large_block_threads>(
+            large_kernel_source_t{}.HierarchicalTransformClusterKernel(),
+            cluster_size,
+            chunk_items,
+            cluster_shared_bytes,
+            max_grid_dim_x);
         }
       }
 
-      return cudaSuccess;
+      return InvokeClusterKernel<BlockThreads>(
+        hierarchical_transform_cluster_kernel, cluster_size, chunk_items, cluster_shared_bytes, max_grid_dim_x);
     }
   }
 
