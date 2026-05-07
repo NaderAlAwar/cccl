@@ -490,10 +490,11 @@ struct DispatchHierarchicalTransform
       using value_t = cub::detail::it_value_t<InputIteratorT>;
 
       const int chunk_items                 = ::cuda::ceil_div(segment_size, cluster_size);
-      constexpr int shared_buffer_alignment = alignof(value_t);
+      constexpr int shared_buffer_alignment = cub::detail::LoadToSharedBufferAlignBytes<value_t>();
       constexpr int alignment_padding       = shared_buffer_alignment > 16 ? (shared_buffer_alignment - 16) : 0;
       const auto cluster_shared_bytes =
-        static_cast<::cuda::std::size_t>(chunk_items) * sizeof(value_t) + alignment_padding;
+        static_cast<::cuda::std::size_t>(cub::detail::LoadToSharedBufferSizeBytes<value_t>(chunk_items))
+        + alignment_padding;
 
       if (cluster_shared_bytes > static_cast<::cuda::std::size_t>(max_dynamic_smem_size))
       {

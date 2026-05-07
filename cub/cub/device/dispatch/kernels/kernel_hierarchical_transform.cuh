@@ -14,11 +14,14 @@
 #endif // no system header
 
 #include <cub/block/block_load.cuh>
+#include <cub/block/block_load_to_shared.cuh>
 #include <cub/block/block_store.cuh>
 #include <cub/device/dispatch/kernels/kernel_hierarchical_common.cuh>
 
 #include <cuda/__cmath/round_up.h>
 #include <cuda/std/cstddef>
+#include <cuda/std/span>
+#include <cuda/std/utility>
 
 CUB_NAMESPACE_BEGIN
 
@@ -190,8 +193,8 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
   using input_range_t       = thread_segment_range<value_t*>;
   using segment_result_t =
     ::cuda::std::decay_t<::cuda::std::invoke_result_t<SegmentOpT, cluster_group_t, input_range_t>>;
-  using block_load_t  = BlockLoad<value_t, BlockThreads, ItemsPerThread, BLOCK_LOAD_STRIPED>;
-  using block_store_t = BlockStore<value_t, BlockThreads, ItemsPerThread, BLOCK_STORE_STRIPED>;
+  using block_load_to_shared_t = BlockLoadToShared<BlockThreads>;
+  using block_store_t          = BlockStore<value_t, BlockThreads, ItemsPerThread, BLOCK_STORE_STRIPED>;
 
   constexpr int tile_items = BlockThreads * ItemsPerThread;
 
@@ -200,6 +203,7 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
   static_assert(!::cuda::std::is_void_v<segment_result_t>, "segment_op must return one scalar result per segment.");
 
   extern __shared__ char shared_segment_buffer_base[];
+  __shared__ typename block_load_to_shared_t::TempStorage load_to_shared_storage;
 
   const int cluster_rank = static_cast<int>(blockIdx.x % cluster_size);
   const int segment_id   = static_cast<int>(blockIdx.x / cluster_size);
@@ -235,28 +239,18 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
     }
   };
 
-  constexpr int shared_buffer_alignment = alignof(value_t);
-  char* aligned_shared_buffer = align_dynamic_shared_buffer<shared_buffer_alignment>(shared_segment_buffer_base);
-  value_t* shared_segment     = reinterpret_cast<value_t*>(aligned_shared_buffer);
+  constexpr int shared_buffer_alignment = cub::detail::LoadToSharedBufferAlignBytes<value_t>();
+  char* aligned_shared_buffer   = align_dynamic_shared_buffer<shared_buffer_alignment>(shared_segment_buffer_base);
+  const int shared_buffer_bytes = cub::detail::LoadToSharedBufferSizeBytes<value_t>(local_items);
 
-  for (int tile_base = 0; tile_base < local_items; tile_base += tile_items)
-  {
-    const int valid_items = (::cuda::std::min) (tile_items, local_items - tile_base);
-    value_t items[ItemsPerThread];
-
-    block_load_t().Load(segment_begin + chunk_begin + tile_base, items, valid_items);
-
-    _CCCL_PRAGMA_UNROLL_FULL()
-    for (int item = 0; item < ItemsPerThread; ++item)
-    {
-      const int tile_local_index = thread_rank + item * BlockThreads;
-
-      if (tile_local_index < valid_items)
-      {
-        shared_segment[tile_base + tile_local_index] = items[item];
-      }
-    }
-  }
+  block_load_to_shared_t load_to_shared{load_to_shared_storage};
+  ::cuda::std::span<char> shared_buffer{aligned_shared_buffer, static_cast<::cuda::std::size_t>(shared_buffer_bytes)};
+  ::cuda::std::span<const value_t> input_buffer{
+    segment_begin + chunk_begin, static_cast<::cuda::std::size_t>(local_items)};
+  auto staged_segment = load_to_shared.CopyAsync(shared_buffer, input_buffer);
+  auto token          = load_to_shared.Commit();
+  load_to_shared.Wait(::cuda::std::move(token));
+  value_t* shared_segment = staged_segment.data();
 
   block_group.sync();
 
