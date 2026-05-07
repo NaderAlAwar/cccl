@@ -143,8 +143,72 @@ _CCCL_DEVICE T reduce(::cuda::experimental::this_block<Hierarchy> group, T threa
   return block_result;
 }
 
+template <typename Hierarchy, typename T, typename ReductionOp>
+_CCCL_DEVICE T reduce(::cuda::experimental::this_cluster<Hierarchy> group, T thread_data, ReductionOp reduction_op)
+{
+  using block_extents_t = decltype(::cuda::gpu_thread.extents(::cuda::block, ::cuda::std::declval<Hierarchy>()));
+
+  static_assert(block_extents_t::rank_dynamic() == 0,
+                "cuda::device::reduce currently requires statically sized block groups.");
+  static_assert(::cuda::std::is_trivially_copyable_v<T>,
+                "cuda::device::reduce currently requires trivially copyable values.");
+
+  using collective_t =
+    cub::BlockReduce<T,
+                     static_cast<int>(block_extents_t::static_extent(0)),
+                     cub::BLOCK_REDUCE_WARP_REDUCTIONS,
+                     static_cast<int>(block_extents_t::static_extent(1)),
+                     static_cast<int>(block_extents_t::static_extent(2))>;
+
+  union shared_storage_t
+  {
+    typename collective_t::TempStorage block_reduce;
+    T cluster_partial;
+  };
+
+  __shared__ shared_storage_t shared_storage;
+
+  const T block_result = collective_t{shared_storage.block_reduce}.Reduce(thread_data, reduction_op);
+  __syncthreads();
+
+  NV_IF_TARGET(
+    NV_PROVIDES_SM_90,
+    ({
+      if (threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0)
+      {
+        shared_storage.cluster_partial = block_result;
+      }
+
+      group.sync_aligned();
+
+      auto root_partial = static_cast<T*>(__cluster_map_shared_rank(&shared_storage.cluster_partial, 0));
+
+      if (::cuda::gpu_thread.is_root_rank(group))
+      {
+        T cluster_result = *root_partial;
+        for (unsigned int rank = 1; rank < static_cast<unsigned int>(::cuda::block.count(group)); ++rank)
+        {
+          auto remote_partial = static_cast<T*>(__cluster_map_shared_rank(&shared_storage.cluster_partial, rank));
+          cluster_result      = reduction_op(cluster_result, *remote_partial);
+        }
+
+        *root_partial = cluster_result;
+      }
+
+      group.sync_aligned();
+      return *root_partial;
+    }),
+    (return T{};))
+}
+
 template <typename Hierarchy, typename T>
 _CCCL_DEVICE T reduce(::cuda::experimental::this_block<Hierarchy> group, T thread_data)
+{
+  return reduce(group, thread_data, ::cuda::std::plus<>{});
+}
+
+template <typename Hierarchy, typename T>
+_CCCL_DEVICE T reduce(::cuda::experimental::this_cluster<Hierarchy> group, T thread_data)
 {
   return reduce(group, thread_data, ::cuda::std::plus<>{});
 }
