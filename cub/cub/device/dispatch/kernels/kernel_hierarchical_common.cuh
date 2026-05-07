@@ -181,22 +181,27 @@ _CCCL_DEVICE T reduce(::cuda::experimental::this_cluster<Hierarchy> group, T thr
 
       group.sync_aligned();
 
-      auto root_partial = static_cast<T*>(__cluster_map_shared_rank(&shared_storage.cluster_partial, 0));
-
       if (::cuda::gpu_thread.is_root_rank(group))
       {
-        T cluster_result = *root_partial;
-        for (unsigned int rank = 1; rank < static_cast<unsigned int>(::cuda::block.count(group)); ++rank)
+        const auto cluster_blocks = static_cast<unsigned int>(::cuda::block.count(group));
+        auto root_partial         = static_cast<T*>(__cluster_map_shared_rank(&shared_storage.cluster_partial, 0));
+        T cluster_result         = *root_partial;
+
+        for (unsigned int rank = 1; rank < cluster_blocks; ++rank)
         {
           auto remote_partial = static_cast<T*>(__cluster_map_shared_rank(&shared_storage.cluster_partial, rank));
           cluster_result      = reduction_op(cluster_result, *remote_partial);
         }
 
-        *root_partial = cluster_result;
+        for (unsigned int rank = 0; rank < cluster_blocks; ++rank)
+        {
+          auto remote_partial = static_cast<T*>(__cluster_map_shared_rank(&shared_storage.cluster_partial, rank));
+          *remote_partial     = cluster_result;
+        }
       }
 
       group.sync_aligned();
-      return *root_partial;
+      return shared_storage.cluster_partial;
     }),
     (return T{};))
 }
