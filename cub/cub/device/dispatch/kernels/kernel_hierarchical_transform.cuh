@@ -31,26 +31,17 @@ namespace detail::hierarchical
 constexpr int transform_prolog_bulk_copy_alignment =
   (CUB_PTX_ARCH >= 900 && CUB_PTX_ARCH < 1000) ? 128 : cub::detail::bulk_copy_min_align;
 
-_CCCL_HOST_DEVICE constexpr int transform_prolog_bulk_copy_alignment_for_ptx(int ptx_version)
-{
-  return (ptx_version >= 900 && ptx_version < 1000) ? 128 : cub::detail::bulk_copy_min_align;
-}
-
-template <typename T>
-_CCCL_HOST_DEVICE constexpr int transform_prolog_load_to_shared_buffer_alignment(int bulk_copy_alignment)
-{
-  constexpr int buffer_alignment = cub::detail::LoadToSharedBufferAlignBytes<T>();
-  return bulk_copy_alignment > buffer_alignment ? bulk_copy_alignment : buffer_alignment;
-}
-
 template <typename T>
 _CCCL_HOST_DEVICE constexpr int transform_prolog_load_to_shared_buffer_alignment()
 {
-  return transform_prolog_load_to_shared_buffer_alignment<T>(transform_prolog_bulk_copy_alignment);
+  constexpr int buffer_alignment = cub::detail::LoadToSharedBufferAlignBytes<T>();
+  return transform_prolog_bulk_copy_alignment > buffer_alignment
+         ? transform_prolog_bulk_copy_alignment
+         : buffer_alignment;
 }
 
 template <typename T>
-_CCCL_HOST_DEVICE constexpr int transform_prolog_load_to_shared_buffer_size(int items, int bulk_copy_alignment)
+_CCCL_HOST_DEVICE constexpr int transform_prolog_load_to_shared_buffer_size(int items)
 {
   if (items == 0)
   {
@@ -58,14 +49,8 @@ _CCCL_HOST_DEVICE constexpr int transform_prolog_load_to_shared_buffer_size(int 
   }
 
   const auto payload_bytes = static_cast<::cuda::std::size_t>(items) * static_cast<::cuda::std::size_t>(sizeof(T));
-  const int max_head_padding     = bulk_copy_alignment - 1;
+  constexpr int max_head_padding = transform_prolog_bulk_copy_alignment - 1;
   return cub::detail::LoadToSharedBufferSizeBytes<char>(payload_bytes + max_head_padding);
-}
-
-template <typename T>
-_CCCL_HOST_DEVICE constexpr int transform_prolog_load_to_shared_buffer_size(int items)
-{
-  return transform_prolog_load_to_shared_buffer_size<T>(items, transform_prolog_bulk_copy_alignment);
 }
 
 _CCCL_DEVICE _CCCL_FORCEINLINE const char*
