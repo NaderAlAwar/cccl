@@ -191,8 +191,6 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
   load_to_shared.Wait(::cuda::std::move(token));
   value_t* shared_segment = reinterpret_cast<value_t*>(staged_bytes.data() + source_head_padding);
 
-  block_group.sync();
-
   auto input_range                      = make_thread_segment_range<BlockThreads>(shared_segment, segment_size);
   const segment_result_t segment_result = segment_op(block_group, input_range);
 
@@ -321,8 +319,6 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
   auto token        = load_to_shared.Commit();
   load_to_shared.Wait(::cuda::std::move(token));
   value_t* shared_segment = reinterpret_cast<value_t*>(staged_bytes.data() + source_head_padding);
-
-  block_group.sync();
 
   const auto local_range = make_thread_segment_range<BlockThreads>(shared_segment, local_items);
   auto input_range       = input_range_t{local_range.begin(), chunk_begin + local_range.offset(), local_range.size()};
