@@ -32,11 +32,10 @@ CUB_NAMESPACE_BEGIN
 
 namespace detail::hierarchical
 {
-constexpr int transform_prolog_cluster_smem_threshold       = 64 * 1024;
-constexpr int transform_prolog_max_portable_cluster_size    = 8;
-constexpr int transform_prolog_cluster_medium_block_threads = 512;
-constexpr int transform_prolog_cluster_large_block_threads  = 672;
-constexpr int transform_prolog_cluster_policy_cache_size    = 8;
+constexpr int transform_prolog_cluster_smem_threshold      = 64 * 1024;
+constexpr int transform_prolog_max_portable_cluster_size   = 8;
+constexpr int transform_prolog_cluster_large_block_threads = 512;
+constexpr int transform_prolog_cluster_policy_cache_size   = 8;
 
 template <typename InputIteratorT>
 struct transform_prolog_is_input_tuple : ::cuda::std::false_type
@@ -401,38 +400,6 @@ struct DispatchHierarchicalTransform
     return cudaSuccess;
   }
 
-  template <int CandidateBlockThreads>
-  CUB_RUNTIME_FUNCTION _CCCL_VISIBILITY_HIDDEN _CCCL_FORCEINLINE void ConsiderClusterCandidate(
-    int cluster_size, int chunk_items, ::cuda::std::size_t cluster_shared_bytes, cluster_candidate_t& selected_candidate)
-  {
-    if constexpr (BlockThreads != CandidateBlockThreads
-                  && hierarchical_transform_cluster_segment_op_v<CandidateBlockThreads, InputIteratorT, SegmentOpT>)
-    {
-      if (chunk_items >= CandidateBlockThreads)
-      {
-        using candidate_kernel_source_t = DeviceHierarchicalTransformKernelSource<
-          CandidateBlockThreads,
-          ItemsPerThread,
-          InputIteratorT,
-          OutputIteratorT,
-          SegmentOpT,
-          ElementTransformOpT>;
-
-        cluster_candidate_t candidate{};
-        const auto candidate_error = QueryClusterCandidate<CandidateBlockThreads>(
-          candidate_kernel_source_t{}.HierarchicalTransformClusterKernel(),
-          cluster_size,
-          cluster_shared_bytes,
-          candidate);
-
-        if (candidate_error == cudaSuccess && candidate.active_warps > selected_candidate.active_warps)
-        {
-          selected_candidate = candidate;
-        }
-      }
-    }
-  }
-
   template <typename DeviceHierarchicalTransformClusterKernelT>
   CUB_RUNTIME_FUNCTION _CCCL_VISIBILITY_HIDDEN _CCCL_FORCEINLINE cudaError_t SelectClusterPolicy(
     DeviceHierarchicalTransformClusterKernelT hierarchical_transform_cluster_kernel,
@@ -466,10 +433,34 @@ struct DispatchHierarchicalTransform
           return error;
         }
 
-        ConsiderClusterCandidate<transform_prolog_cluster_medium_block_threads>(
-          cluster_size, chunk_items, cluster_shared_bytes, selected_candidate);
-        ConsiderClusterCandidate<transform_prolog_cluster_large_block_threads>(
-          cluster_size, chunk_items, cluster_shared_bytes, selected_candidate);
+        if constexpr (BlockThreads != transform_prolog_cluster_large_block_threads
+                      && hierarchical_transform_cluster_segment_op_v<transform_prolog_cluster_large_block_threads,
+                                                                     InputIteratorT,
+                                                                     SegmentOpT>)
+        {
+          if (chunk_items >= transform_prolog_cluster_large_block_threads)
+          {
+            using large_kernel_source_t = DeviceHierarchicalTransformKernelSource<
+              transform_prolog_cluster_large_block_threads,
+              ItemsPerThread,
+              InputIteratorT,
+              OutputIteratorT,
+              SegmentOpT,
+              ElementTransformOpT>;
+
+            cluster_candidate_t large_candidate{};
+            const auto large_error = QueryClusterCandidate<transform_prolog_cluster_large_block_threads>(
+              large_kernel_source_t{}.HierarchicalTransformClusterKernel(),
+              cluster_size,
+              cluster_shared_bytes,
+              large_candidate);
+
+            if (large_error == cudaSuccess && large_candidate.active_warps > selected_candidate.active_warps)
+            {
+              selected_candidate = large_candidate;
+            }
+          }
+        }
 
         policy = cluster_policy_t{
           selected_candidate.block_threads, selected_candidate.active_clusters, selected_candidate.active_warps};
@@ -556,30 +547,6 @@ struct DispatchHierarchicalTransform
             cluster_policy))
       {
         return error;
-      }
-
-      if constexpr (BlockThreads != transform_prolog_cluster_medium_block_threads
-                    && hierarchical_transform_cluster_segment_op_v<transform_prolog_cluster_medium_block_threads,
-                                                                   InputIteratorT,
-                                                                   SegmentOpT>)
-      {
-        if (cluster_policy.block_threads == transform_prolog_cluster_medium_block_threads)
-        {
-          using medium_kernel_source_t = DeviceHierarchicalTransformKernelSource<
-            transform_prolog_cluster_medium_block_threads,
-            ItemsPerThread,
-            InputIteratorT,
-            OutputIteratorT,
-            SegmentOpT,
-            ElementTransformOpT>;
-
-          return InvokeClusterKernel<transform_prolog_cluster_medium_block_threads>(
-            medium_kernel_source_t{}.HierarchicalTransformClusterKernel(),
-            cluster_size,
-            chunk_items,
-            cluster_shared_bytes,
-            max_grid_dim_x);
-        }
       }
 
       if constexpr (BlockThreads != transform_prolog_cluster_large_block_threads
