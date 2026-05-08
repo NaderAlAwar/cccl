@@ -22,9 +22,7 @@
 #include <cuda/std/__algorithm/min.h>
 #include <cuda/std/cstdint>
 #include <cuda/std/limits>
-#include <cuda/std/tuple>
 #include <cuda/std/type_traits>
-#include <cuda/std/utility>
 
 #include <cuda_runtime_api.h>
 
@@ -37,46 +35,12 @@ constexpr int transform_prolog_max_portable_cluster_size   = 8;
 constexpr int transform_prolog_cluster_large_block_threads = 512;
 constexpr int transform_prolog_cluster_policy_cache_size   = 8;
 
-template <typename InputIteratorT>
-struct transform_prolog_is_input_tuple : ::cuda::std::false_type
-{};
-
-template <typename... InputIteratorTs>
-struct transform_prolog_is_input_tuple<::cuda::std::tuple<InputIteratorTs...>> : ::cuda::std::true_type
-{};
-
-template <typename InputIteratorT>
-CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE auto make_transform_prolog_input(InputIteratorT&& d_in)
-{
-  if constexpr (transform_prolog_is_input_tuple<::cuda::std::decay_t<InputIteratorT>>::value)
-  {
-    return THRUST_NS_QUALIFIER::make_zip_iterator(::cuda::std::forward<InputIteratorT>(d_in));
-  }
-  else
-  {
-    return ::cuda::std::forward<InputIteratorT>(d_in);
-  }
-}
-
-template <bool IsStageable, int BlockThreads, typename InputIteratorT, typename SegmentOpT>
-struct hierarchical_transform_cluster_segment_op : ::cuda::std::false_type
-{};
-
 template <int BlockThreads, typename InputIteratorT, typename SegmentOpT>
-struct hierarchical_transform_cluster_segment_op<true, BlockThreads, InputIteratorT, SegmentOpT>
-    : ::cuda::std::bool_constant<::cuda::std::is_invocable_v<
-        SegmentOpT,
-        ::cuda::experimental::this_cluster<decltype(::cuda::hierarchy(
-          ::cuda::grid_dims(dim3{}), ::cuda::cluster_dims(dim3{}), ::cuda::block_dims<BlockThreads>()))>,
-        thread_segment_range<transform_prolog_segment_iterator_t<transform_prolog_staged_iterator_t<InputIteratorT>>>>>
-{};
-
-template <int BlockThreads, typename InputIteratorT, typename SegmentOpT>
-inline constexpr bool hierarchical_transform_cluster_segment_op_v =
-  hierarchical_transform_cluster_segment_op<transform_prolog_stageable_input_v<InputIteratorT>,
-                                            BlockThreads,
-                                            InputIteratorT,
-                                            SegmentOpT>::value;
+inline constexpr bool hierarchical_transform_cluster_segment_op_v = ::cuda::std::is_invocable_v<
+  SegmentOpT,
+  ::cuda::experimental::this_cluster<decltype(::cuda::hierarchy(
+    ::cuda::grid_dims(dim3{}), ::cuda::cluster_dims(dim3{}), ::cuda::block_dims<BlockThreads>()))>,
+  thread_segment_range<cub::detail::it_value_t<InputIteratorT>*>>;
 
 template <int BlockThreads,
           int ItemsPerThread,
@@ -121,8 +85,8 @@ struct DispatchHierarchicalTransform
 {
   static_assert(BlockThreads > 0, "BlockThreads must be positive.");
   static_assert(ItemsPerThread > 0, "ItemsPerThread must be positive.");
-  static_assert(transform_prolog_stageable_input_v<InputIteratorT>,
-                "TransformProlog requires input iterators to expose stageable contiguous source(s).");
+  static_assert(hierarchical_transform_stageable_input_v<InputIteratorT>,
+                "TransformProlog requires input values to be trivially relocatable.");
 
   InputIteratorT d_in;
   OutputIteratorT d_out;
@@ -186,18 +150,6 @@ struct DispatchHierarchicalTransform
       , launcher_factory(launcher_factory)
   {}
 
-  CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE ::cuda::std::size_t SharedBytesForItems(int items) const
-  {
-    using staging_traits_t = transform_prolog_staging_traits_t<InputIteratorT>;
-
-    const int bulk_copy_alignment     = transform_prolog_bulk_copy_alignment_for_ptx(ptx_version);
-    const int shared_buffer_alignment = staging_traits_t::shared_buffer_alignment(bulk_copy_alignment);
-    const int alignment_padding       = shared_buffer_alignment > 16 ? (shared_buffer_alignment - 16) : 0;
-
-    return staging_traits_t::shared_buffer_size(items, bulk_copy_alignment)
-         + static_cast<::cuda::std::size_t>(alignment_padding);
-  }
-
   template <typename DeviceHierarchicalTransformKernelT>
   CUB_RUNTIME_FUNCTION _CCCL_VISIBILITY_HIDDEN _CCCL_FORCEINLINE cudaError_t
   InvokeKernel(DeviceHierarchicalTransformKernelT hierarchical_transform_kernel)
@@ -212,7 +164,16 @@ struct DispatchHierarchicalTransform
       return cudaErrorInvalidValue;
     }
 
-    const auto requested_shared_bytes = SharedBytesForItems(segment_size);
+    using value_t = cub::detail::it_value_t<InputIteratorT>;
+
+    const int bulk_copy_alignment    = transform_prolog_bulk_copy_alignment_for_ptx(ptx_version);
+    const int shared_buffer_alignment = transform_prolog_load_to_shared_buffer_alignment<value_t>(bulk_copy_alignment);
+    const int alignment_padding       = shared_buffer_alignment > 16 ? (shared_buffer_alignment - 16) : 0;
+
+    const auto requested_shared_bytes =
+      static_cast<::cuda::std::size_t>(
+        transform_prolog_load_to_shared_buffer_size<value_t>(segment_size, bulk_copy_alignment))
+      + alignment_padding;
 
     int max_dynamic_smem_size = 0;
     if (const auto error =
@@ -529,8 +490,16 @@ struct DispatchHierarchicalTransform
         return cudaErrorInvalidValue;
       }
 
-      const int chunk_items           = ::cuda::ceil_div(segment_size, cluster_size);
-      const auto cluster_shared_bytes = SharedBytesForItems(chunk_items);
+      using value_t = cub::detail::it_value_t<InputIteratorT>;
+
+      const int chunk_items            = ::cuda::ceil_div(segment_size, cluster_size);
+      const int bulk_copy_alignment    = transform_prolog_bulk_copy_alignment_for_ptx(ptx_version);
+      const int shared_buffer_alignment = transform_prolog_load_to_shared_buffer_alignment<value_t>(bulk_copy_alignment);
+      const int alignment_padding       = shared_buffer_alignment > 16 ? (shared_buffer_alignment - 16) : 0;
+      const auto cluster_shared_bytes =
+        static_cast<::cuda::std::size_t>(
+          transform_prolog_load_to_shared_buffer_size<value_t>(chunk_items, bulk_copy_alignment))
+        + alignment_padding;
 
       if (cluster_shared_bytes > static_cast<::cuda::std::size_t>(max_dynamic_smem_size))
       {
@@ -592,7 +561,15 @@ struct DispatchHierarchicalTransform
       return cudaErrorInvalidValue;
     }
 
-    const auto requested_shared_bytes = SharedBytesForItems(segment_size);
+    using value_t = cub::detail::it_value_t<InputIteratorT>;
+
+    const int bulk_copy_alignment    = transform_prolog_bulk_copy_alignment_for_ptx(ptx_version);
+    const int shared_buffer_alignment = transform_prolog_load_to_shared_buffer_alignment<value_t>(bulk_copy_alignment);
+    const int alignment_padding       = shared_buffer_alignment > 16 ? (shared_buffer_alignment - 16) : 0;
+    const auto requested_shared_bytes =
+      static_cast<::cuda::std::size_t>(
+        transform_prolog_load_to_shared_buffer_size<value_t>(segment_size, bulk_copy_alignment))
+      + alignment_padding;
 
     int max_grid_dim_x = 0;
     if (const auto error = CubDebug(launcher_factory.MaxGridDimX(max_grid_dim_x)))

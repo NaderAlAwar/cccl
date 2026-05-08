@@ -37,9 +37,8 @@ struct DeviceSegmentedTransform
   {
     _CCCL_NVTX_RANGE_SCOPE("cub::DeviceSegmentedTransform::TransformProlog");
 
-    auto transform_input = detail::hierarchical::make_transform_prolog_input(::cuda::std::move(d_in));
     return detail::hierarchical::dispatch(
-      ::cuda::std::move(transform_input),
+      ::cuda::std::move(d_in),
       ::cuda::std::move(d_out),
       num_segments,
       segment_size,

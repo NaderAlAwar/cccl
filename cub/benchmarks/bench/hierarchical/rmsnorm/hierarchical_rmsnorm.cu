@@ -6,9 +6,6 @@
 #include <thrust/transform.h>
 
 #include <cuda/cmath>
-#include <cuda/iterator>
-#include <cuda/std/cstddef>
-#include <cuda/std/tuple>
 #include <cuda/std/type_traits>
 
 #include <stdexcept>
@@ -19,18 +16,6 @@
 #include "rmsnorm_check.cuh"
 
 constexpr float rms_norm_eps = 1e-5f;
-
-struct rmsnorm_weight_source_offset_op
-{
-  int segment_size{};
-
-  template <cuda::std::size_t SourceIndex>
-  __host__ __device__ cuda::std::size_t operator()(
-    cuda::std::integral_constant<cuda::std::size_t, SourceIndex>, cuda::std::size_t absolute_logical_offset, int) const
-  {
-    return absolute_logical_offset % static_cast<cuda::std::size_t>(segment_size);
-  }
-};
 
 template <typename T>
 struct convert_op
@@ -105,22 +90,14 @@ try
 
     return rsqrtf(sum_of_squares / static_cast<float>(hidden_size) + eps);
   };
-  auto element_transform_op = [] __device__(float rms_rcp, int, auto input_item) {
-    const float x     = static_cast<float>(cuda::std::get<0>(input_item));
-    const float scale = static_cast<float>(cuda::std::get<1>(input_item)) * rms_rcp;
+  auto element_transform_op = [d_weight] __device__(float rms_rcp, int index_in_segment, T x) {
+    const float scale = static_cast<float>(d_weight[index_in_segment]) * rms_rcp;
 
-    return static_cast<T>(x * scale);
+    return static_cast<T>(static_cast<float>(x) * scale);
   };
-  auto weight_logical   = cuda::constant_iterator<T>{T{}};
-  auto weight_stageable = cub::detail::hierarchical::make_transform_prolog_stageable_iterator(
-    weight_logical,
-    cuda::std::make_tuple(d_weight),
-    cub::detail::hierarchical::transform_prolog_first_staged_source{},
-    rmsnorm_weight_source_offset_op{hidden_size});
-  auto transform_input = cuda::std::make_tuple(d_input, weight_stageable);
 
   const cudaError_t warmup_error = cub::DeviceSegmentedTransform::TransformProlog(
-    transform_input, d_output, batch_size, hidden_size, segment_op, element_transform_op);
+    d_input, d_output, batch_size, hidden_size, segment_op, element_transform_op);
   if (warmup_error == cudaErrorInvalidValue)
   {
     state.skip("Skipping: segment does not fit in dynamic shared memory.");
@@ -130,7 +107,7 @@ try
 
   state.exec(nvbench::exec_tag::no_batch, [&](nvbench::launch& launch) {
     cub::DeviceSegmentedTransform::TransformProlog(
-      transform_input,
+      d_input,
       d_output,
       batch_size,
       hidden_size,
