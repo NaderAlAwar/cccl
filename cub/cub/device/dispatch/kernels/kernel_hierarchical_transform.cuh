@@ -22,12 +22,20 @@
 #include <cuda/__memory/align_down.h>
 #include <cuda/std/cstddef>
 #include <cuda/std/span>
+#include <cuda/std/type_traits>
 #include <cuda/std/utility>
 
 CUB_NAMESPACE_BEGIN
 
 namespace detail::hierarchical
 {
+struct transform_prolog_no_direct_input
+{};
+
+template <typename DirectInputIteratorT>
+inline constexpr bool transform_prolog_has_direct_input_v =
+  !::cuda::std::is_same_v<::cuda::std::remove_cv_t<DirectInputIteratorT>, transform_prolog_no_direct_input>;
+
 constexpr int transform_prolog_bulk_copy_alignment =
   (CUB_PTX_ARCH >= 900 && CUB_PTX_ARCH < 1000) ? 128 : cub::detail::bulk_copy_min_align;
 
@@ -57,8 +65,8 @@ _CCCL_HOST_DEVICE constexpr int transform_prolog_load_to_shared_buffer_size(int 
     return 0;
   }
 
-  const auto payload_bytes = static_cast<::cuda::std::size_t>(items) * static_cast<::cuda::std::size_t>(sizeof(T));
-  const int max_head_padding     = bulk_copy_alignment - 1;
+  const auto payload_bytes   = static_cast<::cuda::std::size_t>(items) * static_cast<::cuda::std::size_t>(sizeof(T));
+  const int max_head_padding = bulk_copy_alignment - 1;
   return cub::detail::LoadToSharedBufferSizeBytes<char>(payload_bytes + max_head_padding);
 }
 
@@ -98,14 +106,47 @@ _CCCL_DEVICE _CCCL_FORCEINLINE char* align_dynamic_shared_buffer(char* shared_bu
   }
 }
 
+template <typename DirectInputIteratorT, int ItemsPerThread, bool HasDirectInput>
+struct transform_prolog_direct_input_items;
+
+template <typename DirectInputIteratorT, int ItemsPerThread>
+struct transform_prolog_direct_input_items<DirectInputIteratorT, ItemsPerThread, false>
+{
+  template <int BlockThreads>
+  _CCCL_DEVICE _CCCL_FORCEINLINE void Load(DirectInputIteratorT, int, int, int)
+  {}
+};
+
+template <typename DirectInputIteratorT, int ItemsPerThread>
+struct transform_prolog_direct_input_items<DirectInputIteratorT, ItemsPerThread, true>
+{
+  using value_t = cub::detail::it_value_t<DirectInputIteratorT>;
+
+  value_t items[ItemsPerThread];
+
+  template <int BlockThreads>
+  _CCCL_DEVICE _CCCL_FORCEINLINE void
+  Load(DirectInputIteratorT d_direct, int direct_base, int valid_items, int thread_rank)
+  {
+    _CCCL_PRAGMA_UNROLL_FULL()
+    for (int item = 0; item < ItemsPerThread; ++item)
+    {
+      const int tile_local_index = thread_rank + item * BlockThreads;
+      items[item] = tile_local_index < valid_items ? d_direct[direct_base + tile_local_index] : value_t{};
+    }
+  }
+};
+
 template <int BlockThreads,
           int ItemsPerThread,
           typename InputIteratorT,
+          typename DirectInputIteratorT,
           typename OutputIteratorT,
           typename SegmentOpT,
           typename ElementTransformOpT>
 _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalTransformKernel(
   _CCCL_GRID_CONSTANT const InputIteratorT d_in,
+  _CCCL_GRID_CONSTANT const DirectInputIteratorT d_direct,
   _CCCL_GRID_CONSTANT const OutputIteratorT d_out,
   _CCCL_GRID_CONSTANT const int segment_size,
   SegmentOpT segment_op,
@@ -127,10 +168,14 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
   using segment_result_t = ::cuda::std::decay_t<::cuda::std::invoke_result_t<SegmentOpT, block_group_t, input_range_t>>;
   using block_load_to_shared_t = BlockLoadToShared<BlockThreads>;
   using block_store_t          = BlockStore<value_t, BlockThreads, ItemsPerThread, BLOCK_STORE_STRIPED>;
+  using direct_input_items_t =
+    transform_prolog_direct_input_items<DirectInputIteratorT,
+                                        ItemsPerThread,
+                                        transform_prolog_has_direct_input_v<DirectInputIteratorT>>;
 
   // There is a subtle difference with the epilog case. There we did
   // IPT because each thread was doing ipt items. Here each thread
-  // does do IPT items but it also loads other stuff so it cal
+  // does do IPT items but it also loads other stuff so it can
   // calculate the RMS. So here, BlockLoad does not need to be tied to
   // IPT in the same way.
   constexpr int tile_items = BlockThreads * ItemsPerThread;
@@ -164,6 +209,20 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
       return element_transform_op(segment_result, static_cast<input_ref_t>(value));
     }
   };
+  auto apply_element_transform_with_direct =
+    [&](const segment_result_t& segment_result, auto&& direct_value, auto&& value) {
+      using direct_ref_t = decltype(direct_value);
+      using input_ref_t  = decltype(value);
+
+      static_assert(::cuda::std::is_invocable_v<ElementTransformOpT, segment_result_t, direct_ref_t, input_ref_t>,
+                    "element_transform_op must be invocable with (segment_result, direct_input, value).");
+      return element_transform_op(
+        segment_result, static_cast<direct_ref_t>(direct_value), static_cast<input_ref_t>(value));
+    };
+
+  direct_input_items_t first_tile_direct_items{};
+  first_tile_direct_items.template Load<BlockThreads>(
+    d_direct, 0, (::cuda::std::min) (tile_items, segment_size), thread_rank);
 
   constexpr int shared_buffer_alignment = transform_prolog_load_to_shared_buffer_alignment<value_t>();
   char* aligned_shared_buffer     = align_dynamic_shared_buffer<shared_buffer_alignment>(shared_segment_buffer_base);
@@ -197,7 +256,20 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
   for (int tile_base = 0; tile_base < segment_size; tile_base += tile_items)
   {
     const int valid_items = (::cuda::std::min) (tile_items, segment_size - tile_base);
+    direct_input_items_t direct_items{};
     value_t output_items[ItemsPerThread];
+
+    if constexpr (transform_prolog_has_direct_input_v<DirectInputIteratorT>)
+    {
+      if (tile_base == 0)
+      {
+        direct_items = first_tile_direct_items;
+      }
+      else
+      {
+        direct_items.template Load<BlockThreads>(d_direct, tile_base, valid_items, thread_rank);
+      }
+    }
 
     _CCCL_PRAGMA_UNROLL_FULL()
     for (int item = 0; item < ItemsPerThread; ++item)
@@ -208,8 +280,16 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
       if (tile_local_index < valid_items)
       {
         const int index_in_segment = tile_base + tile_local_index;
-        output_items[item] =
-          apply_element_transform(segment_result, index_in_segment, shared_segment[index_in_segment]);
+        if constexpr (transform_prolog_has_direct_input_v<DirectInputIteratorT>)
+        {
+          output_items[item] = apply_element_transform_with_direct(
+            segment_result, direct_items.items[item], shared_segment[index_in_segment]);
+        }
+        else
+        {
+          output_items[item] =
+            apply_element_transform(segment_result, index_in_segment, shared_segment[index_in_segment]);
+        }
       }
     }
 
@@ -220,11 +300,13 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
 template <int BlockThreads,
           int ItemsPerThread,
           typename InputIteratorT,
+          typename DirectInputIteratorT,
           typename OutputIteratorT,
           typename SegmentOpT,
           typename ElementTransformOpT>
 _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalTransformClusterKernel(
   _CCCL_GRID_CONSTANT const InputIteratorT d_in,
+  _CCCL_GRID_CONSTANT const DirectInputIteratorT d_direct,
   _CCCL_GRID_CONSTANT const OutputIteratorT d_out,
   _CCCL_GRID_CONSTANT const int segment_size,
   _CCCL_GRID_CONSTANT const int cluster_size,
@@ -249,6 +331,10 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
     ::cuda::std::decay_t<::cuda::std::invoke_result_t<SegmentOpT, cluster_group_t, input_range_t>>;
   using block_load_to_shared_t = BlockLoadToShared<BlockThreads>;
   using block_store_t          = BlockStore<value_t, BlockThreads, ItemsPerThread, BLOCK_STORE_STRIPED>;
+  using direct_input_items_t =
+    transform_prolog_direct_input_items<DirectInputIteratorT,
+                                        ItemsPerThread,
+                                        transform_prolog_has_direct_input_v<DirectInputIteratorT>>;
 
   constexpr int tile_items = BlockThreads * ItemsPerThread;
 
@@ -292,6 +378,20 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
       return element_transform_op(segment_result, static_cast<input_ref_t>(value));
     }
   };
+  auto apply_element_transform_with_direct =
+    [&](const segment_result_t& segment_result, auto&& direct_value, auto&& value) {
+      using direct_ref_t = decltype(direct_value);
+      using input_ref_t  = decltype(value);
+
+      static_assert(::cuda::std::is_invocable_v<ElementTransformOpT, segment_result_t, direct_ref_t, input_ref_t>,
+                    "element_transform_op must be invocable with (segment_result, direct_input, value).");
+      return element_transform_op(
+        segment_result, static_cast<direct_ref_t>(direct_value), static_cast<input_ref_t>(value));
+    };
+
+  direct_input_items_t first_tile_direct_items{};
+  first_tile_direct_items.template Load<BlockThreads>(
+    d_direct, chunk_begin, (::cuda::std::min) (tile_items, local_items), thread_rank);
 
   constexpr int shared_buffer_alignment = transform_prolog_load_to_shared_buffer_alignment<value_t>();
   char* aligned_shared_buffer   = align_dynamic_shared_buffer<shared_buffer_alignment>(shared_segment_buffer_base);
@@ -327,7 +427,20 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
   for (int tile_base = 0; tile_base < local_items; tile_base += tile_items)
   {
     const int valid_items = (::cuda::std::min) (tile_items, local_items - tile_base);
+    direct_input_items_t direct_items{};
     value_t output_items[ItemsPerThread];
+
+    if constexpr (transform_prolog_has_direct_input_v<DirectInputIteratorT>)
+    {
+      if (tile_base == 0)
+      {
+        direct_items = first_tile_direct_items;
+      }
+      else
+      {
+        direct_items.template Load<BlockThreads>(d_direct, chunk_begin + tile_base, valid_items, thread_rank);
+      }
+    }
 
     _CCCL_PRAGMA_UNROLL_FULL()
     for (int item = 0; item < ItemsPerThread; ++item)
@@ -339,7 +452,15 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
       {
         const int local_index      = tile_base + tile_local_index;
         const int index_in_segment = chunk_begin + local_index;
-        output_items[item] = apply_element_transform(segment_result, index_in_segment, shared_segment[local_index]);
+        if constexpr (transform_prolog_has_direct_input_v<DirectInputIteratorT>)
+        {
+          output_items[item] =
+            apply_element_transform_with_direct(segment_result, direct_items.items[item], shared_segment[local_index]);
+        }
+        else
+        {
+          output_items[item] = apply_element_transform(segment_result, index_in_segment, shared_segment[local_index]);
+        }
       }
     }
 

@@ -45,6 +45,7 @@ inline constexpr bool hierarchical_transform_cluster_segment_op_v = ::cuda::std:
 template <int BlockThreads,
           int ItemsPerThread,
           typename InputIteratorT,
+          typename DirectInputIteratorT,
           typename OutputIteratorT,
           typename SegmentOpT,
           typename ElementTransformOpT>
@@ -55,31 +56,37 @@ struct DeviceHierarchicalTransformKernelSource
     DeviceHierarchicalTransformKernel<BlockThreads,
                                       ItemsPerThread,
                                       InputIteratorT,
+                                      DirectInputIteratorT,
                                       OutputIteratorT,
                                       SegmentOpT,
                                       ElementTransformOpT>)
   CUB_DEFINE_KERNEL_GETTER(
     HierarchicalTransformClusterKernel,
-    DeviceHierarchicalTransformClusterKernel<BlockThreads,
-                                             ItemsPerThread,
-                                             InputIteratorT,
-                                             OutputIteratorT,
-                                             SegmentOpT,
-                                             ElementTransformOpT>)
+    DeviceHierarchicalTransformClusterKernel<
+      BlockThreads,
+      ItemsPerThread,
+      InputIteratorT,
+      DirectInputIteratorT,
+      OutputIteratorT,
+      SegmentOpT,
+      ElementTransformOpT>)
 };
 
 template <int BlockThreads,
           int ItemsPerThread,
           typename InputIteratorT,
+          typename DirectInputIteratorT,
           typename OutputIteratorT,
           typename SegmentOpT,
           typename ElementTransformOpT,
-          typename KernelSource          = DeviceHierarchicalTransformKernelSource<BlockThreads,
-                                                                                   ItemsPerThread,
-                                                                                   InputIteratorT,
-                                                                                   OutputIteratorT,
-                                                                                   SegmentOpT,
-                                                                                   ElementTransformOpT>,
+          typename KernelSource = DeviceHierarchicalTransformKernelSource<
+            BlockThreads,
+            ItemsPerThread,
+            InputIteratorT,
+            DirectInputIteratorT,
+            OutputIteratorT,
+            SegmentOpT,
+            ElementTransformOpT>,
           typename KernelLauncherFactory = CUB_DETAIL_DEFAULT_KERNEL_LAUNCHER_FACTORY>
 struct DispatchHierarchicalTransform
 {
@@ -89,6 +96,7 @@ struct DispatchHierarchicalTransform
                 "TransformProlog requires input values to be trivially relocatable.");
 
   InputIteratorT d_in;
+  DirectInputIteratorT d_direct;
   OutputIteratorT d_out;
 
   ::cuda::std::int64_t num_segments;
@@ -129,6 +137,7 @@ struct DispatchHierarchicalTransform
 
   CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE DispatchHierarchicalTransform(
     InputIteratorT d_in,
+    DirectInputIteratorT d_direct,
     OutputIteratorT d_out,
     ::cuda::std::int64_t num_segments,
     int segment_size,
@@ -139,6 +148,7 @@ struct DispatchHierarchicalTransform
     KernelSource kernel_source             = {},
     KernelLauncherFactory launcher_factory = {})
       : d_in(::cuda::std::move(d_in))
+      , d_direct(::cuda::std::move(d_direct))
       , d_out(::cuda::std::move(d_out))
       , num_segments(num_segments)
       , segment_size(segment_size)
@@ -166,7 +176,7 @@ struct DispatchHierarchicalTransform
 
     using value_t = cub::detail::it_value_t<InputIteratorT>;
 
-    const int bulk_copy_alignment    = transform_prolog_bulk_copy_alignment_for_ptx(ptx_version);
+    const int bulk_copy_alignment     = transform_prolog_bulk_copy_alignment_for_ptx(ptx_version);
     const int shared_buffer_alignment = transform_prolog_load_to_shared_buffer_alignment<value_t>(bulk_copy_alignment);
     const int alignment_padding       = shared_buffer_alignment > 16 ? (shared_buffer_alignment - 16) : 0;
 
@@ -214,6 +224,7 @@ struct DispatchHierarchicalTransform
         static_cast<int>(num_current_segments), BlockThreads, static_cast<int>(requested_shared_bytes), stream)
         .doit(hierarchical_transform_kernel,
               d_in + item_offset,
+              d_direct,
               d_out + item_offset,
               segment_size,
               segment_op,
@@ -280,6 +291,7 @@ struct DispatchHierarchicalTransform
             &launch_config,
             hierarchical_transform_cluster_kernel,
             d_in + item_offset,
+            d_direct,
             d_out + item_offset,
             segment_size,
             cluster_size,
@@ -405,6 +417,7 @@ struct DispatchHierarchicalTransform
               transform_prolog_cluster_large_block_threads,
               ItemsPerThread,
               InputIteratorT,
+              DirectInputIteratorT,
               OutputIteratorT,
               SegmentOpT,
               ElementTransformOpT>;
@@ -492,10 +505,11 @@ struct DispatchHierarchicalTransform
 
       using value_t = cub::detail::it_value_t<InputIteratorT>;
 
-      const int chunk_items            = ::cuda::ceil_div(segment_size, cluster_size);
-      const int bulk_copy_alignment    = transform_prolog_bulk_copy_alignment_for_ptx(ptx_version);
-      const int shared_buffer_alignment = transform_prolog_load_to_shared_buffer_alignment<value_t>(bulk_copy_alignment);
-      const int alignment_padding       = shared_buffer_alignment > 16 ? (shared_buffer_alignment - 16) : 0;
+      const int chunk_items         = ::cuda::ceil_div(segment_size, cluster_size);
+      const int bulk_copy_alignment = transform_prolog_bulk_copy_alignment_for_ptx(ptx_version);
+      const int shared_buffer_alignment =
+        transform_prolog_load_to_shared_buffer_alignment<value_t>(bulk_copy_alignment);
+      const int alignment_padding = shared_buffer_alignment > 16 ? (shared_buffer_alignment - 16) : 0;
       const auto cluster_shared_bytes =
         static_cast<::cuda::std::size_t>(
           transform_prolog_load_to_shared_buffer_size<value_t>(chunk_items, bulk_copy_alignment))
@@ -529,6 +543,7 @@ struct DispatchHierarchicalTransform
             transform_prolog_cluster_large_block_threads,
             ItemsPerThread,
             InputIteratorT,
+            DirectInputIteratorT,
             OutputIteratorT,
             SegmentOpT,
             ElementTransformOpT>;
@@ -563,7 +578,7 @@ struct DispatchHierarchicalTransform
 
     using value_t = cub::detail::it_value_t<InputIteratorT>;
 
-    const int bulk_copy_alignment    = transform_prolog_bulk_copy_alignment_for_ptx(ptx_version);
+    const int bulk_copy_alignment     = transform_prolog_bulk_copy_alignment_for_ptx(ptx_version);
     const int shared_buffer_alignment = transform_prolog_load_to_shared_buffer_alignment<value_t>(bulk_copy_alignment);
     const int alignment_padding       = shared_buffer_alignment > 16 ? (shared_buffer_alignment - 16) : 0;
     const auto requested_shared_bytes =
@@ -601,15 +616,75 @@ struct DispatchHierarchicalTransform
 template <int BlockThreads   = 256,
           int ItemsPerThread = 4,
           typename InputIteratorT,
+          typename DirectInputIteratorT,
           typename OutputIteratorT,
           typename SegmentOpT,
           typename ElementTransformOpT,
-          typename KernelSource          = DeviceHierarchicalTransformKernelSource<BlockThreads,
-                                                                                   ItemsPerThread,
-                                                                                   InputIteratorT,
-                                                                                   OutputIteratorT,
-                                                                                   SegmentOpT,
-                                                                                   ElementTransformOpT>,
+          typename KernelSource = DeviceHierarchicalTransformKernelSource<
+            BlockThreads,
+            ItemsPerThread,
+            InputIteratorT,
+            DirectInputIteratorT,
+            OutputIteratorT,
+            SegmentOpT,
+            ElementTransformOpT>,
+          typename KernelLauncherFactory = CUB_DETAIL_DEFAULT_KERNEL_LAUNCHER_FACTORY>
+CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE cudaError_t dispatch(
+  InputIteratorT d_in,
+  DirectInputIteratorT d_direct,
+  OutputIteratorT d_out,
+  ::cuda::std::int64_t num_segments,
+  int segment_size,
+  SegmentOpT segment_op,
+  ElementTransformOpT element_transform_op,
+  cudaStream_t stream,
+  KernelSource kernel_source             = {},
+  KernelLauncherFactory launcher_factory = {})
+{
+  int ptx_version = 0;
+  if (const auto error = CubDebug(launcher_factory.PtxVersion(ptx_version)))
+  {
+    return error;
+  }
+
+  return DispatchHierarchicalTransform<
+           BlockThreads,
+           ItemsPerThread,
+           InputIteratorT,
+           DirectInputIteratorT,
+           OutputIteratorT,
+           SegmentOpT,
+           ElementTransformOpT,
+           KernelSource,
+           KernelLauncherFactory>{
+    ::cuda::std::move(d_in),
+    ::cuda::std::move(d_direct),
+    ::cuda::std::move(d_out),
+    num_segments,
+    segment_size,
+    ::cuda::std::move(segment_op),
+    ::cuda::std::move(element_transform_op),
+    stream,
+    ptx_version,
+    kernel_source,
+    launcher_factory}
+    .Invoke();
+}
+
+template <int BlockThreads   = 256,
+          int ItemsPerThread = 4,
+          typename InputIteratorT,
+          typename OutputIteratorT,
+          typename SegmentOpT,
+          typename ElementTransformOpT,
+          typename KernelSource = DeviceHierarchicalTransformKernelSource<
+            BlockThreads,
+            ItemsPerThread,
+            InputIteratorT,
+            transform_prolog_no_direct_input,
+            OutputIteratorT,
+            SegmentOpT,
+            ElementTransformOpT>,
           typename KernelLauncherFactory = CUB_DETAIL_DEFAULT_KERNEL_LAUNCHER_FACTORY>
 CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE cudaError_t dispatch(
   InputIteratorT d_in,
@@ -628,15 +703,18 @@ CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE cudaError_t dispatch(
     return error;
   }
 
-  return DispatchHierarchicalTransform<BlockThreads,
-                                       ItemsPerThread,
-                                       InputIteratorT,
-                                       OutputIteratorT,
-                                       SegmentOpT,
-                                       ElementTransformOpT,
-                                       KernelSource,
-                                       KernelLauncherFactory>{
+  return DispatchHierarchicalTransform<
+           BlockThreads,
+           ItemsPerThread,
+           InputIteratorT,
+           transform_prolog_no_direct_input,
+           OutputIteratorT,
+           SegmentOpT,
+           ElementTransformOpT,
+           KernelSource,
+           KernelLauncherFactory>{
     ::cuda::std::move(d_in),
+    transform_prolog_no_direct_input{},
     ::cuda::std::move(d_out),
     num_segments,
     segment_size,

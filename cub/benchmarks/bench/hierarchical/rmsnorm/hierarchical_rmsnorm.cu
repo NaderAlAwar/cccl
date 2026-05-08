@@ -90,14 +90,14 @@ try
 
     return rsqrtf(sum_of_squares / static_cast<float>(hidden_size) + eps);
   };
-  auto element_transform_op = [d_weight] __device__(float rms_rcp, int index_in_segment, T x) {
-    const float scale = static_cast<float>(d_weight[index_in_segment]) * rms_rcp;
+  auto element_transform_op = [] __device__(float rms_rcp, T weight, T x) {
+    const float scale = static_cast<float>(weight) * rms_rcp;
 
     return static_cast<T>(static_cast<float>(x) * scale);
   };
 
   const cudaError_t warmup_error = cub::DeviceSegmentedTransform::TransformProlog(
-    d_input, d_output, batch_size, hidden_size, segment_op, element_transform_op);
+    d_input, d_weight, d_output, batch_size, hidden_size, segment_op, element_transform_op);
   if (warmup_error == cudaErrorInvalidValue)
   {
     state.skip("Skipping: segment does not fit in dynamic shared memory.");
@@ -108,6 +108,7 @@ try
   state.exec(nvbench::exec_tag::no_batch, [&](nvbench::launch& launch) {
     cub::DeviceSegmentedTransform::TransformProlog(
       d_input,
+      d_weight,
       d_output,
       batch_size,
       hidden_size,
