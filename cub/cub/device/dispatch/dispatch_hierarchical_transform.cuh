@@ -36,11 +36,12 @@ constexpr int transform_prolog_cluster_large_block_threads = 512;
 constexpr int transform_prolog_cluster_policy_cache_size   = 8;
 
 template <int BlockThreads, typename InputIteratorT, typename SegmentOpT>
-inline constexpr bool hierarchical_transform_cluster_segment_op_v = ::cuda::std::is_invocable_v<
-  SegmentOpT,
+inline constexpr bool hierarchical_transform_cluster_segment_op_v = transform_prolog_segment_range_selector<
+  BlockThreads,
   ::cuda::experimental::this_cluster<decltype(::cuda::hierarchy(
     ::cuda::grid_dims(dim3{}), ::cuda::cluster_dims(dim3{}), ::cuda::block_dims<BlockThreads>()))>,
-  thread_segment_range<cub::detail::it_value_t<InputIteratorT>*>>;
+  SegmentOpT,
+  cub::detail::it_value_t<InputIteratorT>>::valid;
 
 template <int BlockThreads,
           int ItemsPerThread,

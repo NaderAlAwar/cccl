@@ -154,17 +154,17 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
 {
   // Initial block-only implementation:
   // - one block owns one fixed-size contiguous segment
-  // - each thread receives a contiguous slice of that segment via `thread_segment_range`
+  // - the block first stages the segment into shared memory via `BlockLoadToShared`
+  // - `segment_op` receives either an explicitly requested contiguous span or an implementation-chosen per-thread range
   // - `segment_op` is responsible for any block-wide combine it needs and should return the final segment result on
   //   every thread in the block group
-  // - the block first stages the segment into shared memory via tiled `BlockLoad`
   // - the kernel then applies `element_transform_op` to each item, passing the segment result, the segment-local item
   //   index, and the item value
 
   using block_hierarchy_t = decltype(::cuda::hierarchy(::cuda::grid_dims(dim3{}), ::cuda::block_dims<BlockThreads>()));
   using block_group_t     = ::cuda::experimental::this_block<block_hierarchy_t>;
   using value_t           = cub::detail::it_value_t<InputIteratorT>;
-  using input_range_t     = thread_segment_range<value_t*>;
+  using input_range_t     = transform_prolog_segment_range_t<BlockThreads, block_group_t, SegmentOpT, value_t>;
   using segment_result_t = ::cuda::std::decay_t<::cuda::std::invoke_result_t<SegmentOpT, block_group_t, input_range_t>>;
   using block_load_to_shared_t = BlockLoadToShared<BlockThreads>;
   using block_store_t          = BlockStore<value_t, BlockThreads, ItemsPerThread, BLOCK_STORE_STRIPED>;
@@ -250,7 +250,8 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
   load_to_shared.Wait(::cuda::std::move(token));
   value_t* shared_segment = reinterpret_cast<value_t*>(staged_bytes.data() + source_head_padding);
 
-  auto input_range                      = make_thread_segment_range<BlockThreads>(shared_segment, segment_size);
+  auto input_range =
+    make_transform_prolog_segment_range<BlockThreads, block_group_t, SegmentOpT>(shared_segment, segment_size);
   const segment_result_t segment_result = segment_op(block_group, input_range);
 
   for (int tile_base = 0; tile_base < segment_size; tile_base += tile_items)
@@ -326,7 +327,7 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
     ::cuda::grid_dims(dim3{}), ::cuda::cluster_dims(dim3{}), ::cuda::block_dims<BlockThreads>()));
   using cluster_group_t     = ::cuda::experimental::this_cluster<cluster_hierarchy_t>;
   using value_t             = cub::detail::it_value_t<InputIteratorT>;
-  using input_range_t       = thread_segment_range<value_t*>;
+  using input_range_t       = transform_prolog_segment_range_t<BlockThreads, cluster_group_t, SegmentOpT, value_t>;
   using segment_result_t =
     ::cuda::std::decay_t<::cuda::std::invoke_result_t<SegmentOpT, cluster_group_t, input_range_t>>;
   using block_load_to_shared_t = BlockLoadToShared<BlockThreads>;
@@ -420,8 +421,8 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
   load_to_shared.Wait(::cuda::std::move(token));
   value_t* shared_segment = reinterpret_cast<value_t*>(staged_bytes.data() + source_head_padding);
 
-  const auto local_range = make_thread_segment_range<BlockThreads>(shared_segment, local_items);
-  auto input_range       = input_range_t{local_range.begin(), chunk_begin + local_range.offset(), local_range.size()};
+  auto input_range = make_transform_prolog_segment_range<BlockThreads, cluster_group_t, SegmentOpT>(
+    shared_segment, local_items, chunk_begin);
   const segment_result_t segment_result = segment_op(cluster_group, input_range);
 
   for (int tile_base = 0; tile_base < local_items; tile_base += tile_items)
