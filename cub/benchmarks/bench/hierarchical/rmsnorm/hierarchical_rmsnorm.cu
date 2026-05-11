@@ -86,7 +86,7 @@ try
       partial_sum += value * value;
     }
 
-    const float sum_of_squares = cuda::device::reduce(group, partial_sum, cuda::std::plus<>{});
+    const float sum_of_squares = cuda::coop::reduce(group, partial_sum, cuda::std::plus<>{});
 
     return rsqrtf(sum_of_squares / static_cast<float>(hidden_size) + eps);
   };

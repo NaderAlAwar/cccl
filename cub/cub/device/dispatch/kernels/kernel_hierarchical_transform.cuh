@@ -318,7 +318,7 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
   // - one cluster owns one fixed-size contiguous segment
   // - each CTA in the cluster stages one contiguous segment chunk in its local shared memory
   // - the segment op sees a cluster group and the CTA-local chunk range
-  // - the segment op is responsible for reducing across the cluster, for example through cuda::device::reduce
+  // - the segment op is responsible for reducing across the cluster, for example through cuda::coop::reduce
   // - each CTA transforms and stores only the items from its own staged chunk
 
   using block_hierarchy_t = decltype(::cuda::hierarchy(::cuda::grid_dims(dim3{}), ::cuda::block_dims<BlockThreads>()));

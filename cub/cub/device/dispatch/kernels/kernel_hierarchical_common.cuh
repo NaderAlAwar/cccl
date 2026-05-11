@@ -110,7 +110,7 @@ _CCCL_DEVICE auto make_thread_segment_range(RandomAccessIteratorT segment_begin,
 
 CUB_NAMESPACE_END
 
-namespace cuda::device
+namespace cuda::coop
 {
 template <typename Hierarchy, typename T, typename ReductionOp>
 _CCCL_DEVICE T reduce(::cuda::experimental::this_block<Hierarchy> group, T thread_data, ReductionOp reduction_op)
@@ -118,9 +118,9 @@ _CCCL_DEVICE T reduce(::cuda::experimental::this_block<Hierarchy> group, T threa
   using block_extents_t = decltype(::cuda::gpu_thread.extents(::cuda::block, ::cuda::std::declval<Hierarchy>()));
 
   static_assert(block_extents_t::rank_dynamic() == 0,
-                "cuda::device::reduce currently requires statically sized block groups.");
+                "cuda::coop::reduce currently requires statically sized block groups.");
   static_assert(::cuda::std::is_trivially_copyable_v<T>,
-                "cuda::device::reduce currently requires trivially copyable values.");
+                "cuda::coop::reduce currently requires trivially copyable values.");
 
   using collective_t =
     cub::BlockReduce<T,
@@ -149,9 +149,9 @@ _CCCL_DEVICE T reduce(::cuda::experimental::this_cluster<Hierarchy> group, T thr
   using block_extents_t = decltype(::cuda::gpu_thread.extents(::cuda::block, ::cuda::std::declval<Hierarchy>()));
 
   static_assert(block_extents_t::rank_dynamic() == 0,
-                "cuda::device::reduce currently requires statically sized block groups.");
+                "cuda::coop::reduce currently requires statically sized block groups.");
   static_assert(::cuda::std::is_trivially_copyable_v<T>,
-                "cuda::device::reduce currently requires trivially copyable values.");
+                "cuda::coop::reduce currently requires trivially copyable values.");
 
   using collective_t =
     cub::BlockReduce<T,
@@ -185,7 +185,7 @@ _CCCL_DEVICE T reduce(::cuda::experimental::this_cluster<Hierarchy> group, T thr
       {
         const auto cluster_blocks = static_cast<unsigned int>(::cuda::block.count(group));
         auto root_partial         = static_cast<T*>(__cluster_map_shared_rank(&shared_storage.cluster_partial, 0));
-        T cluster_result         = *root_partial;
+        T cluster_result          = *root_partial;
 
         for (unsigned int rank = 1; rank < cluster_blocks; ++rank)
         {
@@ -223,4 +223,4 @@ _CCCL_DEVICE ::cuda::std::uint32_t ballot(::cuda::experimental::this_warp<Hierar
 {
   return static_cast<::cuda::std::uint32_t>(__ballot_sync(0xFFFF'FFFFu, predicate));
 }
-} // namespace cuda::device
+} // namespace cuda::coop

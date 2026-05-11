@@ -123,7 +123,7 @@ try
           warp_valid               = __popc(word);
         }
 
-        const int block_valid = cuda::device::reduce(block_group, warp_valid, cuda::std::plus<>{});
+        const int block_valid = cuda::coop::reduce(block_group, warp_valid, cuda::std::plus<>{});
 
         if (cuda::gpu_thread.is_root_rank(block_group))
         {

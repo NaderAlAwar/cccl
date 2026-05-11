@@ -89,7 +89,7 @@ try
       cuda::std::bit_or<>{},
       std::uint32_t{0},
       [d_valid_count] __device__(auto group, std::uint32_t thread_partial) -> std::uint32_t {
-        const std::uint32_t word = cuda::device::reduce(group, thread_partial, cuda::std::bit_or<>{});
+        const std::uint32_t word = cuda::coop::reduce(group, thread_partial, cuda::std::bit_or<>{});
 
         if (cuda::gpu_thread.is_root_rank(group))
         {
