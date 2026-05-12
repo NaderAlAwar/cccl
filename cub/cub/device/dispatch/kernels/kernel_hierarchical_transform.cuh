@@ -13,9 +13,7 @@
 #  pragma system_header
 #endif // no system header
 
-#include <cub/block/block_load.cuh>
 #include <cub/block/block_load_to_shared.cuh>
-#include <cub/block/block_store.cuh>
 #include <cub/device/dispatch/kernels/kernel_hierarchical_common.cuh>
 
 #include <cuda/__cmath/round_up.h>
@@ -167,7 +165,6 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
   using input_range_t     = transform_prolog_segment_range_t<BlockThreads, block_group_t, SegmentOpT, value_t>;
   using segment_result_t = ::cuda::std::decay_t<::cuda::std::invoke_result_t<SegmentOpT, block_group_t, input_range_t>>;
   using block_load_to_shared_t = BlockLoadToShared<BlockThreads>;
-  using block_store_t          = BlockStore<value_t, BlockThreads, ItemsPerThread, BLOCK_STORE_STRIPED>;
   using direct_input_items_t =
     transform_prolog_direct_input_items<DirectInputIteratorT,
                                         ItemsPerThread,
@@ -258,7 +255,6 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
   {
     const int valid_items = (::cuda::std::min) (tile_items, segment_size - tile_base);
     direct_input_items_t direct_items{};
-    value_t output_items[ItemsPerThread];
 
     if constexpr (transform_prolog_has_direct_input_v<DirectInputIteratorT>)
     {
@@ -276,25 +272,22 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
     for (int item = 0; item < ItemsPerThread; ++item)
     {
       const int tile_local_index = thread_rank + item * BlockThreads;
-      output_items[item]         = value_t{};
 
       if (tile_local_index < valid_items)
       {
         const int index_in_segment = tile_base + tile_local_index;
         if constexpr (transform_prolog_has_direct_input_v<DirectInputIteratorT>)
         {
-          output_items[item] = apply_element_transform_with_direct(
+          d_out[segment_offset + index_in_segment] = apply_element_transform_with_direct(
             segment_result, direct_items.items[item], shared_segment[index_in_segment]);
         }
         else
         {
-          output_items[item] =
+          d_out[segment_offset + index_in_segment] =
             apply_element_transform(segment_result, index_in_segment, shared_segment[index_in_segment]);
         }
       }
     }
-
-    block_store_t().Store(d_out + segment_offset + tile_base, output_items, valid_items);
   }
 }
 
@@ -331,7 +324,6 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
   using segment_result_t =
     ::cuda::std::decay_t<::cuda::std::invoke_result_t<SegmentOpT, cluster_group_t, input_range_t>>;
   using block_load_to_shared_t = BlockLoadToShared<BlockThreads>;
-  using block_store_t          = BlockStore<value_t, BlockThreads, ItemsPerThread, BLOCK_STORE_STRIPED>;
   using direct_input_items_t =
     transform_prolog_direct_input_items<DirectInputIteratorT,
                                         ItemsPerThread,
@@ -429,7 +421,6 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
   {
     const int valid_items = (::cuda::std::min) (tile_items, local_items - tile_base);
     direct_input_items_t direct_items{};
-    value_t output_items[ItemsPerThread];
 
     if constexpr (transform_prolog_has_direct_input_v<DirectInputIteratorT>)
     {
@@ -447,7 +438,6 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
     for (int item = 0; item < ItemsPerThread; ++item)
     {
       const int tile_local_index = thread_rank + item * BlockThreads;
-      output_items[item]         = value_t{};
 
       if (tile_local_index < valid_items)
       {
@@ -455,17 +445,16 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
         const int index_in_segment = chunk_begin + local_index;
         if constexpr (transform_prolog_has_direct_input_v<DirectInputIteratorT>)
         {
-          output_items[item] =
+          d_out[segment_offset + index_in_segment] =
             apply_element_transform_with_direct(segment_result, direct_items.items[item], shared_segment[local_index]);
         }
         else
         {
-          output_items[item] = apply_element_transform(segment_result, index_in_segment, shared_segment[local_index]);
+          d_out[segment_offset + index_in_segment] =
+            apply_element_transform(segment_result, index_in_segment, shared_segment[local_index]);
         }
       }
     }
-
-    block_store_t().Store(d_out + segment_offset + chunk_begin + tile_base, output_items, valid_items);
   }
 }
 } // namespace detail::hierarchical
