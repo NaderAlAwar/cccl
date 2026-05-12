@@ -147,6 +147,7 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
   _CCCL_GRID_CONSTANT const DirectInputIteratorT d_direct,
   _CCCL_GRID_CONSTANT const OutputIteratorT d_out,
   _CCCL_GRID_CONSTANT const int segment_size,
+  _CCCL_GRID_CONSTANT const int items_per_thread,
   SegmentOpT segment_op,
   ElementTransformOpT element_transform_op)
 {
@@ -175,7 +176,7 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
   // does do IPT items but it also loads other stuff so it can
   // calculate the RMS. So here, BlockLoad does not need to be tied to
   // IPT in the same way.
-  constexpr int tile_items = BlockThreads * ItemsPerThread;
+  const int tile_items = BlockThreads * items_per_thread;
 
   static_assert(hierarchical_transform_stageable_input_v<InputIteratorT>,
                 "TransformProlog requires input values to be trivially relocatable.");
@@ -303,6 +304,7 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
   _CCCL_GRID_CONSTANT const DirectInputIteratorT d_direct,
   _CCCL_GRID_CONSTANT const OutputIteratorT d_out,
   _CCCL_GRID_CONSTANT const int segment_size,
+  _CCCL_GRID_CONSTANT const int items_per_thread,
   _CCCL_GRID_CONSTANT const int cluster_size,
   _CCCL_GRID_CONSTANT const int chunk_items,
   SegmentOpT segment_op,
@@ -329,7 +331,7 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
                                         ItemsPerThread,
                                         transform_prolog_has_direct_input_v<DirectInputIteratorT>>;
 
-  constexpr int tile_items = BlockThreads * ItemsPerThread;
+  const int tile_items = BlockThreads * items_per_thread;
 
   static_assert(hierarchical_transform_stageable_input_v<InputIteratorT>,
                 "TransformProlog requires input values to be trivially relocatable.");

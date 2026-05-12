@@ -245,6 +245,7 @@ struct DispatchHierarchicalTransform
               d_direct,
               d_out + item_offset,
               segment_size,
+              ItemsPerThread,
               segment_op,
               element_transform_op);
 
@@ -425,6 +426,7 @@ struct DispatchHierarchicalTransform
             d_direct,
             d_out + item_offset,
             segment_size,
+            ItemsPerThread,
             cluster_size,
             chunk_items,
             segment_op,
