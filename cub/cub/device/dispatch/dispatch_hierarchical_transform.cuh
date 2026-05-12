@@ -31,9 +31,19 @@ CUB_NAMESPACE_BEGIN
 namespace detail::hierarchical
 {
 constexpr int transform_prolog_cluster_smem_threshold      = 64 * 1024;
+constexpr int transform_prolog_block_large_block_threads   = 512;
 constexpr int transform_prolog_max_portable_cluster_size   = 8;
 constexpr int transform_prolog_cluster_large_block_threads = 512;
+constexpr int transform_prolog_block_policy_cache_size     = 8;
 constexpr int transform_prolog_cluster_policy_cache_size   = 8;
+
+template <int BlockThreads, typename InputIteratorT, typename SegmentOpT>
+inline constexpr bool hierarchical_transform_block_segment_op_v =
+  transform_prolog_segment_range_selector<BlockThreads,
+                                          ::cuda::experimental::this_block<decltype(::cuda::hierarchy(
+                                            ::cuda::grid_dims(dim3{}), ::cuda::block_dims<BlockThreads>()))>,
+                                          SegmentOpT,
+                                          cub::detail::it_value_t<InputIteratorT>>::valid;
 
 template <int BlockThreads, typename InputIteratorT, typename SegmentOpT>
 inline constexpr bool hierarchical_transform_cluster_segment_op_v = transform_prolog_segment_range_selector<
@@ -44,6 +54,7 @@ inline constexpr bool hierarchical_transform_cluster_segment_op_v = transform_pr
   cub::detail::it_value_t<InputIteratorT>>::valid;
 
 template <int BlockThreads,
+          int ItemsPerThread,
           typename InputIteratorT,
           typename DirectInputIteratorT,
           typename OutputIteratorT,
@@ -54,6 +65,7 @@ struct DeviceHierarchicalTransformKernelSource
   CUB_DEFINE_KERNEL_GETTER(
     HierarchicalTransformKernel,
     DeviceHierarchicalTransformKernel<BlockThreads,
+                                      ItemsPerThread,
                                       InputIteratorT,
                                       DirectInputIteratorT,
                                       OutputIteratorT,
@@ -61,30 +73,36 @@ struct DeviceHierarchicalTransformKernelSource
                                       ElementTransformOpT>)
   CUB_DEFINE_KERNEL_GETTER(
     HierarchicalTransformClusterKernel,
-    DeviceHierarchicalTransformClusterKernel<BlockThreads,
-                                             InputIteratorT,
-                                             DirectInputIteratorT,
-                                             OutputIteratorT,
-                                             SegmentOpT,
-                                             ElementTransformOpT>)
+    DeviceHierarchicalTransformClusterKernel<
+      BlockThreads,
+      ItemsPerThread,
+      InputIteratorT,
+      DirectInputIteratorT,
+      OutputIteratorT,
+      SegmentOpT,
+      ElementTransformOpT>)
 };
 
 template <int BlockThreads,
+          int ItemsPerThread,
           typename InputIteratorT,
           typename DirectInputIteratorT,
           typename OutputIteratorT,
           typename SegmentOpT,
           typename ElementTransformOpT,
-          typename KernelSource          = DeviceHierarchicalTransformKernelSource<BlockThreads,
-                                                                                   InputIteratorT,
-                                                                                   DirectInputIteratorT,
-                                                                                   OutputIteratorT,
-                                                                                   SegmentOpT,
-                                                                                   ElementTransformOpT>,
+          typename KernelSource = DeviceHierarchicalTransformKernelSource<
+            BlockThreads,
+            ItemsPerThread,
+            InputIteratorT,
+            DirectInputIteratorT,
+            OutputIteratorT,
+            SegmentOpT,
+            ElementTransformOpT>,
           typename KernelLauncherFactory = CUB_DETAIL_DEFAULT_KERNEL_LAUNCHER_FACTORY>
 struct DispatchHierarchicalTransform
 {
   static_assert(BlockThreads > 0, "BlockThreads must be positive.");
+  static_assert(ItemsPerThread > 0, "ItemsPerThread must be positive.");
   static_assert(hierarchical_transform_stageable_input_v<InputIteratorT>,
                 "TransformProlog requires input values to be trivially relocatable.");
 
@@ -103,6 +121,28 @@ struct DispatchHierarchicalTransform
 
   KernelSource kernel_source;
   KernelLauncherFactory launcher_factory;
+
+  struct block_candidate_t
+  {
+    int block_threads{0};
+    int active_blocks{0};
+    int active_warps{0};
+  };
+
+  struct block_policy_t
+  {
+    int block_threads{0};
+    int active_blocks{0};
+    int active_warps{0};
+  };
+
+  struct block_policy_cache_t
+  {
+    bool valid{false};
+    int device{-1};
+    ::cuda::std::size_t requested_shared_bytes{0};
+    block_policy_t policy{};
+  };
 
   struct cluster_candidate_t
   {
@@ -153,9 +193,11 @@ struct DispatchHierarchicalTransform
       , launcher_factory(launcher_factory)
   {}
 
-  template <typename DeviceHierarchicalTransformKernelT>
-  CUB_RUNTIME_FUNCTION _CCCL_VISIBILITY_HIDDEN _CCCL_FORCEINLINE cudaError_t
-  InvokeKernel(DeviceHierarchicalTransformKernelT hierarchical_transform_kernel)
+  template <int CandidateBlockThreads, typename DeviceHierarchicalTransformKernelT>
+  CUB_RUNTIME_FUNCTION _CCCL_VISIBILITY_HIDDEN _CCCL_FORCEINLINE cudaError_t InvokeKernel(
+    DeviceHierarchicalTransformKernelT hierarchical_transform_kernel,
+    ::cuda::std::size_t requested_shared_bytes,
+    int max_grid_dim_x)
   {
     if (num_segments == 0)
     {
@@ -166,17 +208,6 @@ struct DispatchHierarchicalTransform
     {
       return cudaErrorInvalidValue;
     }
-
-    using value_t = cub::detail::it_value_t<InputIteratorT>;
-
-    const int bulk_copy_alignment     = transform_prolog_bulk_copy_alignment_for_ptx(ptx_version);
-    const int shared_buffer_alignment = transform_prolog_load_to_shared_buffer_alignment<value_t>(bulk_copy_alignment);
-    const int alignment_padding       = shared_buffer_alignment > 16 ? (shared_buffer_alignment - 16) : 0;
-
-    const auto requested_shared_bytes =
-      static_cast<::cuda::std::size_t>(
-        transform_prolog_load_to_shared_buffer_size<value_t>(segment_size, bulk_copy_alignment))
-      + alignment_padding;
 
     int max_dynamic_smem_size = 0;
     if (const auto error =
@@ -197,12 +228,6 @@ struct DispatchHierarchicalTransform
       return cudaErrorInvalidValue;
     }
 
-    int max_grid_dim_x = 0;
-    if (const auto error = CubDebug(launcher_factory.MaxGridDimX(max_grid_dim_x)))
-    {
-      return error;
-    }
-
     const auto num_segments_per_invocation =
       (::cuda::std::min) (static_cast<::cuda::std::int64_t>(max_grid_dim_x),
                           static_cast<::cuda::std::int64_t>(::cuda::std::numeric_limits<int>::max()));
@@ -214,7 +239,7 @@ struct DispatchHierarchicalTransform
       const auto item_offset          = segment_offset * static_cast<::cuda::std::int64_t>(segment_size);
 
       launcher_factory(
-        static_cast<int>(num_current_segments), BlockThreads, static_cast<int>(requested_shared_bytes), stream)
+        static_cast<int>(num_current_segments), CandidateBlockThreads, static_cast<int>(requested_shared_bytes), stream)
         .doit(hierarchical_transform_kernel,
               d_in + item_offset,
               d_direct,
@@ -235,6 +260,119 @@ struct DispatchHierarchicalTransform
     }
 
     return cudaSuccess;
+  }
+
+  template <int CandidateBlockThreads, typename DeviceHierarchicalTransformKernelT>
+  CUB_RUNTIME_FUNCTION _CCCL_VISIBILITY_HIDDEN _CCCL_FORCEINLINE cudaError_t QueryBlockCandidate(
+    DeviceHierarchicalTransformKernelT hierarchical_transform_kernel,
+    ::cuda::std::size_t requested_shared_bytes,
+    block_candidate_t& candidate)
+  {
+    candidate = block_candidate_t{CandidateBlockThreads, 0, 0};
+
+    int max_dynamic_smem_size = 0;
+    if (const auto error =
+          CubDebug(launcher_factory.max_dynamic_smem_size_for(max_dynamic_smem_size, hierarchical_transform_kernel)))
+    {
+      return error;
+    }
+
+    if (requested_shared_bytes > static_cast<::cuda::std::size_t>(max_dynamic_smem_size))
+    {
+      return cudaErrorInvalidValue;
+    }
+
+    NV_IF_TARGET(NV_IS_HOST,
+                 (if (const auto error = CubDebug(launcher_factory.set_max_dynamic_smem_size_for(
+                        hierarchical_transform_kernel, static_cast<int>(requested_shared_bytes)))) { return error; }),
+                 (return cudaErrorNotSupported;))
+
+    int active_blocks = 0;
+    if (const auto error = CubDebug(cudaOccupancyMaxActiveBlocksPerMultiprocessor(
+          &active_blocks,
+          hierarchical_transform_kernel,
+          CandidateBlockThreads,
+          static_cast<::cuda::std::size_t>(requested_shared_bytes))))
+    {
+      return error;
+    }
+
+    if (active_blocks <= 0)
+    {
+      return cudaErrorInvalidValue;
+    }
+
+    candidate.active_blocks = active_blocks;
+    candidate.active_warps  = active_blocks * (CandidateBlockThreads / cub::detail::warp_threads);
+    return cudaSuccess;
+  }
+
+  template <typename DeviceHierarchicalTransformKernelT>
+  CUB_RUNTIME_FUNCTION _CCCL_VISIBILITY_HIDDEN _CCCL_FORCEINLINE cudaError_t SelectBlockPolicy(
+    DeviceHierarchicalTransformKernelT hierarchical_transform_kernel,
+    int current_device,
+    ::cuda::std::size_t requested_shared_bytes,
+    block_policy_t& policy)
+  {
+    NV_IF_TARGET(
+      NV_IS_HOST,
+      ({
+        static block_policy_cache_t cached_policies[transform_prolog_block_policy_cache_size]{};
+        static int next_cached_policy = 0;
+
+        for (const auto& cached_policy : cached_policies)
+        {
+          if (cached_policy.valid && cached_policy.device == current_device
+              && cached_policy.requested_shared_bytes == requested_shared_bytes)
+          {
+            policy = cached_policy.policy;
+            return cudaSuccess;
+          }
+        }
+
+        block_candidate_t selected_candidate{};
+        if (const auto error = QueryBlockCandidate<BlockThreads>(
+              hierarchical_transform_kernel, requested_shared_bytes, selected_candidate))
+        {
+          return error;
+        }
+
+        if constexpr (BlockThreads != transform_prolog_block_large_block_threads
+                      && hierarchical_transform_block_segment_op_v<transform_prolog_block_large_block_threads,
+                                                                   InputIteratorT,
+                                                                   SegmentOpT>)
+        {
+          if (segment_size >= transform_prolog_block_large_block_threads)
+          {
+            using large_kernel_source_t = DeviceHierarchicalTransformKernelSource<
+              transform_prolog_block_large_block_threads,
+              ItemsPerThread,
+              InputIteratorT,
+              DirectInputIteratorT,
+              OutputIteratorT,
+              SegmentOpT,
+              ElementTransformOpT>;
+
+            block_candidate_t large_candidate{};
+            const auto large_error = QueryBlockCandidate<transform_prolog_block_large_block_threads>(
+              large_kernel_source_t{}.HierarchicalTransformKernel(), requested_shared_bytes, large_candidate);
+
+            if (large_error == cudaSuccess && large_candidate.active_warps > selected_candidate.active_warps)
+            {
+              selected_candidate = large_candidate;
+            }
+          }
+        }
+
+        policy = block_policy_t{
+          selected_candidate.block_threads, selected_candidate.active_blocks, selected_candidate.active_warps};
+
+        cached_policies[next_cached_policy] =
+          block_policy_cache_t{true, current_device, requested_shared_bytes, policy};
+        next_cached_policy = (next_cached_policy + 1) % transform_prolog_block_policy_cache_size;
+        return cudaSuccess;
+      }),
+      (return cudaErrorNotSupported;))
   }
 
   template <int CandidateBlockThreads, typename DeviceHierarchicalTransformClusterKernelT>
@@ -408,6 +546,7 @@ struct DispatchHierarchicalTransform
           {
             using large_kernel_source_t = DeviceHierarchicalTransformKernelSource<
               transform_prolog_cluster_large_block_threads,
+              ItemsPerThread,
               InputIteratorT,
               DirectInputIteratorT,
               OutputIteratorT,
@@ -533,6 +672,7 @@ struct DispatchHierarchicalTransform
         {
           using large_kernel_source_t = DeviceHierarchicalTransformKernelSource<
             transform_prolog_cluster_large_block_threads,
+            ItemsPerThread,
             InputIteratorT,
             DirectInputIteratorT,
             OutputIteratorT,
@@ -600,22 +740,59 @@ struct DispatchHierarchicalTransform
       }
     }
 
-    return InvokeKernel(hierarchical_transform_kernel);
+    int current_device = 0;
+    if (const auto error = CubDebug(cudaGetDevice(&current_device)))
+    {
+      return error;
+    }
+
+    block_policy_t block_policy{};
+    if (const auto error =
+          SelectBlockPolicy(hierarchical_transform_kernel, current_device, requested_shared_bytes, block_policy))
+    {
+      return error;
+    }
+
+    if constexpr (BlockThreads != transform_prolog_block_large_block_threads
+                  && hierarchical_transform_block_segment_op_v<transform_prolog_block_large_block_threads,
+                                                               InputIteratorT,
+                                                               SegmentOpT>)
+    {
+      if (block_policy.block_threads == transform_prolog_block_large_block_threads)
+      {
+        using large_kernel_source_t = DeviceHierarchicalTransformKernelSource<
+          transform_prolog_block_large_block_threads,
+          ItemsPerThread,
+          InputIteratorT,
+          DirectInputIteratorT,
+          OutputIteratorT,
+          SegmentOpT,
+          ElementTransformOpT>;
+
+        return InvokeKernel<transform_prolog_block_large_block_threads>(
+          large_kernel_source_t{}.HierarchicalTransformKernel(), requested_shared_bytes, max_grid_dim_x);
+      }
+    }
+
+    return InvokeKernel<BlockThreads>(hierarchical_transform_kernel, requested_shared_bytes, max_grid_dim_x);
   }
 };
 
-template <int BlockThreads = 256,
+template <int BlockThreads   = 256,
+          int ItemsPerThread = 4,
           typename InputIteratorT,
           typename DirectInputIteratorT,
           typename OutputIteratorT,
           typename SegmentOpT,
           typename ElementTransformOpT,
-          typename KernelSource          = DeviceHierarchicalTransformKernelSource<BlockThreads,
-                                                                                   InputIteratorT,
-                                                                                   DirectInputIteratorT,
-                                                                                   OutputIteratorT,
-                                                                                   SegmentOpT,
-                                                                                   ElementTransformOpT>,
+          typename KernelSource = DeviceHierarchicalTransformKernelSource<
+            BlockThreads,
+            ItemsPerThread,
+            InputIteratorT,
+            DirectInputIteratorT,
+            OutputIteratorT,
+            SegmentOpT,
+            ElementTransformOpT>,
           typename KernelLauncherFactory = CUB_DETAIL_DEFAULT_KERNEL_LAUNCHER_FACTORY>
 CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE cudaError_t dispatch(
   InputIteratorT d_in,
@@ -635,14 +812,16 @@ CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE cudaError_t dispatch(
     return error;
   }
 
-  return DispatchHierarchicalTransform<BlockThreads,
-                                       InputIteratorT,
-                                       DirectInputIteratorT,
-                                       OutputIteratorT,
-                                       SegmentOpT,
-                                       ElementTransformOpT,
-                                       KernelSource,
-                                       KernelLauncherFactory>{
+  return DispatchHierarchicalTransform<
+           BlockThreads,
+           ItemsPerThread,
+           InputIteratorT,
+           DirectInputIteratorT,
+           OutputIteratorT,
+           SegmentOpT,
+           ElementTransformOpT,
+           KernelSource,
+           KernelLauncherFactory>{
     ::cuda::std::move(d_in),
     ::cuda::std::move(d_direct),
     ::cuda::std::move(d_out),
@@ -657,17 +836,20 @@ CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE cudaError_t dispatch(
     .Invoke();
 }
 
-template <int BlockThreads = 256,
+template <int BlockThreads   = 256,
+          int ItemsPerThread = 4,
           typename InputIteratorT,
           typename OutputIteratorT,
           typename SegmentOpT,
           typename ElementTransformOpT,
-          typename KernelSource          = DeviceHierarchicalTransformKernelSource<BlockThreads,
-                                                                                   InputIteratorT,
-                                                                                   transform_prolog_no_direct_input,
-                                                                                   OutputIteratorT,
-                                                                                   SegmentOpT,
-                                                                                   ElementTransformOpT>,
+          typename KernelSource = DeviceHierarchicalTransformKernelSource<
+            BlockThreads,
+            ItemsPerThread,
+            InputIteratorT,
+            transform_prolog_no_direct_input,
+            OutputIteratorT,
+            SegmentOpT,
+            ElementTransformOpT>,
           typename KernelLauncherFactory = CUB_DETAIL_DEFAULT_KERNEL_LAUNCHER_FACTORY>
 CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE cudaError_t dispatch(
   InputIteratorT d_in,
@@ -686,14 +868,16 @@ CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE cudaError_t dispatch(
     return error;
   }
 
-  return DispatchHierarchicalTransform<BlockThreads,
-                                       InputIteratorT,
-                                       transform_prolog_no_direct_input,
-                                       OutputIteratorT,
-                                       SegmentOpT,
-                                       ElementTransformOpT,
-                                       KernelSource,
-                                       KernelLauncherFactory>{
+  return DispatchHierarchicalTransform<
+           BlockThreads,
+           ItemsPerThread,
+           InputIteratorT,
+           transform_prolog_no_direct_input,
+           OutputIteratorT,
+           SegmentOpT,
+           ElementTransformOpT,
+           KernelSource,
+           KernelLauncherFactory>{
     ::cuda::std::move(d_in),
     transform_prolog_no_direct_input{},
     ::cuda::std::move(d_out),
