@@ -13,9 +13,7 @@
 #  pragma system_header
 #endif // no system header
 
-#include <cub/block/block_load.cuh>
 #include <cub/block/block_load_to_shared.cuh>
-#include <cub/block/block_store.cuh>
 #include <cub/device/dispatch/kernels/kernel_hierarchical_common.cuh>
 
 #include <cuda/__cmath/round_up.h>
@@ -106,39 +104,7 @@ _CCCL_DEVICE _CCCL_FORCEINLINE char* align_dynamic_shared_buffer(char* shared_bu
   }
 }
 
-template <typename DirectInputIteratorT, int ItemsPerThread, bool HasDirectInput>
-struct transform_prolog_direct_input_items;
-
-template <typename DirectInputIteratorT, int ItemsPerThread>
-struct transform_prolog_direct_input_items<DirectInputIteratorT, ItemsPerThread, false>
-{
-  template <int BlockThreads>
-  _CCCL_DEVICE _CCCL_FORCEINLINE void Load(DirectInputIteratorT, int, int, int)
-  {}
-};
-
-template <typename DirectInputIteratorT, int ItemsPerThread>
-struct transform_prolog_direct_input_items<DirectInputIteratorT, ItemsPerThread, true>
-{
-  using value_t = cub::detail::it_value_t<DirectInputIteratorT>;
-
-  value_t items[ItemsPerThread];
-
-  template <int BlockThreads>
-  _CCCL_DEVICE _CCCL_FORCEINLINE void
-  Load(DirectInputIteratorT d_direct, int direct_base, int valid_items, int thread_rank)
-  {
-    _CCCL_PRAGMA_UNROLL_FULL()
-    for (int item = 0; item < ItemsPerThread; ++item)
-    {
-      const int tile_local_index = thread_rank + item * BlockThreads;
-      items[item] = tile_local_index < valid_items ? d_direct[direct_base + tile_local_index] : value_t{};
-    }
-  }
-};
-
 template <int BlockThreads,
-          int ItemsPerThread,
           typename InputIteratorT,
           typename DirectInputIteratorT,
           typename OutputIteratorT,
@@ -167,18 +133,10 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
   using input_range_t     = transform_prolog_segment_range_t<BlockThreads, block_group_t, SegmentOpT, value_t>;
   using segment_result_t = ::cuda::std::decay_t<::cuda::std::invoke_result_t<SegmentOpT, block_group_t, input_range_t>>;
   using block_load_to_shared_t = BlockLoadToShared<BlockThreads>;
-  using block_store_t          = BlockStore<value_t, BlockThreads, ItemsPerThread, BLOCK_STORE_STRIPED>;
-  using direct_input_items_t =
-    transform_prolog_direct_input_items<DirectInputIteratorT,
-                                        ItemsPerThread,
-                                        transform_prolog_has_direct_input_v<DirectInputIteratorT>>;
 
-  // There is a subtle difference with the epilog case. There we did
-  // IPT because each thread was doing ipt items. Here each thread
-  // does do IPT items but it also loads other stuff so it can
-  // calculate the RMS. So here, BlockLoad does not need to be tied to
-  // IPT in the same way.
-  constexpr int tile_items = BlockThreads * ItemsPerThread;
+  // Unlike the epilog path, prolog's per-thread work is not just the final element transform: the segment op may
+  // also consume arbitrary staged items to calculate a segment-wide result such as RMS. Keep the transform/write phase
+  // as a runtime-strided pass over the segment instead of tying it to a static items-per-thread tile size.
 
   static_assert(hierarchical_transform_stageable_input_v<InputIteratorT>,
                 "TransformProlog requires input values to be trivially relocatable.");
@@ -220,10 +178,6 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
         segment_result, static_cast<direct_ref_t>(direct_value), static_cast<input_ref_t>(value));
     };
 
-  direct_input_items_t first_tile_direct_items{};
-  first_tile_direct_items.template Load<BlockThreads>(
-    d_direct, 0, (::cuda::std::min) (tile_items, segment_size), thread_rank);
-
   constexpr int shared_buffer_alignment = transform_prolog_load_to_shared_buffer_alignment<value_t>();
   char* aligned_shared_buffer     = align_dynamic_shared_buffer<shared_buffer_alignment>(shared_segment_buffer_base);
   const char* const segment_src   = reinterpret_cast<const char*>(segment_begin);
@@ -254,52 +208,23 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
     make_transform_prolog_segment_range<BlockThreads, block_group_t, SegmentOpT>(shared_segment, segment_size);
   const segment_result_t segment_result = segment_op(block_group, input_range);
 
-  for (int tile_base = 0; tile_base < segment_size; tile_base += tile_items)
+  for (int index_in_segment = thread_rank; index_in_segment < segment_size; index_in_segment += BlockThreads)
   {
-    const int valid_items = (::cuda::std::min) (tile_items, segment_size - tile_base);
-    direct_input_items_t direct_items{};
-    value_t output_items[ItemsPerThread];
-
     if constexpr (transform_prolog_has_direct_input_v<DirectInputIteratorT>)
     {
-      if (tile_base == 0)
-      {
-        direct_items = first_tile_direct_items;
-      }
-      else
-      {
-        direct_items.template Load<BlockThreads>(d_direct, tile_base, valid_items, thread_rank);
-      }
+      const auto direct_value = d_direct[index_in_segment];
+      d_out[segment_offset + index_in_segment] =
+        apply_element_transform_with_direct(segment_result, direct_value, shared_segment[index_in_segment]);
     }
-
-    _CCCL_PRAGMA_UNROLL_FULL()
-    for (int item = 0; item < ItemsPerThread; ++item)
+    else
     {
-      const int tile_local_index = thread_rank + item * BlockThreads;
-      output_items[item]         = value_t{};
-
-      if (tile_local_index < valid_items)
-      {
-        const int index_in_segment = tile_base + tile_local_index;
-        if constexpr (transform_prolog_has_direct_input_v<DirectInputIteratorT>)
-        {
-          output_items[item] = apply_element_transform_with_direct(
-            segment_result, direct_items.items[item], shared_segment[index_in_segment]);
-        }
-        else
-        {
-          output_items[item] =
-            apply_element_transform(segment_result, index_in_segment, shared_segment[index_in_segment]);
-        }
-      }
+      d_out[segment_offset + index_in_segment] =
+        apply_element_transform(segment_result, index_in_segment, shared_segment[index_in_segment]);
     }
-
-    block_store_t().Store(d_out + segment_offset + tile_base, output_items, valid_items);
   }
 }
 
 template <int BlockThreads,
-          int ItemsPerThread,
           typename InputIteratorT,
           typename DirectInputIteratorT,
           typename OutputIteratorT,
@@ -331,13 +256,6 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
   using segment_result_t =
     ::cuda::std::decay_t<::cuda::std::invoke_result_t<SegmentOpT, cluster_group_t, input_range_t>>;
   using block_load_to_shared_t = BlockLoadToShared<BlockThreads>;
-  using block_store_t          = BlockStore<value_t, BlockThreads, ItemsPerThread, BLOCK_STORE_STRIPED>;
-  using direct_input_items_t =
-    transform_prolog_direct_input_items<DirectInputIteratorT,
-                                        ItemsPerThread,
-                                        transform_prolog_has_direct_input_v<DirectInputIteratorT>>;
-
-  constexpr int tile_items = BlockThreads * ItemsPerThread;
 
   static_assert(hierarchical_transform_stageable_input_v<InputIteratorT>,
                 "TransformProlog requires input values to be trivially relocatable.");
@@ -390,10 +308,6 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
         segment_result, static_cast<direct_ref_t>(direct_value), static_cast<input_ref_t>(value));
     };
 
-  direct_input_items_t first_tile_direct_items{};
-  first_tile_direct_items.template Load<BlockThreads>(
-    d_direct, chunk_begin, (::cuda::std::min) (tile_items, local_items), thread_rank);
-
   constexpr int shared_buffer_alignment = transform_prolog_load_to_shared_buffer_alignment<value_t>();
   char* aligned_shared_buffer   = align_dynamic_shared_buffer<shared_buffer_alignment>(shared_segment_buffer_base);
   const char* const chunk_src   = reinterpret_cast<const char*>(segment_begin + chunk_begin);
@@ -425,47 +339,21 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
     shared_segment, local_items, chunk_begin);
   const segment_result_t segment_result = segment_op(cluster_group, input_range);
 
-  for (int tile_base = 0; tile_base < local_items; tile_base += tile_items)
+  for (int local_index = thread_rank; local_index < local_items; local_index += BlockThreads)
   {
-    const int valid_items = (::cuda::std::min) (tile_items, local_items - tile_base);
-    direct_input_items_t direct_items{};
-    value_t output_items[ItemsPerThread];
+    const int index_in_segment = chunk_begin + local_index;
 
     if constexpr (transform_prolog_has_direct_input_v<DirectInputIteratorT>)
     {
-      if (tile_base == 0)
-      {
-        direct_items = first_tile_direct_items;
-      }
-      else
-      {
-        direct_items.template Load<BlockThreads>(d_direct, chunk_begin + tile_base, valid_items, thread_rank);
-      }
+      const auto direct_value = d_direct[index_in_segment];
+      d_out[segment_offset + index_in_segment] =
+        apply_element_transform_with_direct(segment_result, direct_value, shared_segment[local_index]);
     }
-
-    _CCCL_PRAGMA_UNROLL_FULL()
-    for (int item = 0; item < ItemsPerThread; ++item)
+    else
     {
-      const int tile_local_index = thread_rank + item * BlockThreads;
-      output_items[item]         = value_t{};
-
-      if (tile_local_index < valid_items)
-      {
-        const int local_index      = tile_base + tile_local_index;
-        const int index_in_segment = chunk_begin + local_index;
-        if constexpr (transform_prolog_has_direct_input_v<DirectInputIteratorT>)
-        {
-          output_items[item] =
-            apply_element_transform_with_direct(segment_result, direct_items.items[item], shared_segment[local_index]);
-        }
-        else
-        {
-          output_items[item] = apply_element_transform(segment_result, index_in_segment, shared_segment[local_index]);
-        }
-      }
+      d_out[segment_offset + index_in_segment] =
+        apply_element_transform(segment_result, index_in_segment, shared_segment[local_index]);
     }
-
-    block_store_t().Store(d_out + segment_offset + chunk_begin + tile_base, output_items, valid_items);
   }
 }
 } // namespace detail::hierarchical
