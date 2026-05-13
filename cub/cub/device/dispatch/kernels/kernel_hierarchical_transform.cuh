@@ -15,6 +15,7 @@
 
 #include <cub/block/block_load_to_shared.cuh>
 #include <cub/device/dispatch/kernels/kernel_hierarchical_common.cuh>
+#include <cub/iterator/cache_modified_input_iterator.cuh>
 
 #include <cuda/__cmath/round_up.h>
 #include <cuda/__memory/align_down.h>
@@ -110,21 +111,39 @@ _CCCL_DEVICE _CCCL_FORCEINLINE void transform_prolog_prefetch_global_l2(const T*
   asm volatile("prefetch.global.L2 [%0];" : : "l"(__cvta_generic_to_global(addr)) : "memory");
 }
 
+template <typename DirectInputIteratorT>
+_CCCL_DEVICE _CCCL_FORCEINLINE auto transform_prolog_direct_prefetch_pointer(DirectInputIteratorT d_direct)
+{
+  if constexpr (::cuda::std::is_pointer_v<DirectInputIteratorT>)
+  {
+    return d_direct;
+  }
+  else if constexpr (cub::detail::is_CacheModifiedInputIterator<DirectInputIteratorT>)
+  {
+    return d_direct.ptr;
+  }
+  else
+  {
+    return nullptr;
+  }
+}
+
 template <int BlockThreads, typename DirectInputIteratorT>
 _CCCL_DEVICE _CCCL_FORCEINLINE void
 transform_prolog_prefetch_direct_tile(DirectInputIteratorT d_direct, int direct_base, int valid_items, int thread_rank)
 {
-  if constexpr (::cuda::std::is_pointer_v<DirectInputIteratorT>)
+  auto* prefetch_ptr = transform_prolog_direct_prefetch_pointer(d_direct);
+  if constexpr (!::cuda::std::is_same_v<decltype(prefetch_ptr), ::cuda::std::nullptr_t>)
   {
     if (valid_items <= 0)
     {
       return;
     }
 
-    using direct_value_t                = ::cuda::std::remove_pointer_t<DirectInputIteratorT>;
+    using direct_value_t                = ::cuda::std::remove_pointer_t<decltype(prefetch_ptr)>;
     constexpr int prefetch_stride_bytes = 128;
     const int tile_bytes                = valid_items * static_cast<int>(sizeof(direct_value_t));
-    const char* const tile_begin        = reinterpret_cast<const char*>(d_direct + direct_base);
+    const char* const tile_begin        = reinterpret_cast<const char*>(prefetch_ptr + direct_base);
 
     _CCCL_PRAGMA_NOUNROLL()
     for (int offset = thread_rank * prefetch_stride_bytes; offset < tile_bytes;
