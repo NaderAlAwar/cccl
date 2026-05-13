@@ -18,6 +18,27 @@
 
 constexpr float rms_norm_eps = 1e-5f;
 
+inline int rmsnorm_row_alignment_bytes(const nvbench::state& state)
+{
+  const auto& device = state.get_device();
+  if (!device.has_value())
+  {
+    return 16;
+  }
+
+  const int sm_version = device->get_sm_version();
+  return (sm_version >= 900 && sm_version < 1000) ? 128 : 16;
+}
+
+template <typename T>
+int align_hidden_size(const nvbench::state& state, int hidden_size)
+{
+  const int alignment_bytes       = rmsnorm_row_alignment_bytes(state);
+  const std::size_t row_bytes     = static_cast<std::size_t>(hidden_size) * sizeof(T);
+  const std::size_t aligned_bytes = ((row_bytes + alignment_bytes - 1) / alignment_bytes) * alignment_bytes;
+  return static_cast<int>(aligned_bytes / sizeof(T));
+}
+
 template <typename T>
 struct convert_op
 {
@@ -53,9 +74,10 @@ template <typename T>
 void hierarchical_rmsnorm(nvbench::state& state, nvbench::type_list<T>)
 try
 {
-  const int batch_size  = static_cast<int>(state.get_int64("BatchSize"));
-  const int hidden_size = static_cast<int>(state.get_int64("HiddenSize"));
-  const bool zero_data  = state.get_int64("ZeroData") != 0;
+  const int batch_size            = static_cast<int>(state.get_int64("BatchSize"));
+  const int requested_hidden_size = static_cast<int>(state.get_int64("HiddenSize"));
+  const int hidden_size           = align_hidden_size<T>(state, requested_hidden_size);
+  const bool zero_data            = state.get_int64("ZeroData") != 0;
 
   const auto elements = static_cast<std::size_t>(batch_size) * static_cast<std::size_t>(hidden_size);
   if (rmsnorm_check::should_skip_large_tensor_on_affected_arch(state, elements))
