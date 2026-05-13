@@ -15,7 +15,6 @@
 
 #include <cub/block/block_load_to_shared.cuh>
 #include <cub/device/dispatch/kernels/kernel_hierarchical_common.cuh>
-#include <cub/iterator/cache_modified_input_iterator.cuh>
 
 #include <cuda/__cmath/round_up.h>
 #include <cuda/__memory/align_down.h>
@@ -111,45 +110,32 @@ _CCCL_DEVICE _CCCL_FORCEINLINE void transform_prolog_prefetch_global_l2(const T*
   asm volatile("prefetch.global.L2 [%0];" : : "l"(__cvta_generic_to_global(addr)) : "memory");
 }
 
-template <typename DirectInputIteratorT>
-_CCCL_DEVICE _CCCL_FORCEINLINE auto transform_prolog_direct_prefetch_pointer(DirectInputIteratorT d_direct)
+template <int BlockThreads, typename DirectInputIteratorT>
+_CCCL_DEVICE _CCCL_FORCEINLINE void
+transform_prolog_prefetch_direct_grid(DirectInputIteratorT d_direct, int direct_items, int thread_rank)
 {
   if constexpr (::cuda::std::is_pointer_v<DirectInputIteratorT>)
   {
-    return d_direct;
-  }
-  else if constexpr (cub::detail::is_CacheModifiedInputIterator<DirectInputIteratorT>)
-  {
-    return d_direct.ptr;
-  }
-  else
-  {
-    return nullptr;
-  }
-}
-
-template <int BlockThreads, typename DirectInputIteratorT>
-_CCCL_DEVICE _CCCL_FORCEINLINE void
-transform_prolog_prefetch_direct_tile(DirectInputIteratorT d_direct, int direct_base, int valid_items, int thread_rank)
-{
-  auto* prefetch_ptr = transform_prolog_direct_prefetch_pointer(d_direct);
-  if constexpr (!::cuda::std::is_same_v<decltype(prefetch_ptr), ::cuda::std::nullptr_t>)
-  {
-    if (valid_items <= 0)
+    if (direct_items <= 0)
     {
       return;
     }
 
-    using direct_value_t                = ::cuda::std::remove_pointer_t<decltype(prefetch_ptr)>;
-    constexpr int prefetch_stride_bytes = 128;
-    const int tile_bytes                = valid_items * static_cast<int>(sizeof(direct_value_t));
-    const char* const tile_begin        = reinterpret_cast<const char*>(prefetch_ptr + direct_base);
+    using direct_value_t                                = ::cuda::std::remove_pointer_t<DirectInputIteratorT>;
+    constexpr ::cuda::std::size_t prefetch_stride_bytes = 128;
+    const auto direct_bytes        = static_cast<::cuda::std::size_t>(direct_items) * sizeof(direct_value_t);
+    const char* const direct_begin = reinterpret_cast<const char*>(d_direct);
+    const auto linear_thread =
+      static_cast<::cuda::std::size_t>(blockIdx.x) * static_cast<::cuda::std::size_t>(BlockThreads)
+      + static_cast<::cuda::std::size_t>(thread_rank);
+    const auto grid_threads =
+      static_cast<::cuda::std::size_t>(gridDim.x) * static_cast<::cuda::std::size_t>(BlockThreads);
 
     _CCCL_PRAGMA_NOUNROLL()
-    for (int offset = thread_rank * prefetch_stride_bytes; offset < tile_bytes;
-         offset += BlockThreads * prefetch_stride_bytes)
+    for (auto offset = linear_thread * prefetch_stride_bytes; offset < direct_bytes;
+         offset += grid_threads * prefetch_stride_bytes)
     {
-      transform_prolog_prefetch_global_l2(tile_begin + offset);
+      transform_prolog_prefetch_global_l2(direct_begin + offset);
     }
   }
 }
@@ -234,8 +220,7 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
 
   if constexpr (transform_prolog_has_direct_input_v<DirectInputIteratorT>)
   {
-    transform_prolog_prefetch_direct_tile<BlockThreads>(
-      d_direct, 0, (::cuda::std::min) (tile_items, segment_size), thread_rank);
+    transform_prolog_prefetch_direct_grid<BlockThreads>(d_direct, segment_size, thread_rank);
   }
 
   constexpr int shared_buffer_alignment = transform_prolog_load_to_shared_buffer_alignment<value_t>();
@@ -271,12 +256,6 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
   for (int tile_base = 0; tile_base < segment_size; tile_base += tile_items)
   {
     const int valid_items = (::cuda::std::min) (tile_items, segment_size - tile_base);
-    if constexpr (transform_prolog_has_direct_input_v<DirectInputIteratorT>)
-    {
-      const int next_tile_base = tile_base + tile_items;
-      transform_prolog_prefetch_direct_tile<BlockThreads>(
-        d_direct, next_tile_base, (::cuda::std::min) (tile_items, segment_size - next_tile_base), thread_rank);
-    }
 
     for (int item = 0; item < items_per_thread; ++item)
     {
@@ -390,8 +369,7 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
 
   if constexpr (transform_prolog_has_direct_input_v<DirectInputIteratorT>)
   {
-    transform_prolog_prefetch_direct_tile<BlockThreads>(
-      d_direct, chunk_begin, (::cuda::std::min) (tile_items, local_items), thread_rank);
+    transform_prolog_prefetch_direct_grid<BlockThreads>(d_direct, segment_size, thread_rank);
   }
 
   constexpr int shared_buffer_alignment = transform_prolog_load_to_shared_buffer_alignment<value_t>();
@@ -428,15 +406,6 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
   for (int tile_base = 0; tile_base < local_items; tile_base += tile_items)
   {
     const int valid_items = (::cuda::std::min) (tile_items, local_items - tile_base);
-    if constexpr (transform_prolog_has_direct_input_v<DirectInputIteratorT>)
-    {
-      const int next_tile_base = tile_base + tile_items;
-      transform_prolog_prefetch_direct_tile<BlockThreads>(
-        d_direct,
-        chunk_begin + next_tile_base,
-        (::cuda::std::min) (tile_items, local_items - next_tile_base),
-        thread_rank);
-    }
 
     for (int item = 0; item < items_per_thread; ++item)
     {
