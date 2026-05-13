@@ -32,6 +32,7 @@ namespace detail::hierarchical
 {
 constexpr int transform_prolog_cluster_smem_threshold      = 64 * 1024;
 constexpr int transform_prolog_block_large_block_threads   = 512;
+constexpr int transform_prolog_default_items_per_thread    = 4;
 constexpr int transform_prolog_max_portable_cluster_size   = 8;
 constexpr int transform_prolog_cluster_large_block_threads = 512;
 constexpr int transform_prolog_block_policy_cache_size     = 8;
@@ -54,7 +55,6 @@ inline constexpr bool hierarchical_transform_cluster_segment_op_v = transform_pr
   cub::detail::it_value_t<InputIteratorT>>::valid;
 
 template <int BlockThreads,
-          int ItemsPerThread,
           typename InputIteratorT,
           typename DirectInputIteratorT,
           typename OutputIteratorT,
@@ -65,7 +65,6 @@ struct DeviceHierarchicalTransformKernelSource
   CUB_DEFINE_KERNEL_GETTER(
     HierarchicalTransformKernel,
     DeviceHierarchicalTransformKernel<BlockThreads,
-                                      ItemsPerThread,
                                       InputIteratorT,
                                       DirectInputIteratorT,
                                       OutputIteratorT,
@@ -73,36 +72,30 @@ struct DeviceHierarchicalTransformKernelSource
                                       ElementTransformOpT>)
   CUB_DEFINE_KERNEL_GETTER(
     HierarchicalTransformClusterKernel,
-    DeviceHierarchicalTransformClusterKernel<
-      BlockThreads,
-      ItemsPerThread,
-      InputIteratorT,
-      DirectInputIteratorT,
-      OutputIteratorT,
-      SegmentOpT,
-      ElementTransformOpT>)
+    DeviceHierarchicalTransformClusterKernel<BlockThreads,
+                                             InputIteratorT,
+                                             DirectInputIteratorT,
+                                             OutputIteratorT,
+                                             SegmentOpT,
+                                             ElementTransformOpT>)
 };
 
 template <int BlockThreads,
-          int ItemsPerThread,
           typename InputIteratorT,
           typename DirectInputIteratorT,
           typename OutputIteratorT,
           typename SegmentOpT,
           typename ElementTransformOpT,
-          typename KernelSource = DeviceHierarchicalTransformKernelSource<
-            BlockThreads,
-            ItemsPerThread,
-            InputIteratorT,
-            DirectInputIteratorT,
-            OutputIteratorT,
-            SegmentOpT,
-            ElementTransformOpT>,
+          typename KernelSource          = DeviceHierarchicalTransformKernelSource<BlockThreads,
+                                                                                   InputIteratorT,
+                                                                                   DirectInputIteratorT,
+                                                                                   OutputIteratorT,
+                                                                                   SegmentOpT,
+                                                                                   ElementTransformOpT>,
           typename KernelLauncherFactory = CUB_DETAIL_DEFAULT_KERNEL_LAUNCHER_FACTORY>
 struct DispatchHierarchicalTransform
 {
   static_assert(BlockThreads > 0, "BlockThreads must be positive.");
-  static_assert(ItemsPerThread > 0, "ItemsPerThread must be positive.");
   static_assert(hierarchical_transform_stageable_input_v<InputIteratorT>,
                 "TransformProlog requires input values to be trivially relocatable.");
 
@@ -112,6 +105,7 @@ struct DispatchHierarchicalTransform
 
   ::cuda::std::int64_t num_segments;
   int segment_size;
+  int items_per_thread;
 
   SegmentOpT segment_op;
   ElementTransformOpT element_transform_op;
@@ -174,6 +168,7 @@ struct DispatchHierarchicalTransform
     OutputIteratorT d_out,
     ::cuda::std::int64_t num_segments,
     int segment_size,
+    int items_per_thread,
     SegmentOpT segment_op,
     ElementTransformOpT element_transform_op,
     cudaStream_t stream,
@@ -185,6 +180,7 @@ struct DispatchHierarchicalTransform
       , d_out(::cuda::std::move(d_out))
       , num_segments(num_segments)
       , segment_size(segment_size)
+      , items_per_thread(items_per_thread)
       , segment_op(::cuda::std::move(segment_op))
       , element_transform_op(::cuda::std::move(element_transform_op))
       , stream(stream)
@@ -245,7 +241,7 @@ struct DispatchHierarchicalTransform
               d_direct,
               d_out + item_offset,
               segment_size,
-              ItemsPerThread,
+              items_per_thread,
               segment_op,
               element_transform_op);
 
@@ -347,7 +343,6 @@ struct DispatchHierarchicalTransform
           {
             using large_kernel_source_t = DeviceHierarchicalTransformKernelSource<
               transform_prolog_block_large_block_threads,
-              ItemsPerThread,
               InputIteratorT,
               DirectInputIteratorT,
               OutputIteratorT,
@@ -426,7 +421,7 @@ struct DispatchHierarchicalTransform
             d_direct,
             d_out + item_offset,
             segment_size,
-            ItemsPerThread,
+            items_per_thread,
             cluster_size,
             chunk_items,
             segment_op,
@@ -548,7 +543,6 @@ struct DispatchHierarchicalTransform
           {
             using large_kernel_source_t = DeviceHierarchicalTransformKernelSource<
               transform_prolog_cluster_large_block_threads,
-              ItemsPerThread,
               InputIteratorT,
               DirectInputIteratorT,
               OutputIteratorT,
@@ -674,7 +668,6 @@ struct DispatchHierarchicalTransform
         {
           using large_kernel_source_t = DeviceHierarchicalTransformKernelSource<
             transform_prolog_cluster_large_block_threads,
-            ItemsPerThread,
             InputIteratorT,
             DirectInputIteratorT,
             OutputIteratorT,
@@ -705,6 +698,11 @@ struct DispatchHierarchicalTransform
     }
 
     if (num_segments < 0 || segment_size <= 0)
+    {
+      return cudaErrorInvalidValue;
+    }
+
+    if (items_per_thread <= 0)
     {
       return cudaErrorInvalidValue;
     }
@@ -764,7 +762,6 @@ struct DispatchHierarchicalTransform
       {
         using large_kernel_source_t = DeviceHierarchicalTransformKernelSource<
           transform_prolog_block_large_block_threads,
-          ItemsPerThread,
           InputIteratorT,
           DirectInputIteratorT,
           OutputIteratorT,
@@ -780,21 +777,18 @@ struct DispatchHierarchicalTransform
   }
 };
 
-template <int BlockThreads   = 256,
-          int ItemsPerThread = 4,
+template <int BlockThreads = 256,
           typename InputIteratorT,
           typename DirectInputIteratorT,
           typename OutputIteratorT,
           typename SegmentOpT,
           typename ElementTransformOpT,
-          typename KernelSource = DeviceHierarchicalTransformKernelSource<
-            BlockThreads,
-            ItemsPerThread,
-            InputIteratorT,
-            DirectInputIteratorT,
-            OutputIteratorT,
-            SegmentOpT,
-            ElementTransformOpT>,
+          typename KernelSource          = DeviceHierarchicalTransformKernelSource<BlockThreads,
+                                                                                   InputIteratorT,
+                                                                                   DirectInputIteratorT,
+                                                                                   OutputIteratorT,
+                                                                                   SegmentOpT,
+                                                                                   ElementTransformOpT>,
           typename KernelLauncherFactory = CUB_DETAIL_DEFAULT_KERNEL_LAUNCHER_FACTORY>
 CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE cudaError_t dispatch(
   InputIteratorT d_in,
@@ -814,21 +808,20 @@ CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE cudaError_t dispatch(
     return error;
   }
 
-  return DispatchHierarchicalTransform<
-           BlockThreads,
-           ItemsPerThread,
-           InputIteratorT,
-           DirectInputIteratorT,
-           OutputIteratorT,
-           SegmentOpT,
-           ElementTransformOpT,
-           KernelSource,
-           KernelLauncherFactory>{
+  return DispatchHierarchicalTransform<BlockThreads,
+                                       InputIteratorT,
+                                       DirectInputIteratorT,
+                                       OutputIteratorT,
+                                       SegmentOpT,
+                                       ElementTransformOpT,
+                                       KernelSource,
+                                       KernelLauncherFactory>{
     ::cuda::std::move(d_in),
     ::cuda::std::move(d_direct),
     ::cuda::std::move(d_out),
     num_segments,
     segment_size,
+    transform_prolog_default_items_per_thread,
     ::cuda::std::move(segment_op),
     ::cuda::std::move(element_transform_op),
     stream,
@@ -838,20 +831,17 @@ CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE cudaError_t dispatch(
     .Invoke();
 }
 
-template <int BlockThreads   = 256,
-          int ItemsPerThread = 4,
+template <int BlockThreads = 256,
           typename InputIteratorT,
           typename OutputIteratorT,
           typename SegmentOpT,
           typename ElementTransformOpT,
-          typename KernelSource = DeviceHierarchicalTransformKernelSource<
-            BlockThreads,
-            ItemsPerThread,
-            InputIteratorT,
-            transform_prolog_no_direct_input,
-            OutputIteratorT,
-            SegmentOpT,
-            ElementTransformOpT>,
+          typename KernelSource          = DeviceHierarchicalTransformKernelSource<BlockThreads,
+                                                                                   InputIteratorT,
+                                                                                   transform_prolog_no_direct_input,
+                                                                                   OutputIteratorT,
+                                                                                   SegmentOpT,
+                                                                                   ElementTransformOpT>,
           typename KernelLauncherFactory = CUB_DETAIL_DEFAULT_KERNEL_LAUNCHER_FACTORY>
 CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE cudaError_t dispatch(
   InputIteratorT d_in,
@@ -870,21 +860,20 @@ CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE cudaError_t dispatch(
     return error;
   }
 
-  return DispatchHierarchicalTransform<
-           BlockThreads,
-           ItemsPerThread,
-           InputIteratorT,
-           transform_prolog_no_direct_input,
-           OutputIteratorT,
-           SegmentOpT,
-           ElementTransformOpT,
-           KernelSource,
-           KernelLauncherFactory>{
+  return DispatchHierarchicalTransform<BlockThreads,
+                                       InputIteratorT,
+                                       transform_prolog_no_direct_input,
+                                       OutputIteratorT,
+                                       SegmentOpT,
+                                       ElementTransformOpT,
+                                       KernelSource,
+                                       KernelLauncherFactory>{
     ::cuda::std::move(d_in),
     transform_prolog_no_direct_input{},
     ::cuda::std::move(d_out),
     num_segments,
     segment_size,
+    transform_prolog_default_items_per_thread,
     ::cuda::std::move(segment_op),
     ::cuda::std::move(element_transform_op),
     stream,
