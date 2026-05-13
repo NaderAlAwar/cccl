@@ -104,6 +104,37 @@ _CCCL_DEVICE _CCCL_FORCEINLINE char* align_dynamic_shared_buffer(char* shared_bu
   }
 }
 
+template <typename T>
+_CCCL_DEVICE _CCCL_FORCEINLINE void transform_prolog_prefetch_global_l2(const T* addr)
+{
+  asm volatile("prefetch.global.L2 [%0];" : : "l"(__cvta_generic_to_global(addr)) : "memory");
+}
+
+template <int BlockThreads, typename DirectInputIteratorT>
+_CCCL_DEVICE _CCCL_FORCEINLINE void
+transform_prolog_prefetch_direct_tile(DirectInputIteratorT d_direct, int direct_base, int valid_items, int thread_rank)
+{
+  if constexpr (::cuda::std::is_pointer_v<DirectInputIteratorT>)
+  {
+    if (valid_items <= 0)
+    {
+      return;
+    }
+
+    using direct_value_t                = ::cuda::std::remove_pointer_t<DirectInputIteratorT>;
+    constexpr int prefetch_stride_bytes = 128;
+    const int tile_bytes                = valid_items * static_cast<int>(sizeof(direct_value_t));
+    const char* const tile_begin        = reinterpret_cast<const char*>(d_direct + direct_base);
+
+    _CCCL_PRAGMA_NOUNROLL()
+    for (int offset = thread_rank * prefetch_stride_bytes; offset < tile_bytes;
+         offset += BlockThreads * prefetch_stride_bytes)
+    {
+      transform_prolog_prefetch_global_l2(tile_begin + offset);
+    }
+  }
+}
+
 template <int BlockThreads,
           typename InputIteratorT,
           typename DirectInputIteratorT,
@@ -182,6 +213,12 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
         segment_result, static_cast<direct_ref_t>(direct_value), static_cast<input_ref_t>(value));
     };
 
+  if constexpr (transform_prolog_has_direct_input_v<DirectInputIteratorT>)
+  {
+    transform_prolog_prefetch_direct_tile<BlockThreads>(
+      d_direct, 0, (::cuda::std::min) (tile_items, segment_size), thread_rank);
+  }
+
   constexpr int shared_buffer_alignment = transform_prolog_load_to_shared_buffer_alignment<value_t>();
   char* aligned_shared_buffer     = align_dynamic_shared_buffer<shared_buffer_alignment>(shared_segment_buffer_base);
   const char* const segment_src   = reinterpret_cast<const char*>(segment_begin);
@@ -215,6 +252,12 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
   for (int tile_base = 0; tile_base < segment_size; tile_base += tile_items)
   {
     const int valid_items = (::cuda::std::min) (tile_items, segment_size - tile_base);
+    if constexpr (transform_prolog_has_direct_input_v<DirectInputIteratorT>)
+    {
+      const int next_tile_base = tile_base + tile_items;
+      transform_prolog_prefetch_direct_tile<BlockThreads>(
+        d_direct, next_tile_base, (::cuda::std::min) (tile_items, segment_size - next_tile_base), thread_rank);
+    }
 
     for (int item = 0; item < items_per_thread; ++item)
     {
@@ -326,6 +369,12 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
         segment_result, static_cast<direct_ref_t>(direct_value), static_cast<input_ref_t>(value));
     };
 
+  if constexpr (transform_prolog_has_direct_input_v<DirectInputIteratorT>)
+  {
+    transform_prolog_prefetch_direct_tile<BlockThreads>(
+      d_direct, chunk_begin, (::cuda::std::min) (tile_items, local_items), thread_rank);
+  }
+
   constexpr int shared_buffer_alignment = transform_prolog_load_to_shared_buffer_alignment<value_t>();
   char* aligned_shared_buffer   = align_dynamic_shared_buffer<shared_buffer_alignment>(shared_segment_buffer_base);
   const char* const chunk_src   = reinterpret_cast<const char*>(segment_begin + chunk_begin);
@@ -360,6 +409,15 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
   for (int tile_base = 0; tile_base < local_items; tile_base += tile_items)
   {
     const int valid_items = (::cuda::std::min) (tile_items, local_items - tile_base);
+    if constexpr (transform_prolog_has_direct_input_v<DirectInputIteratorT>)
+    {
+      const int next_tile_base = tile_base + tile_items;
+      transform_prolog_prefetch_direct_tile<BlockThreads>(
+        d_direct,
+        chunk_begin + next_tile_base,
+        (::cuda::std::min) (tile_items, local_items - next_tile_base),
+        thread_rank);
+    }
 
     for (int item = 0; item < items_per_thread; ++item)
     {

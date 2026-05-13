@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include <cub/device/device_hierarchical_transform.cuh>
-#include <cub/iterator/cache_modified_input_iterator.cuh>
 
 #include <thrust/transform.h>
 
@@ -71,7 +70,6 @@ try
   auto* d_input  = thrust::raw_pointer_cast(input.data());
   auto* d_output = thrust::raw_pointer_cast(output.data());
   auto* d_weight = thrust::raw_pointer_cast(weight.data());
-  cub::CacheModifiedInputIterator<cub::LOAD_LDG, T> d_weight_ldg(d_weight);
 
   state.add_element_count(elements);
   state.add_global_memory_reads<T>(elements, "Input");
@@ -99,7 +97,7 @@ try
   };
 
   const cudaError_t warmup_error = cub::DeviceSegmentedTransform::TransformProlog(
-    d_input, d_weight_ldg, d_output, batch_size, hidden_size, segment_op, element_transform_op);
+    d_input, d_weight, d_output, batch_size, hidden_size, segment_op, element_transform_op);
   if (warmup_error == cudaErrorInvalidValue)
   {
     state.skip("Skipping: segment does not fit in dynamic shared memory.");
@@ -110,7 +108,7 @@ try
   state.exec(nvbench::exec_tag::no_batch, [&](nvbench::launch& launch) {
     cub::DeviceSegmentedTransform::TransformProlog(
       d_input,
-      d_weight_ldg,
+      d_weight,
       d_output,
       batch_size,
       hidden_size,
