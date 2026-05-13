@@ -15,6 +15,9 @@
 
 #include <cub/block/block_load_to_shared.cuh>
 #include <cub/device/dispatch/kernels/kernel_hierarchical_common.cuh>
+#include <cub/iterator/cache_modified_input_iterator.cuh>
+
+#include <thrust/system/cuda/detail/core/util.h>
 
 #include <cuda/std/cstddef>
 #include <cuda/std/span>
@@ -31,6 +34,145 @@ struct transform_prolog_no_direct_input
 template <typename DirectInputIteratorT>
 inline constexpr bool transform_prolog_has_direct_input_v =
   !::cuda::std::is_same_v<::cuda::std::remove_cv_t<DirectInputIteratorT>, transform_prolog_no_direct_input>;
+
+template <typename DirectInputIteratorT>
+struct transform_prolog_direct_vector_load
+{
+  static constexpr bool supported = false;
+};
+
+using transform_prolog_f32_vector_storage_t = int4;
+static_assert(sizeof(transform_prolog_f32_vector_storage_t) == 4 * sizeof(float));
+static_assert(alignof(transform_prolog_f32_vector_storage_t) == 4 * sizeof(float));
+
+template <typename T>
+struct transform_prolog_direct_vector_load<T*>
+{
+  using value_t = ::cuda::std::remove_cv_t<T>;
+
+  static constexpr bool supported = ::cuda::std::is_same_v<value_t, float>;
+
+  [[nodiscard]] _CCCL_DEVICE _CCCL_FORCEINLINE static transform_prolog_f32_vector_storage_t Load(T* ptr, int index)
+  {
+    return reinterpret_cast<const transform_prolog_f32_vector_storage_t*>(ptr + index)[0];
+  }
+};
+
+template <CacheLoadModifier Modifier, typename OffsetT>
+struct transform_prolog_direct_vector_load<CacheModifiedInputIterator<Modifier, float, OffsetT>>
+{
+  static constexpr bool supported = true;
+
+  [[nodiscard]] _CCCL_DEVICE _CCCL_FORCEINLINE static transform_prolog_f32_vector_storage_t
+  Load(CacheModifiedInputIterator<Modifier, float, OffsetT> input, int index)
+  {
+    CacheModifiedInputIterator<Modifier, transform_prolog_f32_vector_storage_t, OffsetT> vector_input(
+      reinterpret_cast<transform_prolog_f32_vector_storage_t*>(input.ptr));
+    return vector_input[index / 4];
+  }
+};
+
+template <typename OutputIteratorT>
+inline constexpr bool transform_prolog_vector_output_v =
+  ::cuda::std::is_pointer_v<OutputIteratorT>
+  && ::cuda::std::is_same_v<::cuda::std::remove_cv_t<::cuda::std::remove_pointer_t<OutputIteratorT>>, float>;
+
+template <typename OutputIteratorT>
+_CCCL_DEVICE _CCCL_FORCEINLINE void transform_prolog_store_vector(
+  OutputIteratorT output, ::cuda::std::size_t index, transform_prolog_f32_vector_storage_t value)
+{
+  reinterpret_cast<transform_prolog_f32_vector_storage_t*>(output + index)[0] = value;
+}
+
+template <int BlockThreads,
+          typename ValueT,
+          typename DirectInputIteratorT,
+          typename OutputIteratorT,
+          typename SegmentResultT,
+          typename ApplyElementTransformT,
+          typename ApplyElementTransformWithDirectT>
+_CCCL_DEVICE _CCCL_FORCEINLINE void transform_prolog_store_outputs(
+  const DirectInputIteratorT d_direct,
+  const OutputIteratorT d_out,
+  ::cuda::std::size_t segment_offset,
+  int chunk_begin,
+  int items,
+  ValueT* shared_segment,
+  const SegmentResultT& segment_result,
+  ApplyElementTransformT apply_element_transform,
+  ApplyElementTransformWithDirectT apply_element_transform_with_direct)
+{
+  const int thread_rank = static_cast<int>(threadIdx.x);
+
+  if constexpr (transform_prolog_has_direct_input_v<DirectInputIteratorT>)
+  {
+    using direct_vector_load_t = transform_prolog_direct_vector_load<::cuda::std::remove_cv_t<DirectInputIteratorT>>;
+    constexpr bool can_vectorize =
+      ::cuda::std::is_same_v<::cuda::std::remove_cv_t<ValueT>, float> && direct_vector_load_t::supported
+      && transform_prolog_vector_output_v<::cuda::std::remove_cv_t<OutputIteratorT>>;
+
+    if constexpr (can_vectorize)
+    {
+      constexpr int vector_items = 4;
+      const bool vector_aligned =
+        (chunk_begin % vector_items == 0)
+        && ((segment_offset + static_cast<::cuda::std::size_t>(chunk_begin)) % vector_items == 0);
+
+      if (vector_aligned)
+      {
+        const int vector_count = items / vector_items;
+        for (int vector_index = thread_rank; vector_index < vector_count; vector_index += BlockThreads)
+        {
+          const int local_base       = vector_index * vector_items;
+          const int index_in_segment = chunk_begin + local_base;
+          using THRUST_NS_QUALIFIER::cuda_cub::core::detail::uninitialized_array;
+          uninitialized_array<float, vector_items, sizeof(transform_prolog_f32_vector_storage_t)> direct_values;
+          reinterpret_cast<transform_prolog_f32_vector_storage_t*>(direct_values.data())[0] =
+            direct_vector_load_t::Load(d_direct, index_in_segment);
+
+          uninitialized_array<float, vector_items, sizeof(transform_prolog_f32_vector_storage_t)> transformed_values;
+          _CCCL_PRAGMA_UNROLL_FULL()
+          for (int lane = 0; lane < vector_items; ++lane)
+          {
+            transformed_values[lane] = apply_element_transform_with_direct(
+              segment_result, direct_values[lane], shared_segment[local_base + lane]);
+          }
+          transform_prolog_store_vector(
+            d_out,
+            segment_offset + static_cast<::cuda::std::size_t>(index_in_segment),
+            reinterpret_cast<const transform_prolog_f32_vector_storage_t*>(transformed_values.data())[0]);
+        }
+
+        for (int local_index = vector_count * vector_items + thread_rank; local_index < items;
+             local_index += BlockThreads)
+        {
+          const int index_in_segment = chunk_begin + local_index;
+          const auto direct_value    = d_direct[index_in_segment];
+          d_out[segment_offset + static_cast<::cuda::std::size_t>(index_in_segment)] =
+            apply_element_transform_with_direct(segment_result, direct_value, shared_segment[local_index]);
+        }
+        return;
+      }
+    }
+
+    for (int local_index = thread_rank; local_index < items; local_index += BlockThreads)
+    {
+      const int index_in_segment = chunk_begin + local_index;
+      const auto direct_value    = d_direct[index_in_segment];
+      d_out[segment_offset + static_cast<::cuda::std::size_t>(index_in_segment)] =
+        apply_element_transform_with_direct(segment_result, direct_value, shared_segment[local_index]);
+    }
+  }
+  else
+  {
+    for (int local_index = thread_rank; local_index < items; local_index += BlockThreads)
+    {
+      const int index_in_segment = chunk_begin + local_index;
+      d_out[segment_offset + static_cast<::cuda::std::size_t>(index_in_segment)] =
+        apply_element_transform(segment_result, index_in_segment, shared_segment[local_index]);
+    }
+  }
+}
 
 template <int BlockThreads,
           typename InputIteratorT,
@@ -117,20 +259,16 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
     make_transform_prolog_segment_range<BlockThreads, block_group_t, SegmentOpT>(shared_segment, segment_size);
   const segment_result_t segment_result = segment_op(block_group, input_range);
 
-  for (int index_in_segment = thread_rank; index_in_segment < segment_size; index_in_segment += BlockThreads)
-  {
-    if constexpr (transform_prolog_has_direct_input_v<DirectInputIteratorT>)
-    {
-      const auto direct_value = d_direct[index_in_segment];
-      d_out[segment_offset + index_in_segment] =
-        apply_element_transform_with_direct(segment_result, direct_value, shared_segment[index_in_segment]);
-    }
-    else
-    {
-      d_out[segment_offset + index_in_segment] =
-        apply_element_transform(segment_result, index_in_segment, shared_segment[index_in_segment]);
-    }
-  }
+  transform_prolog_store_outputs<BlockThreads>(
+    d_direct,
+    d_out,
+    segment_offset,
+    0,
+    segment_size,
+    shared_segment,
+    segment_result,
+    apply_element_transform,
+    apply_element_transform_with_direct);
 }
 
 template <int BlockThreads,
@@ -233,21 +371,16 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
     shared_segment, local_items, chunk_begin);
   const segment_result_t segment_result = segment_op(cluster_group, input_range);
 
-  for (int local_index = thread_rank; local_index < local_items; local_index += BlockThreads)
-  {
-    const int index_in_segment = chunk_begin + local_index;
-    if constexpr (transform_prolog_has_direct_input_v<DirectInputIteratorT>)
-    {
-      const auto direct_value = d_direct[index_in_segment];
-      d_out[segment_offset + index_in_segment] =
-        apply_element_transform_with_direct(segment_result, direct_value, shared_segment[local_index]);
-    }
-    else
-    {
-      d_out[segment_offset + index_in_segment] =
-        apply_element_transform(segment_result, index_in_segment, shared_segment[local_index]);
-    }
-  }
+  transform_prolog_store_outputs<BlockThreads>(
+    d_direct,
+    d_out,
+    segment_offset,
+    chunk_begin,
+    local_items,
+    shared_segment,
+    segment_result,
+    apply_element_transform,
+    apply_element_transform_with_direct);
 }
 } // namespace detail::hierarchical
 
