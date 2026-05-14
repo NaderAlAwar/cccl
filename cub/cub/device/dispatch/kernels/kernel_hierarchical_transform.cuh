@@ -21,6 +21,7 @@
 #include <thrust/system/cuda/detail/core/util.h>
 
 #include <cuda/std/cstddef>
+#include <cuda/std/cstdint>
 #include <cuda/std/span>
 #include <cuda/std/type_traits>
 #include <cuda/std/utility>
@@ -123,39 +124,44 @@ _CCCL_DEVICE _CCCL_FORCEINLINE void transform_prolog_store_outputs(
       {
         const int vector_count      = items / vector_items;
         const int vector_tile_items = BlockThreads * vector_items;
-        const int vector_tiles      = (vector_count + BlockThreads - 1) / BlockThreads;
+        const int full_vector_tiles = vector_count / BlockThreads;
+        int vectorized_items        = 0;
 
         using block_exchange_t = BlockExchange<float, BlockThreads, vector_items>;
-        for (int vector_tile = 0; vector_tile < vector_tiles; ++vector_tile)
+        static_assert(sizeof(typename block_exchange_t::TempStorage) <= BlockThreads * vector_items * sizeof(float));
+        const bool exchange_storage_aligned =
+          reinterpret_cast<::cuda::std::uintptr_t>(shared_segment) % alignof(typename block_exchange_t::TempStorage)
+          == 0;
+
+        if (exchange_storage_aligned)
         {
-          const int vector_tile_base  = vector_tile * vector_tile_items;
-          const int local_base        = vector_tile_base + thread_rank * vector_items;
-          const int index_in_segment  = chunk_begin + local_base;
-          const int remaining_vectors = vector_count - vector_tile * BlockThreads;
-          const bool has_vector       = thread_rank < remaining_vectors;
+          vectorized_items = full_vector_tiles * vector_tile_items;
 
-          using THRUST_NS_QUALIFIER::cuda_cub::core::detail::uninitialized_array;
-          uninitialized_array<float, vector_items, sizeof(transform_prolog_f32_vector_storage_t)> direct_values;
-
-          if (has_vector)
+          for (int vector_tile = 0; vector_tile < full_vector_tiles; ++vector_tile)
           {
+            const int vector_tile_base = vector_tile * vector_tile_items;
+            const int local_base       = vector_tile_base + thread_rank * vector_items;
+            const int index_in_segment = chunk_begin + local_base;
+
+            using THRUST_NS_QUALIFIER::cuda_cub::core::detail::uninitialized_array;
+            uninitialized_array<float, vector_items, sizeof(transform_prolog_f32_vector_storage_t)> direct_values;
             reinterpret_cast<transform_prolog_f32_vector_storage_t*>(direct_values.data())[0] =
               direct_vector_load_t::Load(d_direct, index_in_segment);
-          }
 
-          float striped_values[vector_items];
-          _CCCL_PRAGMA_UNROLL_FULL()
-          for (int lane = 0; lane < vector_items; ++lane)
-          {
-            const int striped_index = vector_tile_base + thread_rank + lane * BlockThreads;
-            striped_values[lane]    = striped_index < items ? shared_segment[striped_index] : float{};
-          }
+            float striped_values[vector_items];
+            _CCCL_PRAGMA_UNROLL_FULL()
+            for (int lane = 0; lane < vector_items; ++lane)
+            {
+              const int striped_index = vector_tile_base + thread_rank + lane * BlockThreads;
+              striped_values[lane]    = shared_segment[striped_index];
+            }
 
-          float blocked_values[vector_items];
-          block_exchange_t{}.StripedToBlocked(striped_values, blocked_values);
+            __syncthreads();
+            auto& exchange_storage =
+              reinterpret_cast<typename block_exchange_t::TempStorage*>(shared_segment + vector_tile_base)[0];
 
-          if (has_vector)
-          {
+            float blocked_values[vector_items];
+            block_exchange_t{exchange_storage}.StripedToBlocked(striped_values, blocked_values);
             uninitialized_array<float, vector_items, sizeof(transform_prolog_f32_vector_storage_t)> transformed_values;
             _CCCL_PRAGMA_UNROLL_FULL()
             for (int lane = 0; lane < vector_items; ++lane)
@@ -168,12 +174,9 @@ _CCCL_DEVICE _CCCL_FORCEINLINE void transform_prolog_store_outputs(
               segment_offset + static_cast<::cuda::std::size_t>(index_in_segment),
               reinterpret_cast<const transform_prolog_f32_vector_storage_t*>(transformed_values.data())[0]);
           }
-
-          __syncthreads();
         }
 
-        for (int local_index = vector_count * vector_items + thread_rank; local_index < items;
-             local_index += BlockThreads)
+        for (int local_index = vectorized_items + thread_rank; local_index < items; local_index += BlockThreads)
         {
           const int index_in_segment = chunk_begin + local_index;
           const auto direct_value    = d_direct[index_in_segment];
