@@ -13,6 +13,7 @@
 #  pragma system_header
 #endif // no system header
 
+#include <cub/block/block_exchange.cuh>
 #include <cub/block/block_load_to_shared.cuh>
 #include <cub/device/dispatch/kernels/kernel_hierarchical_common.cuh>
 #include <cub/iterator/cache_modified_input_iterator.cuh>
@@ -120,27 +121,55 @@ _CCCL_DEVICE _CCCL_FORCEINLINE void transform_prolog_store_outputs(
 
       if (vector_aligned)
       {
-        const int vector_count = items / vector_items;
-        for (int vector_index = thread_rank; vector_index < vector_count; vector_index += BlockThreads)
+        const int vector_count      = items / vector_items;
+        const int vector_tile_items = BlockThreads * vector_items;
+        const int vector_tiles      = (vector_count + BlockThreads - 1) / BlockThreads;
+
+        using block_exchange_t = BlockExchange<float, BlockThreads, vector_items>;
+        for (int vector_tile = 0; vector_tile < vector_tiles; ++vector_tile)
         {
-          const int local_base       = vector_index * vector_items;
-          const int index_in_segment = chunk_begin + local_base;
+          const int vector_tile_base  = vector_tile * vector_tile_items;
+          const int local_base        = vector_tile_base + thread_rank * vector_items;
+          const int index_in_segment  = chunk_begin + local_base;
+          const int remaining_vectors = vector_count - vector_tile * BlockThreads;
+          const bool has_vector       = thread_rank < remaining_vectors;
+
           using THRUST_NS_QUALIFIER::cuda_cub::core::detail::uninitialized_array;
           uninitialized_array<float, vector_items, sizeof(transform_prolog_f32_vector_storage_t)> direct_values;
-          reinterpret_cast<transform_prolog_f32_vector_storage_t*>(direct_values.data())[0] =
-            direct_vector_load_t::Load(d_direct, index_in_segment);
 
-          uninitialized_array<float, vector_items, sizeof(transform_prolog_f32_vector_storage_t)> transformed_values;
+          if (has_vector)
+          {
+            reinterpret_cast<transform_prolog_f32_vector_storage_t*>(direct_values.data())[0] =
+              direct_vector_load_t::Load(d_direct, index_in_segment);
+          }
+
+          float striped_values[vector_items];
           _CCCL_PRAGMA_UNROLL_FULL()
           for (int lane = 0; lane < vector_items; ++lane)
           {
-            transformed_values[lane] = apply_element_transform_with_direct(
-              segment_result, direct_values[lane], shared_segment[local_base + lane]);
+            const int striped_index = vector_tile_base + thread_rank + lane * BlockThreads;
+            striped_values[lane]    = striped_index < items ? shared_segment[striped_index] : float{};
           }
-          transform_prolog_store_vector(
-            d_out,
-            segment_offset + static_cast<::cuda::std::size_t>(index_in_segment),
-            reinterpret_cast<const transform_prolog_f32_vector_storage_t*>(transformed_values.data())[0]);
+
+          float blocked_values[vector_items];
+          block_exchange_t{}.StripedToBlocked(striped_values, blocked_values);
+
+          if (has_vector)
+          {
+            uninitialized_array<float, vector_items, sizeof(transform_prolog_f32_vector_storage_t)> transformed_values;
+            _CCCL_PRAGMA_UNROLL_FULL()
+            for (int lane = 0; lane < vector_items; ++lane)
+            {
+              transformed_values[lane] =
+                apply_element_transform_with_direct(segment_result, direct_values[lane], blocked_values[lane]);
+            }
+            transform_prolog_store_vector(
+              d_out,
+              segment_offset + static_cast<::cuda::std::size_t>(index_in_segment),
+              reinterpret_cast<const transform_prolog_f32_vector_storage_t*>(transformed_values.data())[0]);
+          }
+
+          __syncthreads();
         }
 
         for (int local_index = vector_count * vector_items + thread_rank; local_index < items;
