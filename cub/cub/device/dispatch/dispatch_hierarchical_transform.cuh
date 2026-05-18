@@ -31,6 +31,7 @@ CUB_NAMESPACE_BEGIN
 namespace detail::hierarchical
 {
 constexpr int transform_prolog_cluster_smem_threshold      = 64 * 1024;
+constexpr bool transform_prolog_enable_cluster_dispatch    = false;
 constexpr int transform_prolog_block_large_block_threads   = 512;
 constexpr int transform_prolog_max_portable_cluster_size   = 8;
 constexpr int transform_prolog_cluster_large_block_threads = 512;
@@ -701,7 +702,8 @@ struct DispatchHierarchicalTransform
       return error;
     }
 
-    if constexpr (hierarchical_transform_cluster_segment_op_v<BlockThreads, InputIteratorT, SegmentOpT>)
+    if constexpr (transform_prolog_enable_cluster_dispatch
+                  && hierarchical_transform_cluster_segment_op_v<BlockThreads, InputIteratorT, SegmentOpT>)
     {
       if (requested_shared_bytes > transform_prolog_cluster_smem_threshold)
       {
