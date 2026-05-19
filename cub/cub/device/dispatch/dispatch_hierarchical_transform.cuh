@@ -32,11 +32,24 @@ namespace detail::hierarchical
 {
 constexpr int transform_prolog_cluster_smem_threshold      = 64 * 1024;
 constexpr bool transform_prolog_enable_cluster_dispatch    = false;
+constexpr int transform_prolog_hopper_bulk_copy_alignment  = 128;
+constexpr int transform_prolog_default_bulk_copy_alignment = 16;
 constexpr int transform_prolog_block_large_block_threads   = 512;
 constexpr int transform_prolog_max_portable_cluster_size   = 8;
 constexpr int transform_prolog_cluster_large_block_threads = 512;
 constexpr int transform_prolog_block_policy_cache_size     = 8;
 constexpr int transform_prolog_cluster_policy_cache_size   = 8;
+
+template <typename T, int PreferredAlignment>
+inline constexpr int transform_prolog_effective_bulk_copy_alignment =
+  PreferredAlignment < static_cast<int>(alignof(T)) ? static_cast<int>(alignof(T)) : PreferredAlignment;
+
+CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE int transform_prolog_preferred_bulk_copy_alignment(int ptx_version)
+{
+  return (ptx_version >= 900 && ptx_version < 1000)
+         ? transform_prolog_hopper_bulk_copy_alignment
+         : transform_prolog_default_bulk_copy_alignment;
+}
 
 template <int BlockThreads, typename InputIteratorT, typename SegmentOpT>
 inline constexpr bool hierarchical_transform_block_segment_op_v =
@@ -62,22 +75,48 @@ template <int BlockThreads,
           typename ElementTransformOpT>
 struct DeviceHierarchicalTransformKernelSource
 {
-  CUB_DEFINE_KERNEL_GETTER(
-    HierarchicalTransformKernel,
-    DeviceHierarchicalTransformKernel<BlockThreads,
-                                      InputIteratorT,
-                                      DirectInputIteratorT,
-                                      OutputIteratorT,
-                                      SegmentOpT,
-                                      ElementTransformOpT>)
-  CUB_DEFINE_KERNEL_GETTER(
-    HierarchicalTransformClusterKernel,
-    DeviceHierarchicalTransformClusterKernel<BlockThreads,
-                                             InputIteratorT,
-                                             DirectInputIteratorT,
-                                             OutputIteratorT,
-                                             SegmentOpT,
-                                             ElementTransformOpT>)
+  template <int BulkCopyAlignment>
+  _CCCL_HIDE_FROM_ABI
+  CUB_RUNTIME_FUNCTION static constexpr decltype(&DeviceHierarchicalTransformKernel<BlockThreads,
+                                                                                    BulkCopyAlignment,
+                                                                                    InputIteratorT,
+                                                                                    DirectInputIteratorT,
+                                                                                    OutputIteratorT,
+                                                                                    SegmentOpT,
+                                                                                    ElementTransformOpT>)
+  HierarchicalTransformKernel()
+  {
+    return &DeviceHierarchicalTransformKernel<
+      BlockThreads,
+      BulkCopyAlignment,
+      InputIteratorT,
+      DirectInputIteratorT,
+      OutputIteratorT,
+      SegmentOpT,
+      ElementTransformOpT>;
+  }
+
+  template <int BulkCopyAlignment>
+  _CCCL_HIDE_FROM_ABI
+  CUB_RUNTIME_FUNCTION static constexpr decltype(&DeviceHierarchicalTransformClusterKernel<
+                                                 BlockThreads,
+                                                 BulkCopyAlignment,
+                                                 InputIteratorT,
+                                                 DirectInputIteratorT,
+                                                 OutputIteratorT,
+                                                 SegmentOpT,
+                                                 ElementTransformOpT>)
+  HierarchicalTransformClusterKernel()
+  {
+    return &DeviceHierarchicalTransformClusterKernel<
+      BlockThreads,
+      BulkCopyAlignment,
+      InputIteratorT,
+      DirectInputIteratorT,
+      OutputIteratorT,
+      SegmentOpT,
+      ElementTransformOpT>;
+  }
 };
 
 template <int BlockThreads,
@@ -160,6 +199,26 @@ struct DispatchHierarchicalTransform
     ::cuda::std::size_t cluster_shared_bytes{0};
     cluster_policy_t policy{};
   };
+
+  template <int BulkCopyAlignment, typename MaybePointerT>
+  CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE static bool CanUseBulkCopyAlignment(MaybePointerT input, int items)
+  {
+    if constexpr (::cuda::std::is_pointer_v<::cuda::std::decay_t<MaybePointerT>>)
+    {
+      using value_t = cub::detail::it_value_t<InputIteratorT>;
+
+      const auto address   = reinterpret_cast<::cuda::std::uintptr_t>(input);
+      const auto num_bytes = static_cast<::cuda::std::uintptr_t>(items) * sizeof(value_t);
+      const auto alignment = static_cast<::cuda::std::uintptr_t>(BulkCopyAlignment);
+      const bool begin_ok  = (address % alignment) == 0;
+      const bool range_ok  = (num_bytes % alignment) == 0;
+      return begin_ok && range_ok;
+    }
+    else
+    {
+      return false;
+    }
+  }
 
   CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE DispatchHierarchicalTransform(
     InputIteratorT d_in,
@@ -300,7 +359,7 @@ struct DispatchHierarchicalTransform
     return cudaSuccess;
   }
 
-  template <typename DeviceHierarchicalTransformKernelT>
+  template <int BulkCopyAlignment, typename DeviceHierarchicalTransformKernelT>
   CUB_RUNTIME_FUNCTION _CCCL_VISIBILITY_HIDDEN _CCCL_FORCEINLINE cudaError_t SelectBlockPolicy(
     DeviceHierarchicalTransformKernelT hierarchical_transform_kernel,
     int current_device,
@@ -347,7 +406,9 @@ struct DispatchHierarchicalTransform
 
             block_candidate_t large_candidate{};
             const auto large_error = QueryBlockCandidate<transform_prolog_block_large_block_threads>(
-              large_kernel_source_t{}.HierarchicalTransformKernel(), requested_shared_bytes, large_candidate);
+              large_kernel_source_t{}.template HierarchicalTransformKernel<BulkCopyAlignment>(),
+              requested_shared_bytes,
+              large_candidate);
 
             if (large_error == cudaSuccess && large_candidate.active_warps > selected_candidate.active_warps)
             {
@@ -496,7 +557,7 @@ struct DispatchHierarchicalTransform
     return cudaSuccess;
   }
 
-  template <typename DeviceHierarchicalTransformClusterKernelT>
+  template <int BulkCopyAlignment, typename DeviceHierarchicalTransformClusterKernelT>
   CUB_RUNTIME_FUNCTION _CCCL_VISIBILITY_HIDDEN _CCCL_FORCEINLINE cudaError_t SelectClusterPolicy(
     DeviceHierarchicalTransformClusterKernelT hierarchical_transform_cluster_kernel,
     int current_device,
@@ -546,7 +607,7 @@ struct DispatchHierarchicalTransform
 
             cluster_candidate_t large_candidate{};
             const auto large_error = QueryClusterCandidate<transform_prolog_cluster_large_block_threads>(
-              large_kernel_source_t{}.HierarchicalTransformClusterKernel(),
+              large_kernel_source_t{}.template HierarchicalTransformClusterKernel<BulkCopyAlignment>(),
               cluster_size,
               cluster_shared_bytes,
               large_candidate);
@@ -569,7 +630,7 @@ struct DispatchHierarchicalTransform
       (return cudaErrorNotSupported;))
   }
 
-  template <typename DeviceHierarchicalTransformClusterKernelT>
+  template <int BulkCopyAlignment, typename DeviceHierarchicalTransformClusterKernelT>
   CUB_RUNTIME_FUNCTION _CCCL_VISIBILITY_HIDDEN _CCCL_FORCEINLINE cudaError_t InvokeClusterKernel(
     DeviceHierarchicalTransformClusterKernelT hierarchical_transform_cluster_kernel,
     ::cuda::std::size_t requested_shared_bytes,
@@ -628,8 +689,16 @@ struct DispatchHierarchicalTransform
       using value_t = cub::detail::it_value_t<InputIteratorT>;
 
       const int chunk_items = ::cuda::ceil_div(segment_size, cluster_size);
-      const auto cluster_shared_bytes =
-        static_cast<::cuda::std::size_t>(cub::detail::LoadToSharedBufferSizeBytes<value_t>(chunk_items));
+      if constexpr (BulkCopyAlignment != static_cast<int>(alignof(value_t)))
+      {
+        if (!CanUseBulkCopyAlignment<BulkCopyAlignment>(d_in, chunk_items))
+        {
+          return cudaErrorInvalidValue;
+        }
+      }
+
+      const auto cluster_shared_bytes = static_cast<::cuda::std::size_t>(
+        cub::detail::LoadToSharedBufferSizeBytes<value_t, BulkCopyAlignment>(chunk_items));
 
       if (cluster_shared_bytes > static_cast<::cuda::std::size_t>(max_dynamic_smem_size))
       {
@@ -637,7 +706,7 @@ struct DispatchHierarchicalTransform
       }
 
       cluster_policy_t cluster_policy{};
-      if (const auto error = SelectClusterPolicy(
+      if (const auto error = SelectClusterPolicy<BulkCopyAlignment>(
             hierarchical_transform_cluster_kernel,
             current_device,
             cluster_size,
@@ -664,7 +733,7 @@ struct DispatchHierarchicalTransform
             ElementTransformOpT>;
 
           return InvokeClusterKernel<transform_prolog_cluster_large_block_threads>(
-            large_kernel_source_t{}.HierarchicalTransformClusterKernel(),
+            large_kernel_source_t{}.template HierarchicalTransformClusterKernel<BulkCopyAlignment>(),
             cluster_size,
             chunk_items,
             cluster_shared_bytes,
@@ -677,9 +746,10 @@ struct DispatchHierarchicalTransform
     }
   }
 
-  CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE cudaError_t Invoke()
+  template <int BulkCopyAlignment>
+  CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE cudaError_t InvokeAligned()
   {
-    auto hierarchical_transform_kernel = kernel_source.HierarchicalTransformKernel();
+    auto hierarchical_transform_kernel = kernel_source.template HierarchicalTransformKernel<BulkCopyAlignment>();
 
     if (num_segments == 0)
     {
@@ -693,8 +763,8 @@ struct DispatchHierarchicalTransform
 
     using value_t = cub::detail::it_value_t<InputIteratorT>;
 
-    const auto requested_shared_bytes =
-      static_cast<::cuda::std::size_t>(cub::detail::LoadToSharedBufferSizeBytes<value_t>(segment_size));
+    const auto requested_shared_bytes = static_cast<::cuda::std::size_t>(
+      cub::detail::LoadToSharedBufferSizeBytes<value_t, BulkCopyAlignment>(segment_size));
 
     int max_grid_dim_x = 0;
     if (const auto error = CubDebug(launcher_factory.MaxGridDimX(max_grid_dim_x)))
@@ -707,8 +777,10 @@ struct DispatchHierarchicalTransform
     {
       if (requested_shared_bytes > transform_prolog_cluster_smem_threshold)
       {
-        const auto cluster_error = InvokeClusterKernel(
-          kernel_source.HierarchicalTransformClusterKernel(), requested_shared_bytes, max_grid_dim_x);
+        const auto cluster_error = InvokeClusterKernel<BulkCopyAlignment>(
+          kernel_source.template HierarchicalTransformClusterKernel<BulkCopyAlignment>(),
+          requested_shared_bytes,
+          max_grid_dim_x);
         if (cluster_error == cudaSuccess)
         {
           return cudaSuccess;
@@ -727,8 +799,8 @@ struct DispatchHierarchicalTransform
     }
 
     block_policy_t block_policy{};
-    if (const auto error =
-          SelectBlockPolicy(hierarchical_transform_kernel, current_device, requested_shared_bytes, block_policy))
+    if (const auto error = SelectBlockPolicy<BulkCopyAlignment>(
+          hierarchical_transform_kernel, current_device, requested_shared_bytes, block_policy))
     {
       return error;
     }
@@ -749,11 +821,38 @@ struct DispatchHierarchicalTransform
           ElementTransformOpT>;
 
         return InvokeKernel<transform_prolog_block_large_block_threads>(
-          large_kernel_source_t{}.HierarchicalTransformKernel(), requested_shared_bytes, max_grid_dim_x);
+          large_kernel_source_t{}.template HierarchicalTransformKernel<BulkCopyAlignment>(),
+          requested_shared_bytes,
+          max_grid_dim_x);
       }
     }
 
     return InvokeKernel<BlockThreads>(hierarchical_transform_kernel, requested_shared_bytes, max_grid_dim_x);
+  }
+
+  template <int PreferredBulkCopyAlignment>
+  CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE cudaError_t InvokePreferredAlignment()
+  {
+    using value_t = cub::detail::it_value_t<InputIteratorT>;
+    constexpr int bulk_copy_alignment =
+      transform_prolog_effective_bulk_copy_alignment<value_t, PreferredBulkCopyAlignment>;
+
+    if (CanUseBulkCopyAlignment<bulk_copy_alignment>(d_in, segment_size))
+    {
+      return InvokeAligned<bulk_copy_alignment>();
+    }
+
+    return InvokeAligned<static_cast<int>(alignof(value_t))>();
+  }
+
+  CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE cudaError_t Invoke()
+  {
+    if (transform_prolog_preferred_bulk_copy_alignment(ptx_version) == transform_prolog_hopper_bulk_copy_alignment)
+    {
+      return InvokePreferredAlignment<transform_prolog_hopper_bulk_copy_alignment>();
+    }
+
+    return InvokePreferredAlignment<transform_prolog_default_bulk_copy_alignment>();
   }
 };
 

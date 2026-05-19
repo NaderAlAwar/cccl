@@ -33,6 +33,7 @@ inline constexpr bool transform_prolog_has_direct_input_v =
   !::cuda::std::is_same_v<::cuda::std::remove_cv_t<DirectInputIteratorT>, transform_prolog_no_direct_input>;
 
 template <int BlockThreads,
+          int BulkCopyAlignment,
           typename InputIteratorT,
           typename DirectInputIteratorT,
           typename OutputIteratorT,
@@ -102,13 +103,13 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
         segment_result, static_cast<direct_ref_t>(direct_value), static_cast<input_ref_t>(value));
     };
 
-  const int shared_buffer_bytes = cub::detail::LoadToSharedBufferSizeBytes<value_t>(segment_size);
+  const int shared_buffer_bytes = cub::detail::LoadToSharedBufferSizeBytes<value_t, BulkCopyAlignment>(segment_size);
 
   block_load_to_shared_t load_to_shared{load_to_shared_storage};
   ::cuda::std::span<char> shared_buffer{
     shared_segment_buffer_base, static_cast<::cuda::std::size_t>(shared_buffer_bytes)};
   ::cuda::std::span<const value_t> input_buffer{segment_begin, static_cast<::cuda::std::size_t>(segment_size)};
-  auto staged_segment = load_to_shared.CopyAsync(shared_buffer, input_buffer);
+  auto staged_segment = load_to_shared.template CopyAsync<value_t, BulkCopyAlignment>(shared_buffer, input_buffer);
   auto token          = load_to_shared.Commit();
   load_to_shared.Wait(::cuda::std::move(token));
   value_t* shared_segment = staged_segment.data();
@@ -134,6 +135,7 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
 }
 
 template <int BlockThreads,
+          int BulkCopyAlignment,
           typename InputIteratorT,
           typename DirectInputIteratorT,
           typename OutputIteratorT,
@@ -217,14 +219,14 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
         segment_result, static_cast<direct_ref_t>(direct_value), static_cast<input_ref_t>(value));
     };
 
-  const int shared_buffer_bytes = cub::detail::LoadToSharedBufferSizeBytes<value_t>(local_items);
+  const int shared_buffer_bytes = cub::detail::LoadToSharedBufferSizeBytes<value_t, BulkCopyAlignment>(local_items);
 
   block_load_to_shared_t load_to_shared{load_to_shared_storage};
   ::cuda::std::span<char> shared_buffer{
     shared_segment_buffer_base, static_cast<::cuda::std::size_t>(shared_buffer_bytes)};
   ::cuda::std::span<const value_t> input_buffer{
     segment_begin + chunk_begin, static_cast<::cuda::std::size_t>(local_items)};
-  auto staged_segment = load_to_shared.CopyAsync(shared_buffer, input_buffer);
+  auto staged_segment = load_to_shared.template CopyAsync<value_t, BulkCopyAlignment>(shared_buffer, input_buffer);
   auto token          = load_to_shared.Commit();
   load_to_shared.Wait(::cuda::std::move(token));
   value_t* shared_segment = staged_segment.data();
