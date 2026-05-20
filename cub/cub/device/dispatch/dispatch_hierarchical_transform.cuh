@@ -39,6 +39,8 @@ constexpr int transform_prolog_max_portable_cluster_size   = 8;
 constexpr int transform_prolog_cluster_large_block_threads = 512;
 constexpr int transform_prolog_block_policy_cache_size     = 8;
 constexpr int transform_prolog_cluster_policy_cache_size   = 8;
+constexpr int transform_prolog_packed_target_items         = 12 * 1024;
+constexpr int transform_prolog_max_segments_per_block      = 4;
 
 template <typename T, int PreferredAlignment>
 inline constexpr int transform_prolog_effective_bulk_copy_alignment =
@@ -156,6 +158,19 @@ struct DispatchHierarchicalTransform
   KernelSource kernel_source;
   KernelLauncherFactory launcher_factory;
 
+  [[nodiscard]] CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE static int SegmentsPerBlock(int segment_size)
+  {
+    if (segment_size <= transform_prolog_packed_target_items / transform_prolog_max_segments_per_block)
+    {
+      return transform_prolog_max_segments_per_block;
+    }
+    if (segment_size <= transform_prolog_packed_target_items / 2)
+    {
+      return 2;
+    }
+    return 1;
+  }
+
   struct block_candidate_t
   {
     int block_threads{0};
@@ -251,6 +266,7 @@ struct DispatchHierarchicalTransform
   CUB_RUNTIME_FUNCTION _CCCL_VISIBILITY_HIDDEN _CCCL_FORCEINLINE cudaError_t InvokeKernel(
     DeviceHierarchicalTransformKernelT hierarchical_transform_kernel,
     ::cuda::std::size_t requested_shared_bytes,
+    int segments_per_block,
     int max_grid_dim_x)
   {
     if (num_segments == 0)
@@ -278,12 +294,15 @@ struct DispatchHierarchicalTransform
     }
     else
     {
-      // TransformProlog currently requires staging the complete segment in dynamic shared memory.
+      // TransformProlog currently stages the complete packed segment tile in dynamic shared memory.
       return cudaErrorInvalidValue;
     }
 
-    const auto num_segments_per_invocation =
+    const auto max_blocks_per_invocation =
       (::cuda::std::min) (static_cast<::cuda::std::int64_t>(max_grid_dim_x),
+                          static_cast<::cuda::std::int64_t>(::cuda::std::numeric_limits<int>::max()));
+    const auto num_segments_per_invocation =
+      (::cuda::std::min) (max_blocks_per_invocation * static_cast<::cuda::std::int64_t>(segments_per_block),
                           static_cast<::cuda::std::int64_t>(::cuda::std::numeric_limits<int>::max()));
 
     for (::cuda::std::int64_t segment_offset = 0; segment_offset < num_segments;
@@ -291,14 +310,18 @@ struct DispatchHierarchicalTransform
     {
       const auto num_current_segments = (::cuda::std::min) (num_segments_per_invocation, num_segments - segment_offset);
       const auto item_offset          = segment_offset * static_cast<::cuda::std::int64_t>(segment_size);
+      const auto current_blocks =
+        ::cuda::ceil_div(num_current_segments, static_cast<::cuda::std::int64_t>(segments_per_block));
 
       launcher_factory(
-        static_cast<int>(num_current_segments), CandidateBlockThreads, static_cast<int>(requested_shared_bytes), stream)
+        static_cast<int>(current_blocks), CandidateBlockThreads, static_cast<int>(requested_shared_bytes), stream)
         .doit(hierarchical_transform_kernel,
               d_in + item_offset,
               d_direct,
               d_out + item_offset,
+              static_cast<int>(num_current_segments),
               segment_size,
+              segments_per_block,
               segment_op,
               element_transform_op);
 
@@ -775,8 +798,11 @@ struct DispatchHierarchicalTransform
 
     using value_t = cub::detail::it_value_t<InputIteratorT>;
 
-    const auto requested_shared_bytes = static_cast<::cuda::std::size_t>(
+    const int segments_per_block           = SegmentsPerBlock(segment_size);
+    const auto single_segment_shared_bytes = static_cast<::cuda::std::size_t>(
       cub::detail::LoadToSharedBufferSizeBytes<value_t, BulkCopyAlignment>(segment_size));
+    const auto requested_shared_bytes = static_cast<::cuda::std::size_t>(
+      cub::detail::LoadToSharedBufferSizeBytes<value_t, BulkCopyAlignment>(segments_per_block * segment_size));
 
     int max_grid_dim_x = 0;
     if (const auto error = CubDebug(launcher_factory.MaxGridDimX(max_grid_dim_x)))
@@ -791,11 +817,11 @@ struct DispatchHierarchicalTransform
                     SegmentOpT,
                     transform_prolog_shared_vector_aligned_v<BulkCopyAlignment>>)
     {
-      if (requested_shared_bytes > transform_prolog_cluster_smem_threshold)
+      if (single_segment_shared_bytes > transform_prolog_cluster_smem_threshold)
       {
         const auto cluster_error = InvokeClusterKernel<BulkCopyAlignment>(
           kernel_source.template HierarchicalTransformClusterKernel<BulkCopyAlignment>(),
-          requested_shared_bytes,
+          single_segment_shared_bytes,
           max_grid_dim_x);
         if (cluster_error == cudaSuccess)
         {
@@ -841,11 +867,13 @@ struct DispatchHierarchicalTransform
         return InvokeKernel<transform_prolog_block_large_block_threads>(
           large_kernel_source_t{}.template HierarchicalTransformKernel<BulkCopyAlignment>(),
           requested_shared_bytes,
+          segments_per_block,
           max_grid_dim_x);
       }
     }
 
-    return InvokeKernel<BlockThreads>(hierarchical_transform_kernel, requested_shared_bytes, max_grid_dim_x);
+    return InvokeKernel<BlockThreads>(
+      hierarchical_transform_kernel, requested_shared_bytes, segments_per_block, max_grid_dim_x);
   }
 
   template <int PreferredBulkCopyAlignment>
