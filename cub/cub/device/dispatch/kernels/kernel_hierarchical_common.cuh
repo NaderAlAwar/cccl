@@ -179,7 +179,7 @@ template <int BulkCopyAlignment>
 inline constexpr bool transform_prolog_shared_vector_aligned_v =
   BulkCopyAlignment >= static_cast<int>(alignof(transform_prolog_f32_vector_range_storage_t));
 
-template <int BlockThreads, typename ValueT>
+template <int BlockThreads, typename ValueT, bool AssumeFullVectors = false>
 class vectorized_thread_segment_range
 {
   using raw_value_t = ::cuda::std::remove_cv_t<ValueT>;
@@ -271,25 +271,49 @@ public:
   {
     constexpr int vector_items = 4;
 
-    for (int vector_group = 0, consumed = 0; consumed < items_; ++vector_group)
+    if constexpr (AssumeFullVectors)
     {
-      const int vector_base = first_item_ + vector_group * BlockThreads * vector_items;
-      const int lane_items  = (::cuda::std::min) (vector_items, items_ - consumed);
+      _CCCL_ASSERT(segment_size_ % vector_items == 0, "");
 
-      transform_prolog_f32_vector_range_storage_t values_storage{};
-      raw_value_t* values = reinterpret_cast<raw_value_t*>(&values_storage);
-      FillValues(values_storage, values, vector_base);
-
-      _CCCL_PRAGMA_UNROLL_FULL()
-      for (int lane = 0; lane < vector_items; ++lane)
+      const int thread_rank  = static_cast<int>(threadIdx.x);
+      const int vector_count = segment_size_ / vector_items;
+      for (int vector_index = thread_rank; vector_index < vector_count; vector_index += BlockThreads)
       {
-        if (lane < lane_items)
+        const int vector_base = vector_index * vector_items;
+
+        transform_prolog_f32_vector_range_storage_t values_storage =
+          reinterpret_cast<const transform_prolog_f32_vector_range_storage_t*>(segment_begin_ + vector_base)[0];
+        raw_value_t* values = reinterpret_cast<raw_value_t*>(&values_storage);
+
+        _CCCL_PRAGMA_UNROLL_FULL()
+        for (int lane = 0; lane < vector_items; ++lane)
         {
           fn(values[lane]);
         }
       }
+    }
+    else
+    {
+      for (int vector_group = 0, consumed = 0; consumed < items_; ++vector_group)
+      {
+        const int vector_base = first_item_ + vector_group * BlockThreads * vector_items;
+        const int lane_items  = (::cuda::std::min) (vector_items, items_ - consumed);
 
-      consumed += lane_items;
+        transform_prolog_f32_vector_range_storage_t values_storage{};
+        raw_value_t* values = reinterpret_cast<raw_value_t*>(&values_storage);
+        FillValues(values_storage, values, vector_base);
+
+        _CCCL_PRAGMA_UNROLL_FULL()
+        for (int lane = 0; lane < vector_items; ++lane)
+        {
+          if (lane < lane_items)
+          {
+            fn(values[lane]);
+          }
+        }
+
+        consumed += lane_items;
+      }
     }
   }
 
@@ -350,7 +374,7 @@ _CCCL_DEVICE void for_each_transform_prolog_item(const RangeT& range, FnT fn)
   }
 }
 
-template <int BlockThreads, typename ValueT>
+template <int BlockThreads, bool AssumeFullVectors = false, typename ValueT>
 _CCCL_DEVICE auto make_vectorized_thread_segment_range(ValueT* segment_begin, int segment_size, int segment_offset = 0)
 {
   constexpr int vector_items = 4;
@@ -366,7 +390,7 @@ _CCCL_DEVICE auto make_vectorized_thread_segment_range(ValueT* segment_begin, in
     items += (::cuda::std::min) (vector_items, remaining % vector_stride);
   }
 
-  return vectorized_thread_segment_range<BlockThreads, ValueT>{
+  return vectorized_thread_segment_range<BlockThreads, ValueT, AssumeFullVectors>{
     segment_begin, segment_size, first_item, segment_offset + first_item, items};
 }
 
@@ -383,11 +407,16 @@ make_striped_thread_segment_range(RandomAccessIteratorT segment_begin, int segme
   return striped_thread_segment_range_t<BlockThreads, RandomAccessIteratorT>{begin, segment_offset + first_item, items};
 }
 
-template <int BlockThreads, typename GroupT, typename SegmentOpT, typename ValueT, bool SharedSegmentVectorAligned>
+template <int BlockThreads,
+          typename GroupT,
+          typename SegmentOpT,
+          typename ValueT,
+          bool SharedSegmentVectorAligned,
+          bool AssumeFullVectorizedRange = false>
 struct transform_prolog_segment_range_selector
 {
   using raw_value_t      = ::cuda::std::remove_cv_t<ValueT>;
-  using vectorized_range = vectorized_thread_segment_range<BlockThreads, ValueT>;
+  using vectorized_range = vectorized_thread_segment_range<BlockThreads, ValueT, AssumeFullVectorizedRange>;
   using striped_range    = striped_thread_segment_range_t<BlockThreads, ValueT*>;
   using span_range       = ::cuda::std::span<ValueT>;
 
@@ -408,22 +437,42 @@ struct transform_prolog_segment_range_selector
                                           ::cuda::std::conditional_t<use_striped_range, striped_range, span_range>>;
 };
 
-template <int BlockThreads, typename GroupT, typename SegmentOpT, typename ValueT, bool SharedSegmentVectorAligned>
-using transform_prolog_segment_range_t =
-  typename transform_prolog_segment_range_selector<BlockThreads, GroupT, SegmentOpT, ValueT, SharedSegmentVectorAligned>::
-    type;
+template <int BlockThreads,
+          typename GroupT,
+          typename SegmentOpT,
+          typename ValueT,
+          bool SharedSegmentVectorAligned,
+          bool AssumeFullVectorizedRange = false>
+using transform_prolog_segment_range_t = typename transform_prolog_segment_range_selector<
+  BlockThreads,
+  GroupT,
+  SegmentOpT,
+  ValueT,
+  SharedSegmentVectorAligned,
+  AssumeFullVectorizedRange>::type;
 
-template <int BlockThreads, typename GroupT, typename SegmentOpT, typename ValueT, bool SharedSegmentVectorAligned>
+template <int BlockThreads,
+          typename GroupT,
+          typename SegmentOpT,
+          typename ValueT,
+          bool SharedSegmentVectorAligned,
+          bool AssumeFullVectorizedRange = false>
 _CCCL_DEVICE auto make_transform_prolog_segment_range(ValueT* segment_begin, int segment_size, int segment_offset = 0)
 {
-  using selector_t =
-    transform_prolog_segment_range_selector<BlockThreads, GroupT, SegmentOpT, ValueT, SharedSegmentVectorAligned>;
+  using selector_t = transform_prolog_segment_range_selector<
+    BlockThreads,
+    GroupT,
+    SegmentOpT,
+    ValueT,
+    SharedSegmentVectorAligned,
+    AssumeFullVectorizedRange>;
   static_assert(selector_t::valid,
                 "segment_op must be invocable with a TransformProlog segment range or cuda::std::span.");
 
   if constexpr (selector_t::use_vectorized_range)
   {
-    return make_vectorized_thread_segment_range<BlockThreads>(segment_begin, segment_size, segment_offset);
+    return make_vectorized_thread_segment_range<BlockThreads, AssumeFullVectorizedRange>(
+      segment_begin, segment_size, segment_offset);
   }
   else if constexpr (selector_t::use_striped_range)
   {

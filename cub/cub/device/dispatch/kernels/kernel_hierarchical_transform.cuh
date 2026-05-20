@@ -260,12 +260,13 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
   using block_hierarchy_t = decltype(::cuda::hierarchy(::cuda::grid_dims(dim3{}), ::cuda::block_dims<BlockThreads>()));
   using block_group_t     = ::cuda::experimental::this_block<block_hierarchy_t>;
   using value_t           = cub::detail::it_value_t<InputIteratorT>;
-  using input_range_t =
-    transform_prolog_segment_range_t<BlockThreads,
-                                     block_group_t,
-                                     SegmentOpT,
-                                     value_t,
-                                     transform_prolog_shared_vector_aligned_v<BulkCopyAlignment>>;
+  using input_range_t     = transform_prolog_segment_range_t<
+        BlockThreads,
+        block_group_t,
+        SegmentOpT,
+        value_t,
+        transform_prolog_shared_vector_aligned_v<BulkCopyAlignment>,
+        true>;
   using segment_result_t = ::cuda::std::decay_t<::cuda::std::invoke_result_t<SegmentOpT, block_group_t, input_range_t>>;
   using block_load_to_shared_t = BlockLoadToShared<BlockThreads>;
 
@@ -324,7 +325,8 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
     block_group_t,
     SegmentOpT,
     value_t,
-    transform_prolog_shared_vector_aligned_v<BulkCopyAlignment>>(shared_segment, segment_size);
+    transform_prolog_shared_vector_aligned_v<BulkCopyAlignment>,
+    true>(shared_segment, segment_size);
   const segment_result_t segment_result = segment_op(block_group, input_range);
 
   transform_prolog_store_outputs<BlockThreads, transform_prolog_shared_vector_aligned_v<BulkCopyAlignment>, true>(
