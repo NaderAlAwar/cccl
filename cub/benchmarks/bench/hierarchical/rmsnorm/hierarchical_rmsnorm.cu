@@ -103,12 +103,10 @@ try
   auto segment_op = [hidden_size, eps = rms_norm_eps] __device__(auto group, const auto& range) -> float {
     float partial_sum = 0.0f;
 
-    // with a proper range can be range based for loop
-    for (int item = 0; item < range.size(); ++item)
-    {
-      const float value = static_cast<float>(range[item]);
+    cub::detail::hierarchical::for_each_transform_prolog_item(range, [&](auto item) {
+      const float value = static_cast<float>(item);
       partial_sum += value * value;
-    }
+    });
 
     const float sum_of_squares = cuda::coop::reduce(group, partial_sum, cuda::std::plus<>{});
 

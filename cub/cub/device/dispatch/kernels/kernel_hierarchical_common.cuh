@@ -171,6 +171,205 @@ template <int BlockThreads, typename RandomAccessIteratorT>
 using striped_thread_segment_range_t =
   striped_thread_segment_range<striped_thread_segment_iterator_t<BlockThreads, RandomAccessIteratorT>>;
 
+using transform_prolog_f32_vector_range_storage_t = int4;
+static_assert(sizeof(transform_prolog_f32_vector_range_storage_t) == 4 * sizeof(float));
+static_assert(alignof(transform_prolog_f32_vector_range_storage_t) == 4 * sizeof(float));
+
+template <int BlockThreads, typename ValueT>
+class vectorized_thread_segment_range
+{
+  using raw_value_t = ::cuda::std::remove_cv_t<ValueT>;
+
+public:
+  using value_type = ValueT;
+  using reference  = value_type;
+
+  class const_iterator
+  {
+  public:
+    _CCCL_DEVICE constexpr const_iterator() noexcept = default;
+
+    _CCCL_DEVICE constexpr const_iterator(const vectorized_thread_segment_range* range, int index) noexcept
+        : range_(range)
+        , index_(index)
+    {}
+
+    _CCCL_DEVICE const_iterator& operator++() noexcept
+    {
+      ++index_;
+      return *this;
+    }
+
+    [[nodiscard]] _CCCL_DEVICE reference operator*() const noexcept
+    {
+      return (*range_)[index_];
+    }
+
+    [[nodiscard]] _CCCL_DEVICE bool operator!=(const const_iterator& other) const noexcept
+    {
+      return index_ != other.index_;
+    }
+
+  private:
+    const vectorized_thread_segment_range* range_{};
+    int index_{0};
+  };
+
+  using iterator = const_iterator;
+
+  _CCCL_DEVICE constexpr vectorized_thread_segment_range() noexcept = default;
+
+  _CCCL_DEVICE constexpr vectorized_thread_segment_range(
+    ValueT* segment_begin, int segment_size, int first_item, int offset, int items) noexcept
+      : segment_begin_(segment_begin)
+      , segment_size_(segment_size)
+      , first_item_(first_item)
+      , offset_(offset)
+      , items_(items)
+  {}
+
+  [[nodiscard]] _CCCL_DEVICE constexpr iterator begin() const noexcept
+  {
+    return iterator{this, 0};
+  }
+
+  [[nodiscard]] _CCCL_DEVICE constexpr iterator end() const noexcept
+  {
+    return iterator{this, items_};
+  }
+
+  [[nodiscard]] _CCCL_DEVICE constexpr int offset() const noexcept
+  {
+    return offset_;
+  }
+
+  [[nodiscard]] _CCCL_DEVICE constexpr int size() const noexcept
+  {
+    return items_;
+  }
+
+  [[nodiscard]] _CCCL_DEVICE constexpr bool empty() const noexcept
+  {
+    return items_ == 0;
+  }
+
+  _CCCL_DEVICE reference operator[](int idx) const noexcept
+  {
+    constexpr int vector_items = 4;
+    const int vector_group     = idx / vector_items;
+    const int vector_lane      = idx % vector_items;
+    const int vector_base      = first_item_ + vector_group * BlockThreads * vector_items;
+    return segment_begin_[vector_base + vector_lane];
+  }
+
+  template <typename FnT>
+  _CCCL_DEVICE void ForEach(FnT fn) const
+  {
+    constexpr int vector_items = 4;
+
+    for (int vector_group = 0, consumed = 0; consumed < items_; ++vector_group)
+    {
+      const int vector_base = first_item_ + vector_group * BlockThreads * vector_items;
+      const int lane_items  = (::cuda::std::min) (vector_items, items_ - consumed);
+
+      transform_prolog_f32_vector_range_storage_t values_storage{};
+      raw_value_t* values = reinterpret_cast<raw_value_t*>(&values_storage);
+      FillValues(values_storage, values, vector_base);
+
+      _CCCL_PRAGMA_UNROLL_FULL()
+      for (int lane = 0; lane < vector_items; ++lane)
+      {
+        if (lane < lane_items)
+        {
+          fn(values[lane]);
+        }
+      }
+
+      consumed += lane_items;
+    }
+  }
+
+private:
+  _CCCL_DEVICE void FillValues(
+    transform_prolog_f32_vector_range_storage_t& values_storage, raw_value_t* values, int vector_base) const noexcept
+  {
+    constexpr auto alignment = static_cast<::cuda::std::uintptr_t>(sizeof(transform_prolog_f32_vector_range_storage_t));
+
+    const bool vector_aligned =
+      (reinterpret_cast<::cuda::std::uintptr_t>(segment_begin_ + vector_base) % alignment) == 0;
+    const bool full_vector = vector_base + 4 <= segment_size_;
+
+    if (vector_aligned && full_vector)
+    {
+      values_storage =
+        reinterpret_cast<const transform_prolog_f32_vector_range_storage_t*>(segment_begin_ + vector_base)[0];
+    }
+    else
+    {
+      _CCCL_PRAGMA_UNROLL_FULL()
+      for (int lane = 0; lane < 4; ++lane)
+      {
+        const int item = vector_base + lane;
+        values[lane]   = item < segment_size_ ? segment_begin_[item] : raw_value_t{};
+      }
+    }
+  }
+
+  ValueT* segment_begin_{};
+  int segment_size_{0};
+  int first_item_{0};
+  int offset_{0};
+  int items_{0};
+};
+
+template <typename RangeT, typename FnT, typename = void>
+struct has_transform_prolog_for_each : ::cuda::std::false_type
+{};
+
+template <typename RangeT, typename FnT>
+struct has_transform_prolog_for_each<
+  RangeT,
+  FnT,
+  ::cuda::std::void_t<decltype(::cuda::std::declval<const RangeT&>().ForEach(::cuda::std::declval<FnT>()))>>
+    : ::cuda::std::true_type
+{};
+
+template <typename RangeT, typename FnT>
+_CCCL_DEVICE void for_each_transform_prolog_item(const RangeT& range, FnT fn)
+{
+  if constexpr (has_transform_prolog_for_each<RangeT, FnT>::value)
+  {
+    range.ForEach(fn);
+  }
+  else
+  {
+    for (int item = 0; item < range.size(); ++item)
+    {
+      fn(range[item]);
+    }
+  }
+}
+
+template <int BlockThreads, typename ValueT>
+_CCCL_DEVICE auto make_vectorized_thread_segment_range(ValueT* segment_begin, int segment_size, int segment_offset = 0)
+{
+  constexpr int vector_items = 4;
+  const int thread_rank      = static_cast<int>(threadIdx.x);
+  const int first_item       = thread_rank * vector_items;
+
+  int items = 0;
+  if (first_item < segment_size)
+  {
+    const int remaining     = segment_size - first_item;
+    const int vector_stride = BlockThreads * vector_items;
+    items                   = (remaining / vector_stride) * vector_items;
+    items += (::cuda::std::min) (vector_items, remaining % vector_stride);
+  }
+
+  return vectorized_thread_segment_range<BlockThreads, ValueT>{
+    segment_begin, segment_size, first_item, segment_offset + first_item, items};
+}
+
 template <int BlockThreads, typename RandomAccessIteratorT>
 _CCCL_DEVICE auto
 make_striped_thread_segment_range(RandomAccessIteratorT segment_begin, int segment_size, int segment_offset = 0)
@@ -187,20 +386,25 @@ make_striped_thread_segment_range(RandomAccessIteratorT segment_begin, int segme
 template <int BlockThreads, typename GroupT, typename SegmentOpT, typename ValueT>
 struct transform_prolog_segment_range_selector
 {
-  using raw_value_t   = ::cuda::std::remove_cv_t<ValueT>;
-  using striped_range = striped_thread_segment_range_t<BlockThreads, ValueT*>;
-  using span_range    = ::cuda::std::span<ValueT>;
+  using raw_value_t      = ::cuda::std::remove_cv_t<ValueT>;
+  using vectorized_range = vectorized_thread_segment_range<BlockThreads, ValueT>;
+  using striped_range    = striped_thread_segment_range_t<BlockThreads, ValueT*>;
+  using span_range       = ::cuda::std::span<ValueT>;
 
-  // TODO: The striped range is used so F32 RMSNorm-style reductions read shared memory with consecutive warp lanes
-  // touching consecutive 4-byte banks. This is only the right bank-conflict fix for 4-byte values; define a
-  // dtype-aware policy for smaller/larger value sizes before using striped traversal there by default.
+  // TODO: The vectorized/striped ranges are used so F32 RMSNorm-style reductions read shared memory with consecutive
+  // warp lanes touching consecutive 4-byte banks. This is only the right bank-conflict fix for F32/4-byte values;
+  // define a dtype-aware policy for smaller/larger value sizes before using these traversals there by default.
+  static constexpr bool use_vectorized_range =
+    ::cuda::std::is_same_v<raw_value_t, float> && ::cuda::std::is_invocable_v<SegmentOpT, GroupT, vectorized_range>;
   static constexpr bool use_striped_range =
-    sizeof(raw_value_t) == 4 && ::cuda::std::is_invocable_v<SegmentOpT, GroupT, striped_range>;
+    !use_vectorized_range && sizeof(raw_value_t) == 4 && ::cuda::std::is_invocable_v<SegmentOpT, GroupT, striped_range>;
   static constexpr bool use_span_range =
-    !use_striped_range && ::cuda::std::is_invocable_v<SegmentOpT, GroupT, span_range>;
-  static constexpr bool valid = use_striped_range || use_span_range;
+    !use_vectorized_range && !use_striped_range && ::cuda::std::is_invocable_v<SegmentOpT, GroupT, span_range>;
+  static constexpr bool valid = use_vectorized_range || use_striped_range || use_span_range;
 
-  using type = ::cuda::std::conditional_t<use_striped_range, striped_range, span_range>;
+  using type = ::cuda::std::conditional_t<use_vectorized_range,
+                                          vectorized_range,
+                                          ::cuda::std::conditional_t<use_striped_range, striped_range, span_range>>;
 };
 
 template <int BlockThreads, typename GroupT, typename SegmentOpT, typename ValueT>
@@ -214,7 +418,11 @@ _CCCL_DEVICE auto make_transform_prolog_segment_range(ValueT* segment_begin, int
   static_assert(selector_t::valid,
                 "segment_op must be invocable with a TransformProlog segment range or cuda::std::span.");
 
-  if constexpr (selector_t::use_striped_range)
+  if constexpr (selector_t::use_vectorized_range)
+  {
+    return make_vectorized_thread_segment_range<BlockThreads>(segment_begin, segment_size, segment_offset);
+  }
+  else if constexpr (selector_t::use_striped_range)
   {
     return make_striped_thread_segment_range<BlockThreads>(segment_begin, segment_size, segment_offset);
   }
