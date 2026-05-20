@@ -175,6 +175,10 @@ using transform_prolog_f32_vector_range_storage_t = int4;
 static_assert(sizeof(transform_prolog_f32_vector_range_storage_t) == 4 * sizeof(float));
 static_assert(alignof(transform_prolog_f32_vector_range_storage_t) == 4 * sizeof(float));
 
+template <int BulkCopyAlignment>
+inline constexpr bool transform_prolog_shared_vector_aligned_v =
+  BulkCopyAlignment >= static_cast<int>(alignof(transform_prolog_f32_vector_range_storage_t));
+
 template <int BlockThreads, typename ValueT>
 class vectorized_thread_segment_range
 {
@@ -293,13 +297,9 @@ private:
   _CCCL_DEVICE void FillValues(
     transform_prolog_f32_vector_range_storage_t& values_storage, raw_value_t* values, int vector_base) const noexcept
   {
-    constexpr auto alignment = static_cast<::cuda::std::uintptr_t>(sizeof(transform_prolog_f32_vector_range_storage_t));
-
-    const bool vector_aligned =
-      (reinterpret_cast<::cuda::std::uintptr_t>(segment_begin_ + vector_base) % alignment) == 0;
     const bool full_vector = vector_base + 4 <= segment_size_;
 
-    if (vector_aligned && full_vector)
+    if (full_vector)
     {
       values_storage =
         reinterpret_cast<const transform_prolog_f32_vector_range_storage_t*>(segment_begin_ + vector_base)[0];
@@ -383,7 +383,7 @@ make_striped_thread_segment_range(RandomAccessIteratorT segment_begin, int segme
   return striped_thread_segment_range_t<BlockThreads, RandomAccessIteratorT>{begin, segment_offset + first_item, items};
 }
 
-template <int BlockThreads, typename GroupT, typename SegmentOpT, typename ValueT>
+template <int BlockThreads, typename GroupT, typename SegmentOpT, typename ValueT, bool SharedSegmentVectorAligned>
 struct transform_prolog_segment_range_selector
 {
   using raw_value_t      = ::cuda::std::remove_cv_t<ValueT>;
@@ -395,7 +395,8 @@ struct transform_prolog_segment_range_selector
   // warp lanes touching consecutive 4-byte banks. This is only the right bank-conflict fix for F32/4-byte values;
   // define a dtype-aware policy for smaller/larger value sizes before using these traversals there by default.
   static constexpr bool use_vectorized_range =
-    ::cuda::std::is_same_v<raw_value_t, float> && ::cuda::std::is_invocable_v<SegmentOpT, GroupT, vectorized_range>;
+    SharedSegmentVectorAligned
+    && ::cuda::std::is_same_v<raw_value_t, float> && ::cuda::std::is_invocable_v<SegmentOpT, GroupT, vectorized_range>;
   static constexpr bool use_striped_range =
     !use_vectorized_range && sizeof(raw_value_t) == 4 && ::cuda::std::is_invocable_v<SegmentOpT, GroupT, striped_range>;
   static constexpr bool use_span_range =
@@ -407,14 +408,16 @@ struct transform_prolog_segment_range_selector
                                           ::cuda::std::conditional_t<use_striped_range, striped_range, span_range>>;
 };
 
-template <int BlockThreads, typename GroupT, typename SegmentOpT, typename ValueT>
+template <int BlockThreads, typename GroupT, typename SegmentOpT, typename ValueT, bool SharedSegmentVectorAligned>
 using transform_prolog_segment_range_t =
-  typename transform_prolog_segment_range_selector<BlockThreads, GroupT, SegmentOpT, ValueT>::type;
+  typename transform_prolog_segment_range_selector<BlockThreads, GroupT, SegmentOpT, ValueT, SharedSegmentVectorAligned>::
+    type;
 
-template <int BlockThreads, typename GroupT, typename SegmentOpT, typename ValueT>
+template <int BlockThreads, typename GroupT, typename SegmentOpT, typename ValueT, bool SharedSegmentVectorAligned>
 _CCCL_DEVICE auto make_transform_prolog_segment_range(ValueT* segment_begin, int segment_size, int segment_offset = 0)
 {
-  using selector_t = transform_prolog_segment_range_selector<BlockThreads, GroupT, SegmentOpT, ValueT>;
+  using selector_t =
+    transform_prolog_segment_range_selector<BlockThreads, GroupT, SegmentOpT, ValueT, SharedSegmentVectorAligned>;
   static_assert(selector_t::valid,
                 "segment_op must be invocable with a TransformProlog segment range or cuda::std::span.");
 

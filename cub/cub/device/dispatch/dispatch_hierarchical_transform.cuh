@@ -51,21 +51,23 @@ CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE int transform_prolog_preferred_bulk_copy_
          : transform_prolog_default_bulk_copy_alignment;
 }
 
-template <int BlockThreads, typename InputIteratorT, typename SegmentOpT>
-inline constexpr bool hierarchical_transform_block_segment_op_v =
-  transform_prolog_segment_range_selector<BlockThreads,
-                                          ::cuda::experimental::this_block<decltype(::cuda::hierarchy(
-                                            ::cuda::grid_dims(dim3{}), ::cuda::block_dims<BlockThreads>()))>,
-                                          SegmentOpT,
-                                          cub::detail::it_value_t<InputIteratorT>>::valid;
+template <int BlockThreads, typename InputIteratorT, typename SegmentOpT, bool SharedSegmentVectorAligned>
+inline constexpr bool hierarchical_transform_block_segment_op_v = transform_prolog_segment_range_selector<
+  BlockThreads,
+  ::cuda::experimental::this_block<decltype(::cuda::hierarchy(
+    ::cuda::grid_dims(dim3{}), ::cuda::block_dims<BlockThreads>()))>,
+  SegmentOpT,
+  cub::detail::it_value_t<InputIteratorT>,
+  SharedSegmentVectorAligned>::valid;
 
-template <int BlockThreads, typename InputIteratorT, typename SegmentOpT>
+template <int BlockThreads, typename InputIteratorT, typename SegmentOpT, bool SharedSegmentVectorAligned>
 inline constexpr bool hierarchical_transform_cluster_segment_op_v = transform_prolog_segment_range_selector<
   BlockThreads,
   ::cuda::experimental::this_cluster<decltype(::cuda::hierarchy(
     ::cuda::grid_dims(dim3{}), ::cuda::cluster_dims(dim3{}), ::cuda::block_dims<BlockThreads>()))>,
   SegmentOpT,
-  cub::detail::it_value_t<InputIteratorT>>::valid;
+  cub::detail::it_value_t<InputIteratorT>,
+  SharedSegmentVectorAligned>::valid;
 
 template <int BlockThreads,
           typename InputIteratorT,
@@ -390,9 +392,11 @@ struct DispatchHierarchicalTransform
         }
 
         if constexpr (BlockThreads != transform_prolog_block_large_block_threads
-                      && hierarchical_transform_block_segment_op_v<transform_prolog_block_large_block_threads,
-                                                                   InputIteratorT,
-                                                                   SegmentOpT>)
+                      && hierarchical_transform_block_segment_op_v<
+                        transform_prolog_block_large_block_threads,
+                        InputIteratorT,
+                        SegmentOpT,
+                        transform_prolog_shared_vector_aligned_v<BulkCopyAlignment>>)
         {
           if (segment_size >= transform_prolog_block_large_block_threads)
           {
@@ -591,9 +595,11 @@ struct DispatchHierarchicalTransform
         }
 
         if constexpr (BlockThreads != transform_prolog_cluster_large_block_threads
-                      && hierarchical_transform_cluster_segment_op_v<transform_prolog_cluster_large_block_threads,
-                                                                     InputIteratorT,
-                                                                     SegmentOpT>)
+                      && hierarchical_transform_cluster_segment_op_v<
+                        transform_prolog_cluster_large_block_threads,
+                        InputIteratorT,
+                        SegmentOpT,
+                        transform_prolog_shared_vector_aligned_v<BulkCopyAlignment>>)
         {
           if (chunk_items >= transform_prolog_cluster_large_block_threads)
           {
@@ -636,7 +642,11 @@ struct DispatchHierarchicalTransform
     ::cuda::std::size_t requested_shared_bytes,
     int max_grid_dim_x)
   {
-    if constexpr (!hierarchical_transform_cluster_segment_op_v<BlockThreads, InputIteratorT, SegmentOpT>)
+    if constexpr (!hierarchical_transform_cluster_segment_op_v<
+                    BlockThreads,
+                    InputIteratorT,
+                    SegmentOpT,
+                    transform_prolog_shared_vector_aligned_v<BulkCopyAlignment>>)
     {
       return cudaErrorInvalidValue;
     }
@@ -718,9 +728,11 @@ struct DispatchHierarchicalTransform
       }
 
       if constexpr (BlockThreads != transform_prolog_cluster_large_block_threads
-                    && hierarchical_transform_cluster_segment_op_v<transform_prolog_cluster_large_block_threads,
-                                                                   InputIteratorT,
-                                                                   SegmentOpT>)
+                    && hierarchical_transform_cluster_segment_op_v<
+                      transform_prolog_cluster_large_block_threads,
+                      InputIteratorT,
+                      SegmentOpT,
+                      transform_prolog_shared_vector_aligned_v<BulkCopyAlignment>>)
       {
         if (cluster_policy.block_threads == transform_prolog_cluster_large_block_threads)
         {
@@ -773,7 +785,11 @@ struct DispatchHierarchicalTransform
     }
 
     if constexpr (transform_prolog_enable_cluster_dispatch
-                  && hierarchical_transform_cluster_segment_op_v<BlockThreads, InputIteratorT, SegmentOpT>)
+                  && hierarchical_transform_cluster_segment_op_v<
+                    BlockThreads,
+                    InputIteratorT,
+                    SegmentOpT,
+                    transform_prolog_shared_vector_aligned_v<BulkCopyAlignment>>)
     {
       if (requested_shared_bytes > transform_prolog_cluster_smem_threshold)
       {
@@ -806,9 +822,11 @@ struct DispatchHierarchicalTransform
     }
 
     if constexpr (BlockThreads != transform_prolog_block_large_block_threads
-                  && hierarchical_transform_block_segment_op_v<transform_prolog_block_large_block_threads,
-                                                               InputIteratorT,
-                                                               SegmentOpT>)
+                  && hierarchical_transform_block_segment_op_v<
+                    transform_prolog_block_large_block_threads,
+                    InputIteratorT,
+                    SegmentOpT,
+                    transform_prolog_shared_vector_aligned_v<BulkCopyAlignment>>)
     {
       if (block_policy.block_threads == transform_prolog_block_large_block_threads)
       {
