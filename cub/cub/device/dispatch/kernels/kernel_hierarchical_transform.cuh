@@ -19,7 +19,6 @@
 
 #include <thrust/system/cuda/detail/core/util.h>
 
-#include <cuda/std/__algorithm/max.h>
 #include <cuda/std/cstddef>
 #include <cuda/std/cstdint>
 #include <cuda/std/span>
@@ -245,17 +244,18 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
   _CCCL_GRID_CONSTANT const InputIteratorT d_in,
   _CCCL_GRID_CONSTANT const DirectInputIteratorT d_direct,
   _CCCL_GRID_CONSTANT const OutputIteratorT d_out,
-  _CCCL_GRID_CONSTANT const int num_segments,
   _CCCL_GRID_CONSTANT const int segment_size,
-  _CCCL_GRID_CONSTANT const int segments_per_block,
   SegmentOpT segment_op,
   ElementTransformOpT element_transform_op)
 {
-  // Block-level implementation:
-  // - one block owns one or more fixed-size contiguous segments
-  // - the block stages the complete packed segment tile with one `BlockLoadToShared`
-  // - for packed small segments, the whole block processes each segment sequentially
-  // - `segment_op` receives a normal block group, so cuda::coop::reduce uses the existing block reduce path
+  // Initial block-only implementation:
+  // - one block owns one fixed-size contiguous segment
+  // - the block first stages the segment into shared memory via `BlockLoadToShared`
+  // - `segment_op` receives either an explicitly requested contiguous span or an implementation-chosen per-thread range
+  // - `segment_op` is responsible for any block-wide combine it needs and should return the final segment result on
+  //   every thread in the block group
+  // - the kernel then applies `element_transform_op` to each item, passing the segment result, the segment-local item
+  //   index, and the item value
 
   using block_hierarchy_t = decltype(::cuda::hierarchy(::cuda::grid_dims(dim3{}), ::cuda::block_dims<BlockThreads>()));
   using block_group_t     = ::cuda::experimental::this_block<block_hierarchy_t>;
@@ -276,14 +276,13 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
   extern __shared__ char shared_segment_buffer_base[];
   __shared__ typename block_load_to_shared_t::TempStorage load_to_shared_storage;
 
-  const int block_first_segment = static_cast<int>(blockIdx.x) * segments_per_block;
-  const int valid_segments =
-    (::cuda::std::max) (0, (::cuda::std::min) (segments_per_block, num_segments - block_first_segment));
-  const int copy_items = valid_segments * segment_size;
+  const int segment_id = static_cast<int>(blockIdx.x);
+  const auto segment_offset =
+    static_cast<::cuda::std::size_t>(segment_id) * static_cast<::cuda::std::size_t>(segment_size);
+  const auto segment_begin = d_in + segment_offset;
 
-  const auto block_hierarchy = ::cuda::hierarchy(::cuda::grid_dims(gridDim), ::cuda::block_dims<BlockThreads>());
-  auto block_group           = ::cuda::experimental::this_block{block_hierarchy};
-
+  const auto block_hierarchy   = ::cuda::hierarchy(::cuda::grid_dims(gridDim), ::cuda::block_dims<BlockThreads>());
+  auto block_group             = ::cuda::experimental::this_block{block_hierarchy};
   auto apply_element_transform = [&](const segment_result_t& segment_result, int index_in_segment, auto&& value) {
     using input_ref_t = decltype(value);
 
@@ -310,47 +309,36 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
         segment_result, static_cast<direct_ref_t>(direct_value), static_cast<input_ref_t>(value));
     };
 
-  const int shared_buffer_bytes =
-    cub::detail::LoadToSharedBufferSizeBytes<value_t, BulkCopyAlignment>(segments_per_block * segment_size);
+  const int shared_buffer_bytes = cub::detail::LoadToSharedBufferSizeBytes<value_t, BulkCopyAlignment>(segment_size);
 
   block_load_to_shared_t load_to_shared{load_to_shared_storage};
   ::cuda::std::span<char> shared_buffer{
     shared_segment_buffer_base, static_cast<::cuda::std::size_t>(shared_buffer_bytes)};
-  ::cuda::std::span<const value_t> input_buffer{
-    d_in + static_cast<::cuda::std::size_t>(block_first_segment) * static_cast<::cuda::std::size_t>(segment_size),
-    static_cast<::cuda::std::size_t>(copy_items)};
+  ::cuda::std::span<const value_t> input_buffer{segment_begin, static_cast<::cuda::std::size_t>(segment_size)};
   auto staged_segment = load_to_shared.template CopyAsync<value_t, BulkCopyAlignment>(shared_buffer, input_buffer);
   auto token          = load_to_shared.Commit();
   load_to_shared.Wait(::cuda::std::move(token));
+  value_t* shared_segment = staged_segment.data();
 
-  for (int segment_in_block = 0; segment_in_block < valid_segments; ++segment_in_block)
-  {
-    const int segment_id = block_first_segment + segment_in_block;
-    const auto segment_offset =
-      static_cast<::cuda::std::size_t>(segment_id) * static_cast<::cuda::std::size_t>(segment_size);
-    value_t* shared_segment = staged_segment.data() + segment_in_block * segment_size;
+  auto input_range = make_transform_prolog_segment_range<
+    BlockThreads,
+    block_group_t,
+    SegmentOpT,
+    value_t,
+    transform_prolog_shared_vector_aligned_v<BulkCopyAlignment>,
+    true>(shared_segment, segment_size);
+  const segment_result_t segment_result = segment_op(block_group, input_range);
 
-    auto input_range = make_transform_prolog_segment_range<
-      BlockThreads,
-      block_group_t,
-      SegmentOpT,
-      value_t,
-      transform_prolog_shared_vector_aligned_v<BulkCopyAlignment>,
-      true>(shared_segment, segment_size);
-    const segment_result_t segment_result = segment_op(block_group, input_range);
-
-    transform_prolog_store_outputs<BlockThreads, transform_prolog_shared_vector_aligned_v<BulkCopyAlignment>, true>(
-      d_direct,
-      d_out,
-      segment_offset,
-      0,
-      segment_size,
-      shared_segment,
-      segment_result,
-      apply_element_transform,
-      apply_element_transform_with_direct);
-    block_group.sync();
-  }
+  transform_prolog_store_outputs<BlockThreads, transform_prolog_shared_vector_aligned_v<BulkCopyAlignment>, true>(
+    d_direct,
+    d_out,
+    segment_offset,
+    0,
+    segment_size,
+    shared_segment,
+    segment_result,
+    apply_element_transform,
+    apply_element_transform_with_direct);
 }
 
 template <int BlockThreads,
