@@ -29,10 +29,6 @@ CUB_NAMESPACE_BEGIN
 
 namespace detail::hierarchical
 {
-using transform_prolog_f32_vector_storage_t = int4;
-static_assert(sizeof(transform_prolog_f32_vector_storage_t) == 4 * sizeof(float));
-static_assert(alignof(transform_prolog_f32_vector_storage_t) == 4 * sizeof(float));
-
 template <typename DirectInputIteratorT>
 struct transform_prolog_direct_vector_load
 {
@@ -46,7 +42,7 @@ struct transform_prolog_direct_vector_load<T*>
 
   static constexpr bool supported = ::cuda::std::is_same_v<value_t, float>;
 
-  [[nodiscard]] _CCCL_DEVICE _CCCL_FORCEINLINE static bool IsAligned(T* input, int index)
+  [[nodiscard]] _CCCL_HOST_DEVICE _CCCL_FORCEINLINE static bool IsAligned(T* input, int index)
   {
     constexpr auto alignment = static_cast<::cuda::std::uintptr_t>(sizeof(transform_prolog_f32_vector_storage_t));
     return (reinterpret_cast<::cuda::std::uintptr_t>(input + index) % alignment) == 0;
@@ -63,7 +59,7 @@ struct transform_prolog_direct_vector_load<CacheModifiedInputIterator<Modifier, 
 {
   static constexpr bool supported = true;
 
-  [[nodiscard]] _CCCL_DEVICE _CCCL_FORCEINLINE static bool
+  [[nodiscard]] _CCCL_HOST_DEVICE _CCCL_FORCEINLINE static bool
   IsAligned(CacheModifiedInputIterator<Modifier, float, OffsetT> input, int index)
   {
     constexpr auto alignment = static_cast<::cuda::std::uintptr_t>(sizeof(transform_prolog_f32_vector_storage_t));
@@ -80,35 +76,15 @@ struct transform_prolog_direct_vector_load<CacheModifiedInputIterator<Modifier, 
 };
 
 template <typename OutputIteratorT>
-inline constexpr bool transform_prolog_vector_output_v =
-  ::cuda::std::is_pointer_v<OutputIteratorT>
-  && ::cuda::std::is_same_v<::cuda::std::remove_cv_t<::cuda::std::remove_pointer_t<OutputIteratorT>>, float>;
-
-template <typename OutputIteratorT>
-_CCCL_DEVICE _CCCL_FORCEINLINE void transform_prolog_store_vector(
-  OutputIteratorT output, ::cuda::std::size_t index, transform_prolog_f32_vector_storage_t value)
-{
-  reinterpret_cast<transform_prolog_f32_vector_storage_t*>(output + index)[0] = value;
-}
-
-template <typename OutputIteratorT>
 [[nodiscard]] _CCCL_DEVICE _CCCL_FORCEINLINE bool
-transform_prolog_output_vector_aligned(OutputIteratorT output, ::cuda::std::size_t index)
+transform_prolog_output_is_vector_aligned(OutputIteratorT output, ::cuda::std::size_t index)
 {
   constexpr auto alignment = static_cast<::cuda::std::uintptr_t>(sizeof(transform_prolog_f32_vector_storage_t));
   return (reinterpret_cast<::cuda::std::uintptr_t>(output + index) % alignment) == 0;
 }
 
-template <typename ValueT>
-[[nodiscard]] _CCCL_DEVICE _CCCL_FORCEINLINE transform_prolog_f32_vector_storage_t
-transform_prolog_load_shared_vector(ValueT* input, int index)
-{
-  return reinterpret_cast<const transform_prolog_f32_vector_storage_t*>(input + index)[0];
-}
-
 template <int BlockThreads,
-          bool SharedSegmentVectorAligned,
-          bool AssumeDirectAndOutputVectorAligned = false,
+          bool VectorizeOutputs,
           typename ValueT,
           typename DirectInputIteratorT,
           typename OutputIteratorT,
@@ -128,13 +104,20 @@ _CCCL_DEVICE _CCCL_FORCEINLINE void transform_prolog_store_outputs(
 
   using direct_vector_load_t = transform_prolog_direct_vector_load<::cuda::std::remove_cv_t<DirectInputIteratorT>>;
   constexpr int vector_items = 4;
-  constexpr bool can_vectorize =
-    SharedSegmentVectorAligned && ::cuda::std::is_same_v<::cuda::std::remove_cv_t<ValueT>, float>
-    && direct_vector_load_t::supported && transform_prolog_vector_output_v<::cuda::std::remove_cv_t<OutputIteratorT>>;
+  constexpr bool output_is_contiguous_f32_pointer =
+    ::cuda::std::is_pointer_v<::cuda::std::remove_cv_t<OutputIteratorT>>
+    && ::cuda::std::is_same_v<
+      ::cuda::std::remove_cv_t<::cuda::std::remove_pointer_t<::cuda::std::remove_cv_t<OutputIteratorT>>>,
+      float>;
+  constexpr bool can_vectorize = VectorizeOutputs && ::cuda::std::is_same_v<::cuda::std::remove_cv_t<ValueT>, float>
+                              && direct_vector_load_t::supported && output_is_contiguous_f32_pointer;
 
   if constexpr (can_vectorize)
   {
-    auto store_vectorized_prefix = [&](int vector_count) {
+    auto store_vectorized_outputs = [&](int vector_count) {
+      auto* d_out_vector          = reinterpret_cast<transform_prolog_f32_vector_storage_t*>(d_out + segment_offset);
+      auto* shared_segment_vector = reinterpret_cast<const transform_prolog_f32_vector_storage_t*>(shared_segment);
+
       for (int vector_index = thread_rank; vector_index < vector_count; vector_index += BlockThreads)
       {
         const int local_base       = vector_index * vector_items;
@@ -146,60 +129,32 @@ _CCCL_DEVICE _CCCL_FORCEINLINE void transform_prolog_store_outputs(
         reinterpret_cast<transform_prolog_f32_vector_storage_t*>(direct_values.data())[0] =
           direct_vector_load_t::Load(d_direct, index_in_segment);
         reinterpret_cast<transform_prolog_f32_vector_storage_t*>(shared_values.data())[0] =
-          transform_prolog_load_shared_vector(shared_segment, local_base);
+          shared_segment_vector[local_base / vector_items];
 
         uninitialized_array<float, vector_items, sizeof(transform_prolog_f32_vector_storage_t)> transformed_values;
         _CCCL_PRAGMA_UNROLL_FULL()
         for (int lane = 0; lane < vector_items; ++lane)
         {
           transformed_values[lane] =
-            apply_element_transform_with_direct(segment_result, direct_values[lane], shared_values[lane]);
+            apply_element_transform_with_direct(shared_values[lane], direct_values[lane], segment_result);
         }
 
-        transform_prolog_store_vector(
-          d_out,
-          segment_offset + static_cast<::cuda::std::size_t>(index_in_segment),
-          reinterpret_cast<const transform_prolog_f32_vector_storage_t*>(transformed_values.data())[0]);
+        d_out_vector[index_in_segment / vector_items] =
+          reinterpret_cast<const transform_prolog_f32_vector_storage_t*>(transformed_values.data())[0];
       }
     };
 
-    if constexpr (AssumeDirectAndOutputVectorAligned)
-    {
-      _CCCL_ASSERT(chunk_begin % vector_items == 0, "");
-      _CCCL_ASSERT((segment_offset + static_cast<::cuda::std::size_t>(chunk_begin)) % vector_items == 0, "");
-      _CCCL_ASSERT(items % vector_items == 0, "");
-      _CCCL_ASSERT(direct_vector_load_t::IsAligned(d_direct, chunk_begin), "");
-      _CCCL_ASSERT(
-        transform_prolog_output_vector_aligned(d_out, segment_offset + static_cast<::cuda::std::size_t>(chunk_begin)),
-        "");
+    _CCCL_ASSERT(chunk_begin % vector_items == 0, "");
+    _CCCL_ASSERT((segment_offset + static_cast<::cuda::std::size_t>(chunk_begin)) % vector_items == 0, "");
+    _CCCL_ASSERT(items % vector_items == 0, "");
+    _CCCL_ASSERT(direct_vector_load_t::IsAligned(d_direct, chunk_begin), "");
+    _CCCL_ASSERT(
+      transform_prolog_output_is_vector_aligned(d_out, segment_offset + static_cast<::cuda::std::size_t>(chunk_begin)),
+      "");
 
-      const int vector_count = items / vector_items;
-      store_vectorized_prefix(vector_count);
-      return;
-    }
-    else
-    {
-      const bool direct_and_output_aligned =
-        (chunk_begin % vector_items == 0)
-        && ((segment_offset + static_cast<::cuda::std::size_t>(chunk_begin)) % vector_items == 0)
-        && direct_vector_load_t::IsAligned(d_direct, chunk_begin)
-        && transform_prolog_output_vector_aligned(d_out, segment_offset + static_cast<::cuda::std::size_t>(chunk_begin));
-
-      if (direct_and_output_aligned)
-      {
-        const int vector_count = items / vector_items;
-        store_vectorized_prefix(vector_count);
-        for (int local_index = vector_count * vector_items + thread_rank; local_index < items;
-             local_index += BlockThreads)
-        {
-          const int index_in_segment = chunk_begin + local_index;
-          const auto direct_value    = d_direct[index_in_segment];
-          d_out[segment_offset + static_cast<::cuda::std::size_t>(index_in_segment)] =
-            apply_element_transform_with_direct(segment_result, direct_value, shared_segment[local_index]);
-        }
-        return;
-      }
-    }
+    const int vector_count = items / vector_items;
+    store_vectorized_outputs(vector_count);
+    return;
   }
 
   for (int local_index = thread_rank; local_index < items; local_index += BlockThreads)
@@ -207,12 +162,13 @@ _CCCL_DEVICE _CCCL_FORCEINLINE void transform_prolog_store_outputs(
     const int index_in_segment = chunk_begin + local_index;
     const auto direct_value    = d_direct[index_in_segment];
     d_out[segment_offset + static_cast<::cuda::std::size_t>(index_in_segment)] =
-      apply_element_transform_with_direct(segment_result, direct_value, shared_segment[local_index]);
+      apply_element_transform_with_direct(shared_segment[local_index], direct_value, segment_result);
   }
 }
 
 template <int BlockThreads,
           int BulkCopyAlignment,
+          bool VectorizeDirectAndOutput,
           typename InputIteratorT,
           typename DirectInputIteratorT,
           typename OutputIteratorT,
@@ -229,22 +185,22 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
   // Initial block-only implementation:
   // - one block owns one fixed-size contiguous segment
   // - the block first stages the segment into shared memory via `BlockLoadToShared`
-  // - `segment_op` receives either an explicitly requested contiguous span or an implementation-chosen per-thread range
+  // - `segment_op` receives an implementation-chosen per-thread range
   // - `segment_op` is responsible for any block-wide combine it needs and should return the final segment result on
   //   every thread in the block group
-  // - the kernel then applies `element_transform_op` to each item, passing the segment result, the direct input value,
-  //   and the staged input value
+  // - the kernel then applies `element_transform_op` to each item, passing the staged input value, the direct input
+  //   value, and the segment result
 
-  using block_hierarchy_t = decltype(::cuda::hierarchy(::cuda::grid_dims(dim3{}), ::cuda::block_dims<BlockThreads>()));
-  using block_group_t     = ::cuda::experimental::this_block<block_hierarchy_t>;
-  using value_t           = cub::detail::it_value_t<InputIteratorT>;
-  using input_range_t     = transform_prolog_segment_range_t<
-        BlockThreads,
-        block_group_t,
-        SegmentOpT,
-        value_t,
-        transform_prolog_shared_vector_aligned_v<BulkCopyAlignment>,
-        true>;
+  auto block_hierarchy = ::cuda::hierarchy(::cuda::grid_dims(gridDim), ::cuda::block_dims<BlockThreads>());
+  using block_group_t  = ::cuda::experimental::this_block<decltype(block_hierarchy)>;
+  using value_t        = cub::detail::it_value_t<InputIteratorT>;
+  using input_range_t  = transform_prolog_segment_range_t<
+     BlockThreads,
+     block_group_t,
+     SegmentOpT,
+     value_t,
+     transform_prolog_shared_vector_aligned_v<BulkCopyAlignment>,
+     true>;
   using segment_result_t = ::cuda::std::decay_t<::cuda::std::invoke_result_t<SegmentOpT, block_group_t, input_range_t>>;
   using block_load_to_shared_t = BlockLoadToShared<BlockThreads>;
 
@@ -257,17 +213,16 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
     static_cast<::cuda::std::size_t>(segment_id) * static_cast<::cuda::std::size_t>(segment_size);
   const auto segment_begin = d_in + segment_offset;
 
-  const auto block_hierarchy = ::cuda::hierarchy(::cuda::grid_dims(gridDim), ::cuda::block_dims<BlockThreads>());
-  auto block_group           = ::cuda::experimental::this_block{block_hierarchy};
+  auto block_group = ::cuda::experimental::this_block{block_hierarchy};
   auto apply_element_transform_with_direct =
-    [&](const segment_result_t& segment_result, auto&& direct_value, auto&& value) {
-      using direct_ref_t = decltype(direct_value);
+    [&](auto&& value, auto&& direct_value, const segment_result_t& segment_result) {
       using input_ref_t  = decltype(value);
+      using direct_ref_t = decltype(direct_value);
 
-      static_assert(::cuda::std::is_invocable_v<ElementTransformOpT, segment_result_t, direct_ref_t, input_ref_t>,
-                    "element_transform_op must be invocable with (segment_result, direct_input, value).");
+      static_assert(::cuda::std::is_invocable_v<ElementTransformOpT, input_ref_t, direct_ref_t, segment_result_t>,
+                    "element_transform_op must be invocable with (value, direct_input, segment_result).");
       return element_transform_op(
-        segment_result, static_cast<direct_ref_t>(direct_value), static_cast<input_ref_t>(value));
+        static_cast<input_ref_t>(value), static_cast<direct_ref_t>(direct_value), segment_result);
     };
 
   const int shared_buffer_bytes = cub::detail::LoadToSharedBufferSizeBytes<value_t, BulkCopyAlignment>(segment_size);
@@ -290,115 +245,13 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
     true>(shared_segment, segment_size);
   const segment_result_t segment_result = segment_op(block_group, input_range);
 
-  transform_prolog_store_outputs<BlockThreads, transform_prolog_shared_vector_aligned_v<BulkCopyAlignment>, true>(
+  transform_prolog_store_outputs<BlockThreads,
+                                 transform_prolog_shared_vector_aligned_v<BulkCopyAlignment> && VectorizeDirectAndOutput>(
     d_direct,
     d_out,
     segment_offset,
     0,
     segment_size,
-    shared_segment,
-    segment_result,
-    apply_element_transform_with_direct);
-}
-
-template <int BlockThreads,
-          int BulkCopyAlignment,
-          typename InputIteratorT,
-          typename DirectInputIteratorT,
-          typename OutputIteratorT,
-          typename SegmentOpT,
-          typename ElementTransformOpT>
-_CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalTransformClusterKernel(
-  _CCCL_GRID_CONSTANT const InputIteratorT d_in,
-  _CCCL_GRID_CONSTANT const DirectInputIteratorT d_direct,
-  _CCCL_GRID_CONSTANT const OutputIteratorT d_out,
-  _CCCL_GRID_CONSTANT const int segment_size,
-  _CCCL_GRID_CONSTANT const int cluster_size,
-  _CCCL_GRID_CONSTANT const int chunk_items,
-  SegmentOpT segment_op,
-  ElementTransformOpT element_transform_op)
-{
-  // Large-segment path:
-  // - one cluster owns one fixed-size contiguous segment
-  // - each CTA in the cluster stages one contiguous segment chunk in its local shared memory
-  // - the segment op sees a cluster group and the CTA-local chunk range
-  // - the segment op is responsible for reducing across the cluster, for example through cuda::coop::reduce
-  // - each CTA transforms and stores only the items from its own staged chunk
-
-  using block_hierarchy_t = decltype(::cuda::hierarchy(::cuda::grid_dims(dim3{}), ::cuda::block_dims<BlockThreads>()));
-  using cluster_hierarchy_t = decltype(::cuda::hierarchy(
-    ::cuda::grid_dims(dim3{}), ::cuda::cluster_dims(dim3{}), ::cuda::block_dims<BlockThreads>()));
-  using cluster_group_t     = ::cuda::experimental::this_cluster<cluster_hierarchy_t>;
-  using value_t             = cub::detail::it_value_t<InputIteratorT>;
-  using input_range_t =
-    transform_prolog_segment_range_t<BlockThreads,
-                                     cluster_group_t,
-                                     SegmentOpT,
-                                     value_t,
-                                     transform_prolog_shared_vector_aligned_v<BulkCopyAlignment>>;
-  using segment_result_t =
-    ::cuda::std::decay_t<::cuda::std::invoke_result_t<SegmentOpT, cluster_group_t, input_range_t>>;
-  using block_load_to_shared_t = BlockLoadToShared<BlockThreads>;
-
-  static_assert(!::cuda::std::is_void_v<segment_result_t>, "segment_op must return one scalar result per segment.");
-
-  extern __shared__ char shared_segment_buffer_base[];
-  __shared__ typename block_load_to_shared_t::TempStorage load_to_shared_storage;
-
-  const int cluster_rank = static_cast<int>(blockIdx.x % cluster_size);
-  const int segment_id   = static_cast<int>(blockIdx.x / cluster_size);
-  const int chunk_begin  = (::cuda::std::min) (cluster_rank * chunk_items, segment_size);
-  const int chunk_end    = (::cuda::std::min) (chunk_begin + chunk_items, segment_size);
-  const int local_items  = chunk_end - chunk_begin;
-  const auto segment_offset =
-    static_cast<::cuda::std::size_t>(segment_id) * static_cast<::cuda::std::size_t>(segment_size);
-  const auto segment_begin = d_in + segment_offset;
-
-  const auto block_hierarchy   = ::cuda::hierarchy(::cuda::grid_dims(gridDim), ::cuda::block_dims<BlockThreads>());
-  auto block_group             = ::cuda::experimental::this_block{block_hierarchy};
-  const auto cluster_hierarchy = ::cuda::hierarchy(
-    ::cuda::grid_dims(gridDim),
-    ::cuda::cluster_dims(dim3(static_cast<unsigned int>(cluster_size), 1, 1)),
-    ::cuda::block_dims<BlockThreads>());
-  auto cluster_group = ::cuda::experimental::this_cluster{cluster_hierarchy};
-
-  auto apply_element_transform_with_direct =
-    [&](const segment_result_t& segment_result, auto&& direct_value, auto&& value) {
-      using direct_ref_t = decltype(direct_value);
-      using input_ref_t  = decltype(value);
-
-      static_assert(::cuda::std::is_invocable_v<ElementTransformOpT, segment_result_t, direct_ref_t, input_ref_t>,
-                    "element_transform_op must be invocable with (segment_result, direct_input, value).");
-      return element_transform_op(
-        segment_result, static_cast<direct_ref_t>(direct_value), static_cast<input_ref_t>(value));
-    };
-
-  const int shared_buffer_bytes = cub::detail::LoadToSharedBufferSizeBytes<value_t, BulkCopyAlignment>(local_items);
-
-  block_load_to_shared_t load_to_shared{load_to_shared_storage};
-  ::cuda::std::span<char> shared_buffer{
-    shared_segment_buffer_base, static_cast<::cuda::std::size_t>(shared_buffer_bytes)};
-  ::cuda::std::span<const value_t> input_buffer{
-    segment_begin + chunk_begin, static_cast<::cuda::std::size_t>(local_items)};
-  auto staged_segment = load_to_shared.template CopyAsync<value_t, BulkCopyAlignment>(shared_buffer, input_buffer);
-  auto token          = load_to_shared.Commit();
-  load_to_shared.Wait(::cuda::std::move(token));
-  value_t* shared_segment = staged_segment.data();
-
-  auto input_range = make_transform_prolog_segment_range<
-    BlockThreads,
-    cluster_group_t,
-    SegmentOpT,
-    value_t,
-    transform_prolog_shared_vector_aligned_v<BulkCopyAlignment>>(shared_segment, local_items, chunk_begin);
-  const segment_result_t segment_result = segment_op(cluster_group, input_range);
-
-  transform_prolog_store_outputs<BlockThreads, transform_prolog_shared_vector_aligned_v<BulkCopyAlignment>>(
-    d_direct,
-    d_out,
-    segment_offset,
-    chunk_begin,
-    local_items,
     shared_segment,
     segment_result,
     apply_element_transform_with_direct);

@@ -102,11 +102,11 @@ try
           partial_sum += value * value;
         });
 
-        const float sum_of_squares = cuda::coop::reduce(group, partial_sum, cuda::std::plus<>{});
+        const float sum_of_squares = cuda::coop::sum(group, partial_sum);
 
         return rsqrtf(sum_of_squares / static_cast<float>(hidden_size) + rms_norm_eps);
       },
-      [] __device__(float rms_rcp, T weight, T x) {
+      [] __device__(T x, T weight, float rms_rcp) {
         const float scale = static_cast<float>(weight) * rms_rcp;
 
         return static_cast<T>(static_cast<float>(x) * scale);

@@ -19,6 +19,8 @@
 #include <cub/util_debug.cuh>
 #include <cub/util_device.cuh>
 
+#include <thrust/type_traits/is_trivially_relocatable.h>
+
 #include <cuda/std/__algorithm/min.h>
 #include <cuda/std/cstdint>
 #include <cuda/std/limits>
@@ -37,20 +39,23 @@ template <typename InputIteratorT,
           typename ElementTransformOpT>
 struct DeviceHierarchicalTransformKernelSource
 {
-  template <int BlockThreads, int BulkCopyAlignment>
+  template <int BlockThreads, int BulkCopyAlignment, bool VectorizeDirectAndOutput>
   _CCCL_HIDE_FROM_ABI
-  CUB_RUNTIME_FUNCTION static constexpr decltype(&DeviceHierarchicalTransformKernel<BlockThreads,
-                                                                                    BulkCopyAlignment,
-                                                                                    InputIteratorT,
-                                                                                    DirectInputIteratorT,
-                                                                                    OutputIteratorT,
-                                                                                    SegmentOpT,
-                                                                                    ElementTransformOpT>)
+  CUB_RUNTIME_FUNCTION static constexpr decltype(&DeviceHierarchicalTransformKernel<
+                                                 BlockThreads,
+                                                 BulkCopyAlignment,
+                                                 VectorizeDirectAndOutput,
+                                                 InputIteratorT,
+                                                 DirectInputIteratorT,
+                                                 OutputIteratorT,
+                                                 SegmentOpT,
+                                                 ElementTransformOpT>)
   HierarchicalTransformKernel()
   {
     return &DeviceHierarchicalTransformKernel<
       BlockThreads,
       BulkCopyAlignment,
+      VectorizeDirectAndOutput,
       InputIteratorT,
       DirectInputIteratorT,
       OutputIteratorT,
@@ -72,10 +77,10 @@ template <typename InputIteratorT,
           typename KernelLauncherFactory = CUB_DETAIL_DEFAULT_KERNEL_LAUNCHER_FACTORY>
 struct DispatchHierarchicalTransform
 {
-  static_assert(hierarchical_transform_stageable_input_v<InputIteratorT>,
-                "TransformProlog requires input values to be trivially relocatable.");
-
   using input_value_t = cub::detail::it_value_t<InputIteratorT>;
+
+  static_assert(THRUST_NS_QUALIFIER::is_trivially_relocatable_v<::cuda::std::remove_cv_t<input_value_t>>,
+                "TransformProlog requires input values to be trivially relocatable.");
 
   // TransformProlog stages one full segment in shared memory, so occupancy depends on runtime segment size rather than
   // only a static policy. Try a larger block when shared memory limits the number of resident CTAs.
@@ -249,63 +254,108 @@ struct DispatchHierarchicalTransform
     int device{-1};
     int segment_size{0};
     ::cuda::std::size_t requested_shared_bytes{0};
+    bool vectorize_direct_and_output{false};
     block_policy_t policy{};
   };
 
-  template <int BulkCopyAlignment, typename DeviceHierarchicalTransformKernelT>
+  template <int BulkCopyAlignment, bool VectorizeDirectAndOutput, typename DeviceHierarchicalTransformKernelT>
   CUB_RUNTIME_FUNCTION _CCCL_VISIBILITY_HIDDEN _CCCL_FORCEINLINE cudaError_t SelectBlockPolicy(
     DeviceHierarchicalTransformKernelT default_hierarchical_transform_kernel,
     int current_device,
     ::cuda::std::size_t requested_shared_bytes,
     block_policy_t& policy)
   {
-    NV_IF_TARGET(NV_IS_HOST,
-                 ({
-                   static block_policy_cache_t cached_policies[block_policy_cache_size]{};
-                   static int next_cached_policy = 0;
+    NV_IF_TARGET(
+      NV_IS_HOST,
+      ({
+        static block_policy_cache_t cached_policies[block_policy_cache_size]{};
+        static int next_cached_policy = 0;
 
-                   for (const auto& cached_policy : cached_policies)
-                   {
-                     if (cached_policy.valid && cached_policy.device == current_device
-                         && cached_policy.segment_size == segment_size
-                         && cached_policy.requested_shared_bytes == requested_shared_bytes)
-                     {
-                       policy = cached_policy.policy;
-                       return cudaSuccess;
-                     }
-                   }
+        for (const auto& cached_policy : cached_policies)
+        {
+          if (cached_policy.valid && cached_policy.device == current_device
+              && cached_policy.segment_size == segment_size
+              && cached_policy.requested_shared_bytes == requested_shared_bytes
+              && cached_policy.vectorize_direct_and_output == VectorizeDirectAndOutput)
+          {
+            policy = cached_policy.policy;
+            return cudaSuccess;
+          }
+        }
 
-                   block_policy_t selected_policy{};
-                   if (const auto error = QueryBlockPolicy<default_block_threads>(
-                         default_hierarchical_transform_kernel, requested_shared_bytes, selected_policy))
-                   {
-                     return error;
-                   }
+        block_policy_t selected_policy{};
+        if (const auto error = QueryBlockPolicy<default_block_threads>(
+              default_hierarchical_transform_kernel, requested_shared_bytes, selected_policy))
+        {
+          return error;
+        }
 
-                   if (segment_size >= large_block_threads)
-                   {
-                     block_policy_t large_policy{};
-                     const auto large_error = QueryBlockPolicy<large_block_threads>(
-                       kernel_source.template HierarchicalTransformKernel<large_block_threads, BulkCopyAlignment>(),
-                       requested_shared_bytes,
-                       large_policy);
+        if (segment_size >= large_block_threads)
+        {
+          block_policy_t large_policy{};
+          const auto large_error = QueryBlockPolicy<large_block_threads>(
+            kernel_source
+              .template HierarchicalTransformKernel<large_block_threads, BulkCopyAlignment, VectorizeDirectAndOutput>(),
+            requested_shared_bytes,
+            large_policy);
 
-                     if (large_error == cudaSuccess && large_policy.active_warps > selected_policy.active_warps)
-                     {
-                       selected_policy = large_policy;
-                     }
-                   }
+          if (large_error == cudaSuccess && large_policy.active_warps > selected_policy.active_warps)
+          {
+            selected_policy = large_policy;
+          }
+        }
 
-                   policy = selected_policy;
-                   cached_policies[next_cached_policy] =
-                     block_policy_cache_t{true, current_device, segment_size, requested_shared_bytes, policy};
-                   next_cached_policy = (next_cached_policy + 1) % block_policy_cache_size;
-                   return cudaSuccess;
-                 }),
-                 (return cudaErrorNotSupported;))
+        policy                              = selected_policy;
+        cached_policies[next_cached_policy] = block_policy_cache_t{
+          true, current_device, segment_size, requested_shared_bytes, VectorizeDirectAndOutput, policy};
+        next_cached_policy = (next_cached_policy + 1) % block_policy_cache_size;
+        return cudaSuccess;
+      }),
+      (return cudaErrorNotSupported;))
   }
 
   template <int BulkCopyAlignment>
+  CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE bool CanVectorizeDirectAndOutput()
+  {
+    using direct_vector_load_t = transform_prolog_direct_vector_load<::cuda::std::remove_cv_t<DirectInputIteratorT>>;
+    constexpr bool output_is_contiguous_f32_pointer =
+      ::cuda::std::is_pointer_v<::cuda::std::remove_cv_t<OutputIteratorT>>
+      && ::cuda::std::is_same_v<
+        ::cuda::std::remove_cv_t<::cuda::std::remove_pointer_t<::cuda::std::remove_cv_t<OutputIteratorT>>>,
+        float>;
+    constexpr bool uses_vectorized_store_outputs =
+      transform_prolog_shared_vector_aligned_v<BulkCopyAlignment>
+      && ::cuda::std::is_same_v<::cuda::std::remove_cv_t<input_value_t>, float> && direct_vector_load_t::supported
+      && output_is_contiguous_f32_pointer;
+
+    if constexpr (uses_vectorized_store_outputs)
+    {
+      constexpr int vector_items = sizeof(transform_prolog_f32_vector_storage_t) / sizeof(float);
+      if (segment_size % vector_items != 0)
+      {
+        return false;
+      }
+
+      if (!direct_vector_load_t::IsAligned(d_direct, 0))
+      {
+        return false;
+      }
+
+      constexpr auto output_alignment =
+        static_cast<::cuda::std::uintptr_t>(alignof(transform_prolog_f32_vector_storage_t));
+      const auto output_address = reinterpret_cast<::cuda::std::uintptr_t>(d_out);
+      if (output_address % output_alignment != 0)
+      {
+        return false;
+      }
+
+      return true;
+    }
+
+    return false;
+  }
+
+  template <int BulkCopyAlignment, bool VectorizeDirectAndOutput>
   CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE cudaError_t InvokeAligned()
   {
     if (num_segments < 0 || segment_size <= 0)
@@ -331,13 +381,14 @@ struct DispatchHierarchicalTransform
     }
 
     auto hierarchical_transform_kernel =
-      kernel_source.template HierarchicalTransformKernel<default_block_threads, BulkCopyAlignment>();
+      kernel_source
+        .template HierarchicalTransformKernel<default_block_threads, BulkCopyAlignment, VectorizeDirectAndOutput>();
 
     const auto requested_shared_bytes = static_cast<::cuda::std::size_t>(
       cub::detail::LoadToSharedBufferSizeBytes<input_value_t, BulkCopyAlignment>(segment_size));
 
     block_policy_t block_policy{};
-    if (const auto error = SelectBlockPolicy<BulkCopyAlignment>(
+    if (const auto error = SelectBlockPolicy<BulkCopyAlignment, VectorizeDirectAndOutput>(
           hierarchical_transform_kernel, current_device, requested_shared_bytes, block_policy))
     {
       return error;
@@ -346,7 +397,8 @@ struct DispatchHierarchicalTransform
     if (block_policy.block_threads == large_block_threads)
     {
       return InvokeKernel<large_block_threads>(
-        kernel_source.template HierarchicalTransformKernel<large_block_threads, BulkCopyAlignment>(),
+        kernel_source
+          .template HierarchicalTransformKernel<large_block_threads, BulkCopyAlignment, VectorizeDirectAndOutput>(),
         requested_shared_bytes,
         max_grid_dim_x);
     }
@@ -382,10 +434,17 @@ struct DispatchHierarchicalTransform
 
     if (CanUseBulkCopyAlignment<bulk_copy_alignment>(d_in, segment_size))
     {
-      return InvokeAligned<bulk_copy_alignment>();
+      // The F32 direct/output vector path is all-or-nothing: if the direct input, output, or segment length cannot
+      // support 16-byte vector accesses, keep the same staged-input alignment but use scalar direct/output accesses.
+      if (CanVectorizeDirectAndOutput<bulk_copy_alignment>())
+      {
+        return InvokeAligned<bulk_copy_alignment, true>();
+      }
+
+      return InvokeAligned<bulk_copy_alignment, false>();
     }
 
-    return InvokeAligned<static_cast<int>(alignof(input_value_t))>();
+    return InvokeAligned<static_cast<int>(alignof(input_value_t)), false>();
   }
 
   CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE cudaError_t Invoke()

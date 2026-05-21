@@ -20,8 +20,6 @@
 #include <cub/block/block_reduce.cuh>
 #include <cub/util_type.cuh>
 
-#include <thrust/type_traits/is_trivially_relocatable.h>
-
 #include <cuda/hierarchy>
 #include <cuda/iterator>
 #include <cuda/std/cstddef>
@@ -37,14 +35,6 @@ CUB_NAMESPACE_BEGIN
 
 namespace detail::hierarchical
 {
-template <typename T>
-inline constexpr bool hierarchical_transform_stageable_value_v =
-  THRUST_NS_QUALIFIER::is_trivially_relocatable_v<::cuda::std::remove_cv_t<T>>;
-
-template <typename InputIteratorT>
-inline constexpr bool hierarchical_transform_stageable_input_v =
-  hierarchical_transform_stageable_value_v<cub::detail::it_value_t<InputIteratorT>>;
-
 template <typename RandomAccessIteratorT>
 class thread_segment_range
 {
@@ -189,13 +179,13 @@ template <int BlockThreads, typename RandomAccessIteratorT>
 using striped_thread_segment_range_t =
   striped_thread_segment_range<striped_thread_segment_iterator_t<BlockThreads, RandomAccessIteratorT>>;
 
-using transform_prolog_f32_vector_range_storage_t = int4;
-static_assert(sizeof(transform_prolog_f32_vector_range_storage_t) == 4 * sizeof(float));
-static_assert(alignof(transform_prolog_f32_vector_range_storage_t) == 4 * sizeof(float));
+using transform_prolog_f32_vector_storage_t = int4;
+static_assert(sizeof(transform_prolog_f32_vector_storage_t) == 4 * sizeof(float));
+static_assert(alignof(transform_prolog_f32_vector_storage_t) == 4 * sizeof(float));
 
 template <int BulkCopyAlignment>
 inline constexpr bool transform_prolog_shared_vector_aligned_v =
-  BulkCopyAlignment >= static_cast<int>(alignof(transform_prolog_f32_vector_range_storage_t));
+  BulkCopyAlignment >= static_cast<int>(alignof(transform_prolog_f32_vector_storage_t));
 
 template <int BlockThreads, typename ValueT, bool AssumeFullVectors = false>
 class vectorized_thread_segment_range
@@ -299,8 +289,8 @@ public:
       {
         const int vector_base = vector_index * vector_items;
 
-        transform_prolog_f32_vector_range_storage_t values_storage =
-          reinterpret_cast<const transform_prolog_f32_vector_range_storage_t*>(segment_begin_ + vector_base)[0];
+        transform_prolog_f32_vector_storage_t values_storage =
+          reinterpret_cast<const transform_prolog_f32_vector_storage_t*>(segment_begin_ + vector_base)[0];
         raw_value_t* values = reinterpret_cast<raw_value_t*>(&values_storage);
 
         _CCCL_PRAGMA_UNROLL_FULL()
@@ -317,7 +307,7 @@ public:
         const int vector_base = first_item_ + vector_group * BlockThreads * vector_items;
         const int lane_items  = (::cuda::std::min) (vector_items, items_ - consumed);
 
-        transform_prolog_f32_vector_range_storage_t values_storage{};
+        transform_prolog_f32_vector_storage_t values_storage{};
         raw_value_t* values = reinterpret_cast<raw_value_t*>(&values_storage);
         FillValues(values_storage, values, vector_base);
 
@@ -336,15 +326,14 @@ public:
   }
 
 private:
-  _CCCL_DEVICE void FillValues(
-    transform_prolog_f32_vector_range_storage_t& values_storage, raw_value_t* values, int vector_base) const noexcept
+  _CCCL_DEVICE void
+  FillValues(transform_prolog_f32_vector_storage_t& values_storage, raw_value_t* values, int vector_base) const noexcept
   {
     const bool full_vector = vector_base + 4 <= segment_size_;
 
     if (full_vector)
     {
-      values_storage =
-        reinterpret_cast<const transform_prolog_f32_vector_range_storage_t*>(segment_begin_ + vector_base)[0];
+      values_storage = reinterpret_cast<const transform_prolog_f32_vector_storage_t*>(segment_begin_ + vector_base)[0];
     }
     else
     {
@@ -578,13 +567,13 @@ _CCCL_DEVICE T reduce(::cuda::experimental::this_cluster<Hierarchy> group, T thr
 }
 
 template <typename Hierarchy, typename T>
-_CCCL_DEVICE T reduce(::cuda::experimental::this_block<Hierarchy> group, T thread_data)
+_CCCL_DEVICE T sum(::cuda::experimental::this_block<Hierarchy> group, T thread_data)
 {
   return reduce(group, thread_data, ::cuda::std::plus<>{});
 }
 
 template <typename Hierarchy, typename T>
-_CCCL_DEVICE T reduce(::cuda::experimental::this_cluster<Hierarchy> group, T thread_data)
+_CCCL_DEVICE T sum(::cuda::experimental::this_cluster<Hierarchy> group, T thread_data)
 {
   return reduce(group, thread_data, ::cuda::std::plus<>{});
 }

@@ -18,6 +18,8 @@
 #include <cub/util_debug.cuh>
 #include <cub/util_device.cuh>
 
+#include <thrust/type_traits/is_trivially_relocatable.h>
+
 #include <cuda/__cmath/ceil_div.h>
 #include <cuda/std/cstdint>
 #include <cuda/std/limits>
@@ -47,7 +49,8 @@ struct is_cuda_std_tuple<::cuda::std::tuple<Ts...>> : ::cuda::std::true_type
 template <typename InputIteratorT>
 inline constexpr bool transform_epilog_should_assume_aligned_input =
   ::cuda::std::is_pointer_v<::cuda::std::decay_t<InputIteratorT>>
-  && hierarchical_transform_stageable_value_v<::cuda::std::remove_pointer_t<::cuda::std::decay_t<InputIteratorT>>>;
+  && THRUST_NS_QUALIFIER::is_trivially_relocatable_v<
+    ::cuda::std::remove_cv_t<::cuda::std::remove_pointer_t<::cuda::std::decay_t<InputIteratorT>>>>;
 
 template <typename InputIteratorT>
 using transform_epilog_kernel_input_t = ::cuda::std::conditional_t<

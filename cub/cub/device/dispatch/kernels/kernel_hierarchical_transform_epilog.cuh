@@ -17,6 +17,8 @@
 #include <cub/device/dispatch/kernels/kernel_hierarchical_common.cuh>
 #include <cub/util_type.cuh>
 
+#include <thrust/type_traits/is_trivially_relocatable.h>
+
 #include <cuda/__memory/align_down.h>
 #include <cuda/__memory/is_aligned.h>
 #include <cuda/std/iterator>
@@ -135,7 +137,8 @@ struct transform_epilog_shared_input_values
 template <typename InputIteratorT>
 inline constexpr bool transform_epilog_use_load_to_shared =
   transform_epilog_is_aligned_base_ptr_v<InputIteratorT>
-  && hierarchical_transform_stageable_value_v<transform_epilog_input_value_t<InputIteratorT>>;
+  && THRUST_NS_QUALIFIER::is_trivially_relocatable_v<
+    ::cuda::std::remove_cv_t<transform_epilog_input_value_t<InputIteratorT>>>;
 
 template <typename... InputIteratorTs>
 inline constexpr bool transform_epilog_all_load_to_shared =
