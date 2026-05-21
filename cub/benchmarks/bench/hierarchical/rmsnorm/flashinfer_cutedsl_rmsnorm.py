@@ -40,10 +40,6 @@ def require_flashinfer_cutedsl(state: bench.State):
     return rmsnorm_cute
 
 
-def should_skip_large_tensor(tensor_size: int) -> bool:
-    return tensor_size > (1 << 31)
-
-
 def bench_flashinfer_cutedsl_rmsnorm(state: bench.State) -> None:
     torch = require_torch(state)
     if torch is None:
@@ -58,12 +54,6 @@ def bench_flashinfer_cutedsl_rmsnorm(state: bench.State) -> None:
     batch_size = int(state.get_int64("BatchSize"))
     hidden_size = int(state.get_int64("HiddenSize"))
     zero_data = state.get_int64("ZeroData") != 0
-    if should_skip_large_tensor(batch_size * hidden_size):
-        state.skip(
-            "Skipping: FlashInfer CuTe DSL RMSNorm hits cudaErrorIllegalAddress "
-            "for this benchmark shape with more than 2^31 elements."
-        )
-        return
 
     try:
         x, weight, out = allocate_rmsnorm_tensors(
