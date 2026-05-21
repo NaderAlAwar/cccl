@@ -255,12 +255,6 @@ def bench_cutile_rmsnorm(state: bench.State) -> None:
     hidden_size = int(state.get_int64("HiddenSize"))
     zero_data = state.get_int64("ZeroData") != 0
 
-    if mode == "static_persistent" and hidden_size >= 16384:
-        state.skip(
-            "Skipping: CuTile static-persistent RMSNorm uses too much memory for this hidden size."
-        )
-        return
-
     try:
         x, weight, out = allocate_rmsnorm_tensors(
             state, torch, batch_size, hidden_size, dtype, zero_data

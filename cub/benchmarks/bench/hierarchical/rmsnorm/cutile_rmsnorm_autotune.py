@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import functools
 import itertools
+import json
+import os
 import sys
 from dataclasses import dataclass
 from math import ceil
@@ -39,9 +41,10 @@ from rmsnorm_common import (  # noqa: E402
 
 STANDARD_TILE_SIZES = (2**7, 2**8, 2**9, 2**10, 2**11, 2**12)
 STATIC_TILE_SIZE_M = (2, 4, 8, 16)
-STATIC_TILE_SIZE_N = (2**9, 2**10, 2**11, 2**12, 2**13, 2**14)
+STATIC_TILE_SIZE_N = (2**9, 2**10, 2**11, 2**12, 2**13, 2**14, 2**15, 2**16)
 NUM_CTAS = (1, 2)
 OCCUPANCIES = (1, 2, 4, 8, 16, 32)
+STATIC_PERSISTENT_CONFIG_PROBE_ENV = "CUTILE_STATIC_PERSISTENT_CONFIG_PROBE_JSON"
 
 
 @dataclass(frozen=True)
@@ -91,8 +94,10 @@ def require_cutile_autotune(state: bench.State):
 
 
 @functools.cache
-def get_standard_kernel():
+def get_standard_kernel(tile_size: int):
     ct = get_cutile_module()
+    tile_shape = (1, tile_size)
+    weight_shape = (tile_size,)
 
     @ct.kernel(occupancy=ct.ByTarget(sm_100=16))
     def rms_norm_kernel(
@@ -102,17 +107,16 @@ def get_standard_kernel():
         rstd,
         N: ct.Constant[int],
         eps: ct.Constant[float],
-        TILE_SIZE: ct.Constant[int],
     ):
         row = ct.bid(0)
-        rms = ct.full((1, TILE_SIZE), 0.0, dtype=np.float32)
-        num_tiles = ct.cdiv(x.shape[1], TILE_SIZE)
+        rms = ct.zeros(tile_shape, dtype=ct.float32)
+        num_tiles = ct.cdiv(x.shape[1], tile_size)
 
         for j in range(0, num_tiles):
             xj = ct.load(
                 x,
                 index=(row, j),
-                shape=(1, TILE_SIZE),
+                shape=tile_shape,
                 allow_tma=False,
                 latency=1,
                 padding_mode=ct.PaddingMode.ZERO,
@@ -127,7 +131,7 @@ def get_standard_kernel():
             wj = ct.load(
                 w,
                 index=(j,),
-                shape=(TILE_SIZE,),
+                shape=weight_shape,
                 allow_tma=False,
                 latency=1,
                 padding_mode=ct.PaddingMode.ZERO,
@@ -136,7 +140,7 @@ def get_standard_kernel():
             xj = ct.load(
                 x,
                 index=(row, j),
-                shape=(1, TILE_SIZE),
+                shape=tile_shape,
                 allow_tma=False,
                 latency=1,
                 padding_mode=ct.PaddingMode.ZERO,
@@ -149,8 +153,9 @@ def get_standard_kernel():
 
 
 @functools.cache
-def get_gather_kernel():
+def get_gather_kernel(tile_size: int):
     ct = get_cutile_module()
+    tile_shape = (tile_size,)
 
     @ct.kernel
     def rms_norm_kernel_gather(
@@ -160,15 +165,14 @@ def get_gather_kernel():
         rstd,
         N: ct.Constant[int],
         eps: ct.Constant[float],
-        TILE_SIZE: ct.Constant[int],
     ):
         row = ct.bid(0)
-        rms = ct.full((TILE_SIZE,), 0.0, dtype=np.float32)
-        num_tiles = ct.cdiv(N, TILE_SIZE)
-        offsets = ct.arange(TILE_SIZE, dtype=np.int32)
+        rms = ct.zeros(tile_shape, dtype=ct.float32)
+        num_tiles = ct.cdiv(N, tile_size)
+        offsets = ct.arange(tile_size, dtype=np.int32)
 
         for j in range(0, num_tiles):
-            offs = j * TILE_SIZE + offsets
+            offs = j * tile_size + offsets
             xj = ct.gather(x, (row, offs), latency=1)
             xj = ct.astype(xj, np.float32)
             rms += xj * xj
@@ -177,7 +181,7 @@ def get_gather_kernel():
         ct.scatter(rstd, row, rms)
 
         for j in range(0, num_tiles):
-            offs = j * TILE_SIZE + offsets
+            offs = j * tile_size + offsets
             wj = ct.gather(w, offs, latency=1)
             wj = ct.astype(wj, np.float32)
             xj = ct.gather(x, (row, offs), latency=1)
@@ -189,27 +193,28 @@ def get_gather_kernel():
 
 
 @functools.cache
-def get_static_persistent_kernel():
+def get_static_persistent_kernel(tile_size_m: int, tile_size_n: int):
     ct = get_cutile_module()
+    weight_shape = (tile_size_n,)
+    tile_shape = (tile_size_m, tile_size_n)
+    rms_shape = (tile_size_m, 1)
+    weight_broadcast_shape = (1, tile_size_n)
 
     @ct.kernel
     def rms_norm_kernel_static_persistent(
         x,
         out,
         w,
-        TILE_SIZE_M: ct.Constant[int],
-        TILE_SIZE_N: ct.Constant[int],
-        eps: ct.Constant[float],
     ):
         bid = ct.bid(0)
         m = x.shape[0]
         n = x.shape[1]
-        upper_bound = (m + TILE_SIZE_M - 1) // TILE_SIZE_M
+        upper_bound = (m + tile_size_m - 1) // tile_size_m
 
         w_tile = ct.load(
             w,
             index=(0,),
-            shape=(TILE_SIZE_N,),
+            shape=weight_shape,
             padding_mode=ct.PaddingMode.ZERO,
         )
         w_tile = ct.astype(w_tile, np.float32)
@@ -219,16 +224,16 @@ def get_static_persistent_kernel():
             x_tile = ct.load(
                 x,
                 index=(current_bid, 0),
-                shape=(TILE_SIZE_M, TILE_SIZE_N),
+                shape=tile_shape,
                 latency=10,
                 padding_mode=ct.PaddingMode.ZERO,
             )
             x_tile = ct.astype(x_tile, np.float32)
             x2_sum = ct.sum(ct.mul(x_tile, x_tile), axis=1, keepdims=True)
-            n_f32 = ct.full((TILE_SIZE_M, 1), n * 1.0, dtype=np.float32)
-            eps_tensor = ct.full((TILE_SIZE_M, 1), eps, dtype=np.float32)
+            n_f32 = ct.full(rms_shape, n * 1.0, dtype=np.float32)
+            eps_tensor = ct.full(rms_shape, RMS_NORM_EPS, dtype=np.float32)
             rsqrt_var = ct.rsqrt(ct.truediv(x2_sum, n_f32) + eps_tensor)
-            w_broadcasted = ct.reshape(w_tile, (1, TILE_SIZE_N))
+            w_broadcasted = ct.reshape(w_tile, weight_broadcast_shape)
             y = ct.astype(ct.mul(ct.mul(x_tile, rsqrt_var), w_broadcasted), x.dtype)
             ct.store(out, index=(current_bid, 0), tile=y, allow_tma=False, latency=3)
 
@@ -242,7 +247,77 @@ def _standard_autotune_configs():
         yield StandardConfig(tile_size, num_ctas, occupancy)
 
 
-def _static_persistent_autotune_configs(hidden_size: int):
+def _split_probe_config_paths(env_value: str) -> tuple[Path, ...]:
+    paths: list[Path] = []
+    for chunk in env_value.split(os.pathsep):
+        for part in chunk.split(","):
+            if part:
+                paths.append(Path(part))
+    return tuple(paths)
+
+
+@functools.cache
+def _load_static_persistent_probe_configs(
+    env_value: str,
+) -> dict[tuple[int, int], tuple[StaticPersistentConfig, ...]]:
+    configs: dict[tuple[int, int], set[StaticPersistentConfig]] = {}
+    for path in _split_probe_config_paths(env_value):
+        payload = json.loads(path.read_text())
+        for result in payload.get("results", []):
+            if result.get("status") != "pass":
+                continue
+            key = (int(result["batch_size"]), int(result["hidden_size"]))
+            configs.setdefault(key, set()).add(
+                StaticPersistentConfig(
+                    int(result["tile_size_m"]),
+                    int(result["tile_size_n"]),
+                    int(result["num_ctas"]),
+                    int(result["occupancy"]),
+                )
+            )
+
+    return {
+        key: tuple(
+            sorted(
+                value,
+                key=lambda cfg: (
+                    cfg.tile_size_m,
+                    cfg.tile_size_n,
+                    cfg.num_ctas,
+                    cfg.occupancy,
+                ),
+            )
+        )
+        for key, value in configs.items()
+    }
+
+
+def _static_persistent_probe_configs(
+    batch_size: int,
+    hidden_size: int,
+) -> tuple[StaticPersistentConfig, ...] | None:
+    env_value = os.environ.get(STATIC_PERSISTENT_CONFIG_PROBE_ENV)
+    if not env_value:
+        return None
+
+    configs = _load_static_persistent_probe_configs(env_value).get(
+        (batch_size, hidden_size), ()
+    )
+    if not configs:
+        raise ValueError(
+            "No passing static-persistent CuTile configs found in "
+            f"{STATIC_PERSISTENT_CONFIG_PROBE_ENV} for "
+            f"BatchSize={batch_size}, HiddenSize={hidden_size}."
+        )
+    return configs
+
+
+def _static_persistent_autotune_configs(batch_size: int, hidden_size: int):
+    probe_configs = _static_persistent_probe_configs(batch_size, hidden_size)
+    if probe_configs is not None:
+        yield from probe_configs
+        return
+
     for tile_size_m, tile_size_n, num_ctas, occupancy in itertools.product(
         STATIC_TILE_SIZE_M, STATIC_TILE_SIZE_N, NUM_CTAS, OCCUPANCIES
     ):
@@ -284,29 +359,51 @@ def _tune_standard_or_gather(torch, x, weight, out, mode: str) -> TunedKernel:
     rstd = torch.empty((m,), dtype=torch.float32, device=x.device)
     tune_out = torch.empty_like(out)
     tune_rstd = torch.empty_like(rstd)
-    kernel = get_gather_kernel() if mode == "gather" else get_standard_kernel()
-    result = exhaustive_search(
-        list(_standard_autotune_configs()),
-        torch.cuda.current_stream(),
-        grid_fn=lambda cfg: (m,),
-        kernel=kernel,
-        args_fn=lambda cfg: (
-            x,
-            weight,
-            tune_out,
-            tune_rstd,
-            n,
-            RMS_NORM_EPS,
-            cfg.tile_size,
-        ),
-        hints_fn=lambda cfg: {
-            "num_ctas": cfg.num_ctas,
-            "occupancy": cfg.occupancy,
-        },
-        quiet=True,
-    )
-    cfg = result.best.config
-    tuned_kernel = kernel.replace_hints(
+
+    best = None
+    best_kernel = None
+    failures = []
+    configs = list(_standard_autotune_configs())
+    for tile_size in STANDARD_TILE_SIZES:
+        tile_configs = [cfg for cfg in configs if cfg.tile_size == tile_size]
+        kernel = (
+            get_gather_kernel(tile_size)
+            if mode == "gather"
+            else get_standard_kernel(tile_size)
+        )
+        try:
+            result = exhaustive_search(
+                tile_configs,
+                torch.cuda.current_stream(),
+                grid_fn=lambda cfg: (m,),
+                kernel=kernel,
+                args_fn=lambda cfg: (
+                    x,
+                    weight,
+                    tune_out,
+                    tune_rstd,
+                    n,
+                    RMS_NORM_EPS,
+                ),
+                hints_fn=lambda cfg: {
+                    "num_ctas": cfg.num_ctas,
+                    "occupancy": cfg.occupancy,
+                },
+                quiet=True,
+            )
+        except ValueError as exc:
+            failures.append(str(exc))
+            continue
+
+        if best is None or result.best.mean_us < best.mean_us:
+            best = result.best
+            best_kernel = kernel
+
+    if best is None or best_kernel is None:
+        raise ValueError("\n".join(failures))
+
+    cfg = best.config
+    tuned_kernel = best_kernel.replace_hints(
         num_ctas=cfg.num_ctas,
         occupancy=cfg.occupancy,
     )
@@ -315,30 +412,55 @@ def _tune_standard_or_gather(torch, x, weight, out, mode: str) -> TunedKernel:
 
 def _tune_static_persistent(torch, x, weight, out) -> TunedKernel:
     exhaustive_search = get_exhaustive_search()
-    search_space = list(_static_persistent_autotune_configs(int(x.shape[1])))
-    tune_out = torch.empty_like(out)
-    kernel = get_static_persistent_kernel()
-    result = exhaustive_search(
-        search_space,
-        torch.cuda.current_stream(),
-        grid_fn=lambda cfg: _static_persistent_grid(torch, x, cfg),
-        kernel=kernel,
-        args_fn=lambda cfg: (
-            x,
-            tune_out,
-            weight,
-            cfg.tile_size_m,
-            cfg.tile_size_n,
-            RMS_NORM_EPS,
-        ),
-        hints_fn=lambda cfg: {
-            "num_ctas": cfg.num_ctas,
-            "occupancy": cfg.occupancy,
-        },
-        quiet=True,
+    search_space = list(
+        _static_persistent_autotune_configs(int(x.shape[0]), int(x.shape[1]))
     )
-    cfg = result.best.config
-    tuned_kernel = kernel.replace_hints(
+    tune_out = torch.empty_like(out)
+
+    best = None
+    best_kernel = None
+    failures = []
+    tile_shapes = sorted({(cfg.tile_size_m, cfg.tile_size_n) for cfg in search_space})
+    for tile_size_m, tile_size_n in tile_shapes:
+        tile_configs = [
+            cfg
+            for cfg in search_space
+            if cfg.tile_size_m == tile_size_m and cfg.tile_size_n == tile_size_n
+        ]
+        if not tile_configs:
+            continue
+
+        kernel = get_static_persistent_kernel(tile_size_m, tile_size_n)
+        try:
+            result = exhaustive_search(
+                tile_configs,
+                torch.cuda.current_stream(),
+                grid_fn=lambda cfg: _static_persistent_grid(torch, x, cfg),
+                kernel=kernel,
+                args_fn=lambda cfg: (
+                    x,
+                    tune_out,
+                    weight,
+                ),
+                hints_fn=lambda cfg: {
+                    "num_ctas": cfg.num_ctas,
+                    "occupancy": cfg.occupancy,
+                },
+                quiet=True,
+            )
+        except ValueError as exc:
+            failures.append(str(exc))
+            continue
+
+        if best is None or result.best.mean_us < best.mean_us:
+            best = result.best
+            best_kernel = kernel
+
+    if best is None or best_kernel is None:
+        raise ValueError("\n".join(failures))
+
+    cfg = best.config
+    tuned_kernel = best_kernel.replace_hints(
         num_ctas=cfg.num_ctas,
         occupancy=cfg.occupancy,
     )
@@ -370,7 +492,7 @@ def launch_tuned_cutile_rmsnorm(torch, x, weight, out, tuned: TunedKernel, rstd=
             torch.cuda.current_stream(),
             _static_persistent_grid(torch, x, cfg),
             tuned.kernel,
-            (x, out, weight, cfg.tile_size_m, cfg.tile_size_n, RMS_NORM_EPS),
+            (x, out, weight),
         )
         return
 
@@ -380,8 +502,19 @@ def launch_tuned_cutile_rmsnorm(torch, x, weight, out, tuned: TunedKernel, rstd=
         torch.cuda.current_stream(),
         (m,),
         tuned.kernel,
-        (x, weight, out, rstd, n, RMS_NORM_EPS, cfg.tile_size),
+        (x, weight, out, rstd, n, RMS_NORM_EPS),
     )
+
+
+def add_tuned_config_summaries(state: bench.State, tuned: TunedKernel) -> None:
+    cfg = tuned.config
+    if isinstance(cfg, StaticPersistentConfig):
+        state.add_summary("TunedTileM", cfg.tile_size_m)
+        state.add_summary("TunedTileN", cfg.tile_size_n)
+    else:
+        state.add_summary("TunedTileSize", cfg.tile_size)
+    state.add_summary("TunedNumCTAs", cfg.num_ctas)
+    state.add_summary("TunedOccupancy", cfg.occupancy)
 
 
 def bench_cutile_rmsnorm_autotune(state: bench.State) -> None:
@@ -398,12 +531,6 @@ def bench_cutile_rmsnorm_autotune(state: bench.State) -> None:
     batch_size = int(state.get_int64("BatchSize"))
     hidden_size = int(state.get_int64("HiddenSize"))
     zero_data = state.get_int64("ZeroData") != 0
-
-    if mode == "static_persistent" and hidden_size >= 16384:
-        state.skip(
-            "Skipping: CuTile static-persistent RMSNorm uses too much memory for this hidden size."
-        )
-        return
 
     try:
         x, weight, out = allocate_rmsnorm_tensors(
@@ -424,6 +551,7 @@ def bench_cutile_rmsnorm_autotune(state: bench.State) -> None:
         stream = as_torch_stream(torch, state.get_stream(), state.get_device())
         with torch.cuda.stream(stream):
             tuned = tune_cutile_rmsnorm(torch, x, weight, out, mode)
+            add_tuned_config_summaries(state, tuned)
             launch_tuned_cutile_rmsnorm(torch, x, weight, out, tuned, rstd)
         torch.cuda.synchronize(state.get_device())
     except RuntimeError as exc:
