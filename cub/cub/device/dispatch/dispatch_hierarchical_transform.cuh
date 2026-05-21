@@ -229,6 +229,11 @@ struct DispatchHierarchicalTransform
       return cudaErrorInvalidValue;
     }
 
+    NV_IF_TARGET(NV_IS_HOST,
+                 (if (const auto error = CubDebug(launcher_factory.set_max_dynamic_smem_size_for(
+                        hierarchical_transform_kernel, static_cast<int>(requested_shared_bytes)))) { return error; }),
+                 (return cudaErrorNotSupported;))
+
     int active_blocks = 0;
     if (const auto error = CubDebug(launcher_factory.MaxSmOccupancy(
           active_blocks,
