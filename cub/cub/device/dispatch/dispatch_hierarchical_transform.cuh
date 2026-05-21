@@ -152,8 +152,6 @@ struct DispatchHierarchicalTransform
       return error;
     }
 
-    // TODO: This overlaps with QueryBlockPolicy. Keep the launch-time guard here, but revisit whether the policy query
-    // needs to set the same dynamic shared-memory attribute.
     if (requested_shared_bytes <= static_cast<::cuda::std::size_t>(max_dynamic_smem_size))
     {
       NV_IF_TARGET(NV_IS_HOST,
@@ -225,11 +223,6 @@ struct DispatchHierarchicalTransform
     {
       return cudaErrorInvalidValue;
     }
-
-    NV_IF_TARGET(NV_IS_HOST,
-                 (if (const auto error = CubDebug(launcher_factory.set_max_dynamic_smem_size_for(
-                        hierarchical_transform_kernel, static_cast<int>(requested_shared_bytes)))) { return error; }),
-                 (return cudaErrorNotSupported;))
 
     int active_blocks = 0;
     if (const auto error = CubDebug(launcher_factory.MaxSmOccupancy(
