@@ -14,17 +14,6 @@
 
 #include <flashinfer/norm.cuh>
 
-constexpr float rms_norm_eps = 1e-5f;
-
-template <typename T>
-struct convert_op
-{
-  __device__ T operator()(float x) const
-  {
-    return static_cast<T>(x);
-  }
-};
-
 template <typename T>
 thrust::device_vector<T> make_bounded_vector(std::size_t elements, bool zero_data)
 {
@@ -33,6 +22,8 @@ thrust::device_vector<T> make_bounded_vector(std::size_t elements, bool zero_dat
     return thrust::device_vector<T>(elements, T{});
   }
 
+  // nvbench_helper::generate is not instantiated for half/bfloat, so generate
+  // float data and convert to the benchmark value type.
   thrust::device_vector<float> source = generate(elements, bit_entropy::_1_000, -1.0f, 1.0f);
 
   if constexpr (cuda::std::is_same_v<T, float>)
@@ -42,7 +33,9 @@ thrust::device_vector<T> make_bounded_vector(std::size_t elements, bool zero_dat
   else
   {
     thrust::device_vector<T> destination(elements, thrust::no_init);
-    thrust::transform(source.begin(), source.end(), destination.begin(), convert_op<T>{});
+    thrust::transform(source.begin(), source.end(), destination.begin(), [] __device__(float x) {
+      return static_cast<T>(x);
+    });
     return destination;
   }
 }
@@ -66,11 +59,12 @@ template <typename T>
 void flashinfer_fused_add_rmsnorm(nvbench::state& state, nvbench::type_list<T>)
 try
 {
-  const int batch_size  = static_cast<int>(state.get_int64("BatchSize"));
-  const int hidden_size = static_cast<int>(state.get_int64("HiddenSize"));
-  const bool zero_data  = state.get_int64("ZeroData") != 0;
-  const auto elements   = static_cast<std::size_t>(batch_size) * static_cast<std::size_t>(hidden_size);
-  const auto bytes      = elements * sizeof(T);
+  constexpr float rms_norm_eps = 1e-5f;
+  const int batch_size         = static_cast<int>(state.get_int64("BatchSize"));
+  const int hidden_size        = static_cast<int>(state.get_int64("HiddenSize"));
+  const bool zero_data         = state.get_int64("ZeroData") != 0;
+  const auto elements          = static_cast<std::size_t>(batch_size) * static_cast<std::size_t>(hidden_size);
+  const auto bytes             = elements * sizeof(T);
 
   thrust::device_vector<T> input_master    = make_bounded_vector<T>(elements, zero_data);
   thrust::device_vector<T> residual_master = make_bounded_vector<T>(elements, zero_data);

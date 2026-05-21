@@ -7,27 +7,13 @@
 #include <thrust/host_vector.h>
 
 #include <cuda/std/type_traits>
-#include <nvbench/state.cuh>
 
 #include <algorithm>
-#include <cstddef>
 #include <cmath>
 #include <stdexcept>
 
 namespace rmsnorm_check
 {
-inline bool should_skip_large_tensor_on_affected_arch(const nvbench::state& state, std::size_t elements)
-{
-  const auto& device = state.get_device();
-  if (!device.has_value() || elements <= (std::size_t{1} << 31))
-  {
-    return false;
-  }
-
-  const int sm_version = device->get_sm_version();
-  return sm_version == 900 || sm_version == 1000;
-}
-
 template <typename T>
 constexpr float correctness_tolerance()
 {

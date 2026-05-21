@@ -9,48 +9,7 @@
 
 #include <stdexcept>
 
-#include <cuda_runtime_api.h>
 #include <nvbench_helper.cuh>
-
-#include "rmsnorm_check.cuh"
-
-template <typename T>
-struct convert_op
-{
-  __device__ T operator()(float x) const
-  {
-    return static_cast<T>(x);
-  }
-};
-
-template <typename T>
-struct unary_proxy_op
-{
-  __device__ T operator()(T x) const
-  {
-    return x;
-  }
-};
-
-template <typename T>
-struct thread_weight_proxy_op
-{
-  const T* weight;
-  int hidden_size;
-
-  __device__ T operator()(T x) const
-  {
-    // Deliberately use the physical thread index, not a logical element index.
-    // We want a cheap pressure probe for "unary transform plus one weight read"
-    // without adding a counting iterator, divide/mod by the global item index,
-    // or row-RMS state. This is not RMSNorm-correct: for large hidden sizes it
-    // repeatedly samples only a small prefix of the weight vector.
-    const int col     = static_cast<int>(threadIdx.x) % hidden_size;
-    const float scale = static_cast<float>(weight[col]);
-
-    return static_cast<T>(static_cast<float>(x) * scale);
-  }
-};
 
 template <typename T>
 thrust::device_vector<T> make_bounded_vector(std::size_t elements, bool zero_data)
@@ -60,6 +19,8 @@ thrust::device_vector<T> make_bounded_vector(std::size_t elements, bool zero_dat
     return thrust::device_vector<T>(elements, T{});
   }
 
+  // nvbench_helper::generate is not instantiated for half/bfloat, so generate
+  // float data and convert to the benchmark value type.
   thrust::device_vector<float> source = generate(elements, bit_entropy::_1_000, -1.0f, 1.0f);
 
   if constexpr (cuda::std::is_same_v<T, float>)
@@ -69,7 +30,9 @@ thrust::device_vector<T> make_bounded_vector(std::size_t elements, bool zero_dat
   else
   {
     thrust::device_vector<T> destination(elements, thrust::no_init);
-    thrust::transform(source.begin(), source.end(), destination.begin(), convert_op<T>{});
+    thrust::transform(source.begin(), source.end(), destination.begin(), [] __device__(float x) {
+      return static_cast<T>(x);
+    });
     return destination;
   }
 }
@@ -84,12 +47,6 @@ try
   const auto proxy_mode = state.get_string("ProxyMode");
   const auto elements   = static_cast<std::size_t>(batch_size) * static_cast<std::size_t>(hidden_size);
   const auto num_items  = batch_size * hidden_size;
-
-  if (rmsnorm_check::should_skip_large_tensor_on_affected_arch(state, elements))
-  {
-    state.skip("Skipping: large RMSNorm tensors above 2^31 elements on sm_90/sm_100.");
-    return;
-  }
 
   thrust::device_vector<T> input = make_bounded_vector<T>(elements, zero_data);
   thrust::device_vector<T> output(elements, thrust::no_init);
@@ -117,13 +74,33 @@ try
   state.exec(nvbench::exec_tag::no_batch, [&](nvbench::launch& launch) {
     if (proxy_mode == "unary")
     {
-      NVBENCH_CUDA_CALL(
-        cub::DeviceTransform::Transform(d_input, d_output, num_items, unary_proxy_op<T>{}, launch.get_stream()));
+      NVBENCH_CUDA_CALL(cub::DeviceTransform::Transform(
+        d_input,
+        d_output,
+        num_items,
+        [] __device__(T x) {
+          return x;
+        },
+        launch.get_stream()));
     }
     else if (proxy_mode == "thread_weight")
     {
       NVBENCH_CUDA_CALL(cub::DeviceTransform::Transform(
-        d_input, d_output, num_items, thread_weight_proxy_op<T>{d_weight, hidden_size}, launch.get_stream()));
+        d_input,
+        d_output,
+        num_items,
+        // Deliberately use the physical thread index, not a logical element index.
+        // We want a cheap pressure probe for "unary transform plus one weight read"
+        // without adding a counting iterator, divide/mod by the global item index,
+        // or row-RMS state. This is not RMSNorm-correct: for large hidden sizes it
+        // repeatedly samples only a small prefix of the weight vector.
+        [d_weight, hidden_size] __device__(T x) {
+          const int col     = static_cast<int>(threadIdx.x) % hidden_size;
+          const float scale = static_cast<float>(d_weight[col]);
+
+          return static_cast<T>(static_cast<float>(x) * scale);
+        },
+        launch.get_stream()));
     }
   });
 }

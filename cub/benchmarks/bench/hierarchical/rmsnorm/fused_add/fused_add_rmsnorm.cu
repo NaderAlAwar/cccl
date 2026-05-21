@@ -15,64 +15,6 @@
 #include <cuda_runtime_api.h>
 #include <nvbench_helper.cuh>
 
-constexpr float rms_norm_eps = 1e-5f;
-
-template <typename T>
-struct convert_op
-{
-  __device__ T operator()(float x) const
-  {
-    return static_cast<T>(x);
-  }
-};
-
-template <typename T>
-struct add_input_and_residual_op
-{
-  __device__ T operator()(T input, T residual) const
-  {
-    return static_cast<T>(static_cast<float>(input) + static_cast<float>(residual));
-  }
-};
-
-template <typename T>
-struct square_op
-{
-  __device__ float operator()(T x) const
-  {
-    const float value = static_cast<float>(x);
-    return value * value;
-  }
-};
-
-struct reciprocal_rms_op
-{
-  int hidden_size;
-  float eps;
-
-  __device__ float operator()(float sum_of_squares) const
-  {
-    return rsqrtf(sum_of_squares / static_cast<float>(hidden_size) + eps);
-  }
-};
-
-template <typename T>
-struct normalize_and_scale_op
-{
-  cuda::fast_mod_div<int> hidden_size;
-  const float* rms_rcp;
-  const T* weight;
-
-  __device__ T operator()(int idx, T x) const
-  {
-    const int row     = idx / hidden_size;
-    const int col     = idx % hidden_size;
-    const float scale = static_cast<float>(weight[col]) * rms_rcp[row];
-
-    return static_cast<T>(static_cast<float>(x) * scale);
-  }
-};
-
 template <typename T>
 thrust::device_vector<T> make_bounded_vector(std::size_t elements, bool zero_data)
 {
@@ -81,6 +23,8 @@ thrust::device_vector<T> make_bounded_vector(std::size_t elements, bool zero_dat
     return thrust::device_vector<T>(elements, T{});
   }
 
+  // nvbench_helper::generate is not instantiated for half/bfloat, so generate
+  // float data and convert to the benchmark value type.
   thrust::device_vector<float> source = generate(elements, bit_entropy::_1_000, -1.0f, 1.0f);
 
   if constexpr (cuda::std::is_same_v<T, float>)
@@ -90,7 +34,9 @@ thrust::device_vector<T> make_bounded_vector(std::size_t elements, bool zero_dat
   else
   {
     thrust::device_vector<T> destination(elements, thrust::no_init);
-    thrust::transform(source.begin(), source.end(), destination.begin(), convert_op<T>{});
+    thrust::transform(source.begin(), source.end(), destination.begin(), [] __device__(float x) {
+      return static_cast<T>(x);
+    });
     return destination;
   }
 }
@@ -99,12 +45,13 @@ template <typename T>
 void fused_add_rmsnorm(nvbench::state& state, nvbench::type_list<T>)
 try
 {
-  const int batch_size  = static_cast<int>(state.get_int64("BatchSize"));
-  const int hidden_size = static_cast<int>(state.get_int64("HiddenSize"));
-  const bool zero_data  = state.get_int64("ZeroData") != 0;
-  const auto elements   = static_cast<std::size_t>(batch_size) * static_cast<std::size_t>(hidden_size);
-  const auto num_items  = batch_size * hidden_size;
-  const auto bytes      = elements * sizeof(T);
+  constexpr float rms_norm_eps = 1e-5f;
+  const int batch_size         = static_cast<int>(state.get_int64("BatchSize"));
+  const int hidden_size        = static_cast<int>(state.get_int64("HiddenSize"));
+  const bool zero_data         = state.get_int64("ZeroData") != 0;
+  const auto elements          = static_cast<std::size_t>(batch_size) * static_cast<std::size_t>(hidden_size);
+  const auto num_items         = batch_size * hidden_size;
+  const auto bytes             = elements * sizeof(T);
 
   thrust::device_vector<T> input_master    = make_bounded_vector<T>(elements, zero_data);
   thrust::device_vector<T> residual_master = make_bounded_vector<T>(elements, zero_data);
@@ -120,9 +67,14 @@ try
   auto* d_weight           = thrust::raw_pointer_cast(weight.data());
   auto* d_rms_rcp          = thrust::raw_pointer_cast(rms_rcp.data());
 
-  auto squared_residual = cuda::make_transform_iterator(d_residual_working, square_op<T>{});
+  auto squared_residual = cuda::make_transform_iterator(d_residual_working, [] __device__(T x) {
+    const float value = static_cast<float>(x);
+    return value * value;
+  });
   auto reciprocal_output =
-    cuda::make_transform_output_iterator(d_rms_rcp, reciprocal_rms_op{hidden_size, rms_norm_eps});
+    cuda::make_transform_output_iterator(d_rms_rcp, [hidden_size, rms_norm_eps] __device__(float sum_of_squares) {
+      return rsqrtf(sum_of_squares / static_cast<float>(hidden_size) + rms_norm_eps);
+    });
 
   std::size_t temp_storage_bytes = 0;
   cub::DeviceSegmentedReduce::Sum(
@@ -152,7 +104,9 @@ try
       cuda::std::make_tuple(d_input_working, d_residual_working),
       d_residual_working,
       num_items,
-      add_input_and_residual_op<T>{},
+      [] __device__(T input, T residual) {
+        return static_cast<T>(static_cast<float>(input) + static_cast<float>(residual));
+      },
       launch.get_stream());
 
     cub::DeviceSegmentedReduce::Sum(
@@ -168,7 +122,13 @@ try
       cuda::std::tuple{cuda::counting_iterator<int>{0}, d_residual_working},
       d_input_working,
       num_items,
-      normalize_and_scale_op<T>{cuda::fast_mod_div<int>{hidden_size}, d_rms_rcp, d_weight},
+      [hidden_size_div = cuda::fast_mod_div<int>{hidden_size}, d_rms_rcp, d_weight] __device__(int idx, T x) {
+        const int row     = idx / hidden_size_div;
+        const int col     = idx % hidden_size_div;
+        const float scale = static_cast<float>(d_weight[col]) * d_rms_rcp[row];
+
+        return static_cast<T>(static_cast<float>(x) * scale);
+      },
       launch.get_stream());
 
     timer.stop();

@@ -92,6 +92,15 @@ public:
     return begin_[idx];
   }
 
+  template <typename FnT>
+  _CCCL_DEVICE _CCCL_FORCEINLINE void for_each(FnT fn) const
+  {
+    for (int item = 0; item < items_; ++item)
+    {
+      fn(begin_[item]);
+    }
+  }
+
 private:
   iterator begin_{};
   int offset_{0};
@@ -155,6 +164,15 @@ public:
   _CCCL_HOST_DEVICE constexpr reference operator[](int idx) const noexcept
   {
     return begin_[idx];
+  }
+
+  template <typename FnT>
+  _CCCL_DEVICE _CCCL_FORCEINLINE void for_each(FnT fn) const
+  {
+    for (int item = 0; item < items_; ++item)
+    {
+      fn(begin_[item]);
+    }
   }
 
 private:
@@ -267,7 +285,7 @@ public:
   }
 
   template <typename FnT>
-  _CCCL_DEVICE void ForEach(FnT fn) const
+  _CCCL_DEVICE _CCCL_FORCEINLINE void for_each(FnT fn) const
   {
     constexpr int vector_items = 4;
 
@@ -346,34 +364,6 @@ private:
   int items_{0};
 };
 
-template <typename RangeT, typename FnT, typename = void>
-struct has_transform_prolog_for_each : ::cuda::std::false_type
-{};
-
-template <typename RangeT, typename FnT>
-struct has_transform_prolog_for_each<
-  RangeT,
-  FnT,
-  ::cuda::std::void_t<decltype(::cuda::std::declval<const RangeT&>().ForEach(::cuda::std::declval<FnT>()))>>
-    : ::cuda::std::true_type
-{};
-
-template <typename RangeT, typename FnT>
-_CCCL_DEVICE void for_each_transform_prolog_item(const RangeT& range, FnT fn)
-{
-  if constexpr (has_transform_prolog_for_each<RangeT, FnT>::value)
-  {
-    range.ForEach(fn);
-  }
-  else
-  {
-    for (int item = 0; item < range.size(); ++item)
-    {
-      fn(range[item]);
-    }
-  }
-}
-
 template <int BlockThreads, bool AssumeFullVectors = false, typename ValueT>
 _CCCL_DEVICE auto make_vectorized_thread_segment_range(ValueT* segment_begin, int segment_size, int segment_offset = 0)
 {
@@ -418,6 +408,7 @@ struct transform_prolog_segment_range_selector
   using raw_value_t      = ::cuda::std::remove_cv_t<ValueT>;
   using vectorized_range = vectorized_thread_segment_range<BlockThreads, ValueT, AssumeFullVectorizedRange>;
   using striped_range    = striped_thread_segment_range_t<BlockThreads, ValueT*>;
+  using thread_range     = thread_segment_range<ValueT*>;
   using span_range       = ::cuda::std::span<ValueT>;
 
   // TODO: The vectorized/striped ranges are used so F32 RMSNorm-style reductions read shared memory with consecutive
@@ -428,13 +419,18 @@ struct transform_prolog_segment_range_selector
     && ::cuda::std::is_same_v<raw_value_t, float> && ::cuda::std::is_invocable_v<SegmentOpT, GroupT, vectorized_range>;
   static constexpr bool use_striped_range =
     !use_vectorized_range && sizeof(raw_value_t) == 4 && ::cuda::std::is_invocable_v<SegmentOpT, GroupT, striped_range>;
-  static constexpr bool use_span_range =
-    !use_vectorized_range && !use_striped_range && ::cuda::std::is_invocable_v<SegmentOpT, GroupT, span_range>;
-  static constexpr bool valid = use_vectorized_range || use_striped_range || use_span_range;
+  static constexpr bool use_thread_range =
+    !use_vectorized_range && !use_striped_range && ::cuda::std::is_invocable_v<SegmentOpT, GroupT, thread_range>;
+  static constexpr bool use_span_range = !use_vectorized_range && !use_striped_range && !use_thread_range
+                                      && ::cuda::std::is_invocable_v<SegmentOpT, GroupT, span_range>;
+  static constexpr bool valid = use_vectorized_range || use_striped_range || use_thread_range || use_span_range;
 
-  using type = ::cuda::std::conditional_t<use_vectorized_range,
-                                          vectorized_range,
-                                          ::cuda::std::conditional_t<use_striped_range, striped_range, span_range>>;
+  using type = ::cuda::std::conditional_t<
+    use_vectorized_range,
+    vectorized_range,
+    ::cuda::std::conditional_t<use_striped_range,
+                               striped_range,
+                               ::cuda::std::conditional_t<use_thread_range, thread_range, span_range>>>;
 };
 
 template <int BlockThreads,
@@ -478,6 +474,11 @@ _CCCL_DEVICE auto make_transform_prolog_segment_range(ValueT* segment_begin, int
   {
     return make_striped_thread_segment_range<BlockThreads>(segment_begin, segment_size, segment_offset);
   }
+  else if constexpr (selector_t::use_thread_range)
+  {
+    const auto local_range = make_thread_segment_range<BlockThreads>(segment_begin, segment_size);
+    return thread_segment_range<ValueT*>{local_range.begin(), segment_offset + local_range.offset(), local_range.size()};
+  }
   else if constexpr (selector_t::use_span_range)
   {
     const auto local_range = make_thread_segment_range<BlockThreads>(segment_begin, segment_size);
@@ -486,7 +487,7 @@ _CCCL_DEVICE auto make_transform_prolog_segment_range(ValueT* segment_begin, int
   else
   {
     static_assert(selector_t::valid,
-                  "segment_op must be invocable with a striped TransformProlog segment range or cuda::std::span.");
+                  "segment_op must be invocable with a TransformProlog segment range or cuda::std::span.");
   }
 }
 } // namespace detail::hierarchical
