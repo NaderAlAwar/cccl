@@ -29,13 +29,6 @@ CUB_NAMESPACE_BEGIN
 
 namespace detail::hierarchical
 {
-struct transform_prolog_no_direct_input
-{};
-
-template <typename DirectInputIteratorT>
-inline constexpr bool transform_prolog_has_direct_input_v =
-  !::cuda::std::is_same_v<::cuda::std::remove_cv_t<DirectInputIteratorT>, transform_prolog_no_direct_input>;
-
 using transform_prolog_f32_vector_storage_t = int4;
 static_assert(sizeof(transform_prolog_f32_vector_storage_t) == 4 * sizeof(float));
 static_assert(alignof(transform_prolog_f32_vector_storage_t) == 4 * sizeof(float));
@@ -120,7 +113,6 @@ template <int BlockThreads,
           typename DirectInputIteratorT,
           typename OutputIteratorT,
           typename SegmentResultT,
-          typename ApplyElementTransformT,
           typename ApplyElementTransformWithDirectT>
 _CCCL_DEVICE _CCCL_FORCEINLINE void transform_prolog_store_outputs(
   const DirectInputIteratorT d_direct,
@@ -130,106 +122,92 @@ _CCCL_DEVICE _CCCL_FORCEINLINE void transform_prolog_store_outputs(
   int items,
   ValueT* shared_segment,
   const SegmentResultT& segment_result,
-  ApplyElementTransformT apply_element_transform,
   ApplyElementTransformWithDirectT apply_element_transform_with_direct)
 {
   const int thread_rank = static_cast<int>(threadIdx.x);
 
-  if constexpr (transform_prolog_has_direct_input_v<DirectInputIteratorT>)
+  using direct_vector_load_t = transform_prolog_direct_vector_load<::cuda::std::remove_cv_t<DirectInputIteratorT>>;
+  constexpr int vector_items = 4;
+  constexpr bool can_vectorize =
+    SharedSegmentVectorAligned && ::cuda::std::is_same_v<::cuda::std::remove_cv_t<ValueT>, float>
+    && direct_vector_load_t::supported && transform_prolog_vector_output_v<::cuda::std::remove_cv_t<OutputIteratorT>>;
+
+  if constexpr (can_vectorize)
   {
-    using direct_vector_load_t = transform_prolog_direct_vector_load<::cuda::std::remove_cv_t<DirectInputIteratorT>>;
-    constexpr int vector_items = 4;
-    constexpr bool can_vectorize =
-      SharedSegmentVectorAligned && ::cuda::std::is_same_v<::cuda::std::remove_cv_t<ValueT>, float>
-      && direct_vector_load_t::supported && transform_prolog_vector_output_v<::cuda::std::remove_cv_t<OutputIteratorT>>;
-
-    if constexpr (can_vectorize)
-    {
-      auto store_vectorized_prefix = [&](int vector_count) {
-        for (int vector_index = thread_rank; vector_index < vector_count; vector_index += BlockThreads)
-        {
-          const int local_base       = vector_index * vector_items;
-          const int index_in_segment = chunk_begin + local_base;
-
-          using THRUST_NS_QUALIFIER::cuda_cub::core::detail::uninitialized_array;
-          uninitialized_array<float, vector_items, sizeof(transform_prolog_f32_vector_storage_t)> direct_values;
-          uninitialized_array<float, vector_items, sizeof(transform_prolog_f32_vector_storage_t)> shared_values;
-          reinterpret_cast<transform_prolog_f32_vector_storage_t*>(direct_values.data())[0] =
-            direct_vector_load_t::Load(d_direct, index_in_segment);
-          reinterpret_cast<transform_prolog_f32_vector_storage_t*>(shared_values.data())[0] =
-            transform_prolog_load_shared_vector(shared_segment, local_base);
-
-          uninitialized_array<float, vector_items, sizeof(transform_prolog_f32_vector_storage_t)> transformed_values;
-          _CCCL_PRAGMA_UNROLL_FULL()
-          for (int lane = 0; lane < vector_items; ++lane)
-          {
-            transformed_values[lane] =
-              apply_element_transform_with_direct(segment_result, direct_values[lane], shared_values[lane]);
-          }
-
-          transform_prolog_store_vector(
-            d_out,
-            segment_offset + static_cast<::cuda::std::size_t>(index_in_segment),
-            reinterpret_cast<const transform_prolog_f32_vector_storage_t*>(transformed_values.data())[0]);
-        }
-      };
-
-      if constexpr (AssumeDirectAndOutputVectorAligned)
+    auto store_vectorized_prefix = [&](int vector_count) {
+      for (int vector_index = thread_rank; vector_index < vector_count; vector_index += BlockThreads)
       {
-        _CCCL_ASSERT(chunk_begin % vector_items == 0, "");
-        _CCCL_ASSERT((segment_offset + static_cast<::cuda::std::size_t>(chunk_begin)) % vector_items == 0, "");
-        _CCCL_ASSERT(items % vector_items == 0, "");
-        _CCCL_ASSERT(direct_vector_load_t::IsAligned(d_direct, chunk_begin), "");
-        _CCCL_ASSERT(
-          transform_prolog_output_vector_aligned(d_out, segment_offset + static_cast<::cuda::std::size_t>(chunk_begin)),
-          "");
+        const int local_base       = vector_index * vector_items;
+        const int index_in_segment = chunk_begin + local_base;
 
+        using THRUST_NS_QUALIFIER::cuda_cub::core::detail::uninitialized_array;
+        uninitialized_array<float, vector_items, sizeof(transform_prolog_f32_vector_storage_t)> direct_values;
+        uninitialized_array<float, vector_items, sizeof(transform_prolog_f32_vector_storage_t)> shared_values;
+        reinterpret_cast<transform_prolog_f32_vector_storage_t*>(direct_values.data())[0] =
+          direct_vector_load_t::Load(d_direct, index_in_segment);
+        reinterpret_cast<transform_prolog_f32_vector_storage_t*>(shared_values.data())[0] =
+          transform_prolog_load_shared_vector(shared_segment, local_base);
+
+        uninitialized_array<float, vector_items, sizeof(transform_prolog_f32_vector_storage_t)> transformed_values;
+        _CCCL_PRAGMA_UNROLL_FULL()
+        for (int lane = 0; lane < vector_items; ++lane)
+        {
+          transformed_values[lane] =
+            apply_element_transform_with_direct(segment_result, direct_values[lane], shared_values[lane]);
+        }
+
+        transform_prolog_store_vector(
+          d_out,
+          segment_offset + static_cast<::cuda::std::size_t>(index_in_segment),
+          reinterpret_cast<const transform_prolog_f32_vector_storage_t*>(transformed_values.data())[0]);
+      }
+    };
+
+    if constexpr (AssumeDirectAndOutputVectorAligned)
+    {
+      _CCCL_ASSERT(chunk_begin % vector_items == 0, "");
+      _CCCL_ASSERT((segment_offset + static_cast<::cuda::std::size_t>(chunk_begin)) % vector_items == 0, "");
+      _CCCL_ASSERT(items % vector_items == 0, "");
+      _CCCL_ASSERT(direct_vector_load_t::IsAligned(d_direct, chunk_begin), "");
+      _CCCL_ASSERT(
+        transform_prolog_output_vector_aligned(d_out, segment_offset + static_cast<::cuda::std::size_t>(chunk_begin)),
+        "");
+
+      const int vector_count = items / vector_items;
+      store_vectorized_prefix(vector_count);
+      return;
+    }
+    else
+    {
+      const bool direct_and_output_aligned =
+        (chunk_begin % vector_items == 0)
+        && ((segment_offset + static_cast<::cuda::std::size_t>(chunk_begin)) % vector_items == 0)
+        && direct_vector_load_t::IsAligned(d_direct, chunk_begin)
+        && transform_prolog_output_vector_aligned(d_out, segment_offset + static_cast<::cuda::std::size_t>(chunk_begin));
+
+      if (direct_and_output_aligned)
+      {
         const int vector_count = items / vector_items;
         store_vectorized_prefix(vector_count);
+        for (int local_index = vector_count * vector_items + thread_rank; local_index < items;
+             local_index += BlockThreads)
+        {
+          const int index_in_segment = chunk_begin + local_index;
+          const auto direct_value    = d_direct[index_in_segment];
+          d_out[segment_offset + static_cast<::cuda::std::size_t>(index_in_segment)] =
+            apply_element_transform_with_direct(segment_result, direct_value, shared_segment[local_index]);
+        }
         return;
       }
-      else
-      {
-        const bool direct_and_output_aligned =
-          (chunk_begin % vector_items == 0)
-          && ((segment_offset + static_cast<::cuda::std::size_t>(chunk_begin)) % vector_items == 0)
-          && direct_vector_load_t::IsAligned(d_direct, chunk_begin)
-          && transform_prolog_output_vector_aligned(
-            d_out, segment_offset + static_cast<::cuda::std::size_t>(chunk_begin));
-
-        if (direct_and_output_aligned)
-        {
-          const int vector_count = items / vector_items;
-          store_vectorized_prefix(vector_count);
-          for (int local_index = vector_count * vector_items + thread_rank; local_index < items;
-               local_index += BlockThreads)
-          {
-            const int index_in_segment = chunk_begin + local_index;
-            const auto direct_value    = d_direct[index_in_segment];
-            d_out[segment_offset + static_cast<::cuda::std::size_t>(index_in_segment)] =
-              apply_element_transform_with_direct(segment_result, direct_value, shared_segment[local_index]);
-          }
-          return;
-        }
-      }
-    }
-
-    for (int local_index = thread_rank; local_index < items; local_index += BlockThreads)
-    {
-      const int index_in_segment = chunk_begin + local_index;
-      const auto direct_value    = d_direct[index_in_segment];
-      d_out[segment_offset + static_cast<::cuda::std::size_t>(index_in_segment)] =
-        apply_element_transform_with_direct(segment_result, direct_value, shared_segment[local_index]);
     }
   }
-  else
+
+  for (int local_index = thread_rank; local_index < items; local_index += BlockThreads)
   {
-    for (int local_index = thread_rank; local_index < items; local_index += BlockThreads)
-    {
-      const int index_in_segment = chunk_begin + local_index;
-      d_out[segment_offset + static_cast<::cuda::std::size_t>(index_in_segment)] =
-        apply_element_transform(segment_result, index_in_segment, shared_segment[local_index]);
-    }
+    const int index_in_segment = chunk_begin + local_index;
+    const auto direct_value    = d_direct[index_in_segment];
+    d_out[segment_offset + static_cast<::cuda::std::size_t>(index_in_segment)] =
+      apply_element_transform_with_direct(segment_result, direct_value, shared_segment[local_index]);
   }
 }
 
@@ -254,8 +232,8 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
   // - `segment_op` receives either an explicitly requested contiguous span or an implementation-chosen per-thread range
   // - `segment_op` is responsible for any block-wide combine it needs and should return the final segment result on
   //   every thread in the block group
-  // - the kernel then applies `element_transform_op` to each item, passing the segment result, the segment-local item
-  //   index, and the item value
+  // - the kernel then applies `element_transform_op` to each item, passing the segment result, the direct input value,
+  //   and the staged input value
 
   using block_hierarchy_t = decltype(::cuda::hierarchy(::cuda::grid_dims(dim3{}), ::cuda::block_dims<BlockThreads>()));
   using block_group_t     = ::cuda::experimental::this_block<block_hierarchy_t>;
@@ -270,8 +248,6 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
   using segment_result_t = ::cuda::std::decay_t<::cuda::std::invoke_result_t<SegmentOpT, block_group_t, input_range_t>>;
   using block_load_to_shared_t = BlockLoadToShared<BlockThreads>;
 
-  static_assert(hierarchical_transform_stageable_input_v<InputIteratorT>,
-                "TransformProlog requires input values to be trivially relocatable.");
   static_assert(!::cuda::std::is_void_v<segment_result_t>, "segment_op must return one scalar result per segment.");
   extern __shared__ char shared_segment_buffer_base[];
   __shared__ typename block_load_to_shared_t::TempStorage load_to_shared_storage;
@@ -281,23 +257,8 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
     static_cast<::cuda::std::size_t>(segment_id) * static_cast<::cuda::std::size_t>(segment_size);
   const auto segment_begin = d_in + segment_offset;
 
-  const auto block_hierarchy   = ::cuda::hierarchy(::cuda::grid_dims(gridDim), ::cuda::block_dims<BlockThreads>());
-  auto block_group             = ::cuda::experimental::this_block{block_hierarchy};
-  auto apply_element_transform = [&](const segment_result_t& segment_result, int index_in_segment, auto&& value) {
-    using input_ref_t = decltype(value);
-
-    if constexpr (::cuda::std::is_invocable_v<ElementTransformOpT, segment_result_t, int, input_ref_t>)
-    {
-      return element_transform_op(segment_result, index_in_segment, static_cast<input_ref_t>(value));
-    }
-    else
-    {
-      static_assert(::cuda::std::is_invocable_v<ElementTransformOpT, segment_result_t, input_ref_t>,
-                    "element_transform_op must be invocable with either "
-                    "(segment_result, index_in_segment, value) or (segment_result, value).");
-      return element_transform_op(segment_result, static_cast<input_ref_t>(value));
-    }
-  };
+  const auto block_hierarchy = ::cuda::hierarchy(::cuda::grid_dims(gridDim), ::cuda::block_dims<BlockThreads>());
+  auto block_group           = ::cuda::experimental::this_block{block_hierarchy};
   auto apply_element_transform_with_direct =
     [&](const segment_result_t& segment_result, auto&& direct_value, auto&& value) {
       using direct_ref_t = decltype(direct_value);
@@ -337,7 +298,6 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
     segment_size,
     shared_segment,
     segment_result,
-    apply_element_transform,
     apply_element_transform_with_direct);
 }
 
@@ -380,8 +340,6 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
     ::cuda::std::decay_t<::cuda::std::invoke_result_t<SegmentOpT, cluster_group_t, input_range_t>>;
   using block_load_to_shared_t = BlockLoadToShared<BlockThreads>;
 
-  static_assert(hierarchical_transform_stageable_input_v<InputIteratorT>,
-                "TransformProlog requires input values to be trivially relocatable.");
   static_assert(!::cuda::std::is_void_v<segment_result_t>, "segment_op must return one scalar result per segment.");
 
   extern __shared__ char shared_segment_buffer_base[];
@@ -404,21 +362,6 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
     ::cuda::block_dims<BlockThreads>());
   auto cluster_group = ::cuda::experimental::this_cluster{cluster_hierarchy};
 
-  auto apply_element_transform = [&](const segment_result_t& segment_result, int index_in_segment, auto&& value) {
-    using input_ref_t = decltype(value);
-
-    if constexpr (::cuda::std::is_invocable_v<ElementTransformOpT, segment_result_t, int, input_ref_t>)
-    {
-      return element_transform_op(segment_result, index_in_segment, static_cast<input_ref_t>(value));
-    }
-    else
-    {
-      static_assert(::cuda::std::is_invocable_v<ElementTransformOpT, segment_result_t, input_ref_t>,
-                    "element_transform_op must be invocable with either "
-                    "(segment_result, index_in_segment, value) or (segment_result, value).");
-      return element_transform_op(segment_result, static_cast<input_ref_t>(value));
-    }
-  };
   auto apply_element_transform_with_direct =
     [&](const segment_result_t& segment_result, auto&& direct_value, auto&& value) {
       using direct_ref_t = decltype(direct_value);
@@ -458,7 +401,6 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
     local_items,
     shared_segment,
     segment_result,
-    apply_element_transform,
     apply_element_transform_with_direct);
 }
 } // namespace detail::hierarchical

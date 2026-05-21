@@ -409,7 +409,6 @@ struct transform_prolog_segment_range_selector
   using vectorized_range = vectorized_thread_segment_range<BlockThreads, ValueT, AssumeFullVectorizedRange>;
   using striped_range    = striped_thread_segment_range_t<BlockThreads, ValueT*>;
   using thread_range     = thread_segment_range<ValueT*>;
-  using span_range       = ::cuda::std::span<ValueT>;
 
   // TODO: The vectorized/striped ranges are used so F32 RMSNorm-style reductions read shared memory with consecutive
   // warp lanes touching consecutive 4-byte banks. This is only the right bank-conflict fix for F32/4-byte values;
@@ -421,16 +420,11 @@ struct transform_prolog_segment_range_selector
     !use_vectorized_range && sizeof(raw_value_t) == 4 && ::cuda::std::is_invocable_v<SegmentOpT, GroupT, striped_range>;
   static constexpr bool use_thread_range =
     !use_vectorized_range && !use_striped_range && ::cuda::std::is_invocable_v<SegmentOpT, GroupT, thread_range>;
-  static constexpr bool use_span_range = !use_vectorized_range && !use_striped_range && !use_thread_range
-                                      && ::cuda::std::is_invocable_v<SegmentOpT, GroupT, span_range>;
-  static constexpr bool valid = use_vectorized_range || use_striped_range || use_thread_range || use_span_range;
+  static constexpr bool valid = use_vectorized_range || use_striped_range || use_thread_range;
 
-  using type = ::cuda::std::conditional_t<
-    use_vectorized_range,
-    vectorized_range,
-    ::cuda::std::conditional_t<use_striped_range,
-                               striped_range,
-                               ::cuda::std::conditional_t<use_thread_range, thread_range, span_range>>>;
+  using type = ::cuda::std::conditional_t<use_vectorized_range,
+                                          vectorized_range,
+                                          ::cuda::std::conditional_t<use_striped_range, striped_range, thread_range>>;
 };
 
 template <int BlockThreads,
@@ -462,8 +456,7 @@ _CCCL_DEVICE auto make_transform_prolog_segment_range(ValueT* segment_begin, int
     ValueT,
     SharedSegmentVectorAligned,
     AssumeFullVectorizedRange>;
-  static_assert(selector_t::valid,
-                "segment_op must be invocable with a TransformProlog segment range or cuda::std::span.");
+  static_assert(selector_t::valid, "segment_op must be invocable with a TransformProlog segment range.");
 
   if constexpr (selector_t::use_vectorized_range)
   {
@@ -479,15 +472,9 @@ _CCCL_DEVICE auto make_transform_prolog_segment_range(ValueT* segment_begin, int
     const auto local_range = make_thread_segment_range<BlockThreads>(segment_begin, segment_size);
     return thread_segment_range<ValueT*>{local_range.begin(), segment_offset + local_range.offset(), local_range.size()};
   }
-  else if constexpr (selector_t::use_span_range)
-  {
-    const auto local_range = make_thread_segment_range<BlockThreads>(segment_begin, segment_size);
-    return ::cuda::std::span<ValueT>{local_range.begin(), static_cast<::cuda::std::size_t>(local_range.size())};
-  }
   else
   {
-    static_assert(selector_t::valid,
-                  "segment_op must be invocable with a TransformProlog segment range or cuda::std::span.");
+    static_assert(selector_t::valid, "segment_op must be invocable with a TransformProlog segment range.");
   }
 }
 } // namespace detail::hierarchical

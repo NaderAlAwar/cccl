@@ -85,7 +85,8 @@ try
   state.exec(nvbench::exec_tag::no_batch, [&](nvbench::launch& launch) {
     NVBENCH_CUDA_CALL(cub::DeviceSegmentedTransform::TransformProlog(
       d_input,
-      d_weight_ldg,
+      d_weight_ldg, // Right now this is a special case because its size is hidden_size, not batch_size * hidden_size.
+                    // Later, we will need an iterator that expresses repeating hidden_size elements for each batch.
       d_output,
       batch_size,
       hidden_size,
