@@ -31,9 +31,6 @@ CUB_NAMESPACE_BEGIN
 
 namespace detail::hierarchical
 {
-constexpr int transform_epilog_bulk_copy_alignment =
-  (CUB_PTX_ARCH >= 900 && CUB_PTX_ARCH < 1000) ? 128 : cub::detail::bulk_copy_min_align;
-
 template <typename T>
 struct transform_epilog_aligned_base_ptr
 {
@@ -43,12 +40,12 @@ struct transform_epilog_aligned_base_ptr
   int head_padding;
 };
 
-template <typename T>
+template <int BulkCopyAlignment, typename T>
 CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE auto transform_epilog_make_aligned_base_ptr(T* ptr)
   -> transform_epilog_aligned_base_ptr<T>
 {
   const auto raw_ptr  = reinterpret_cast<const char*>(ptr);
-  const auto base_ptr = ::cuda::align_down(raw_ptr, transform_epilog_bulk_copy_alignment);
+  const auto base_ptr = ::cuda::align_down(raw_ptr, BulkCopyAlignment);
   return {base_ptr, static_cast<int>(raw_ptr - base_ptr)};
 }
 
@@ -80,19 +77,19 @@ template <typename InputIteratorT>
 using transform_epilog_input_value_t =
   typename transform_epilog_input_value<::cuda::std::decay_t<InputIteratorT>>::type;
 
-template <typename InputIteratorT>
+template <int BulkCopyAlignment, typename InputIteratorT>
 CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE bool transform_epilog_is_valid_aligned_input(const InputIteratorT&, int)
 {
   return true;
 }
 
-template <typename T>
+template <int BulkCopyAlignment, typename T>
 CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE bool
 transform_epilog_is_valid_aligned_input(const transform_epilog_aligned_base_ptr<T>& input, int total_items)
 {
   const auto total_bytes =
     static_cast<::cuda::std::int64_t>(sizeof(typename transform_epilog_aligned_base_ptr<T>::value_type)) * total_items;
-  return input.head_padding == 0 && total_bytes % transform_epilog_bulk_copy_alignment == 0;
+  return input.head_padding == 0 && total_bytes % BulkCopyAlignment == 0;
 }
 
 template <typename TransformOpT, bool AcceptsIndex, typename... InputValueTs>
@@ -149,59 +146,63 @@ _CCCL_HOST_DEVICE constexpr int transform_epilog_align_up(int value, int alignme
   return ((value + alignment - 1) / alignment) * alignment;
 }
 
-template <int ItemsPerBlock, typename InputIteratorT>
+template <int BulkCopyAlignment, int ItemsPerBlock, typename InputIteratorT>
 _CCCL_HOST_DEVICE constexpr int transform_epilog_shared_buffer_align()
 {
-  return transform_epilog_bulk_copy_alignment;
+  return BulkCopyAlignment;
 }
 
-template <int ItemsPerBlock, typename InputIteratorT>
+template <int BulkCopyAlignment, int ItemsPerBlock, typename InputIteratorT>
 _CCCL_HOST_DEVICE constexpr int transform_epilog_shared_buffer_size()
 {
-  return static_cast<int>(sizeof(transform_epilog_input_value_t<InputIteratorT>)) * ItemsPerBlock
-       + transform_epilog_bulk_copy_alignment;
+  return static_cast<int>(sizeof(transform_epilog_input_value_t<InputIteratorT>)) * ItemsPerBlock + BulkCopyAlignment;
 }
 
-template <int ItemsPerBlock, typename... InputIteratorTs>
+template <int BulkCopyAlignment, int ItemsPerBlock, typename... InputIteratorTs>
 _CCCL_HOST_DEVICE constexpr int transform_epilog_shared_buffer_max_align()
 {
   int result = 1;
-  ((result = (::cuda::std::max) (result, transform_epilog_shared_buffer_align<ItemsPerBlock, InputIteratorTs>())), ...);
+  ((result =
+      (::cuda::std::max) (result,
+                          transform_epilog_shared_buffer_align<BulkCopyAlignment, ItemsPerBlock, InputIteratorTs>())),
+   ...);
   return result;
 }
 
-template <int ItemsPerBlock, typename... InputIteratorTs>
+template <int BulkCopyAlignment, int ItemsPerBlock, typename... InputIteratorTs>
 _CCCL_HOST_DEVICE constexpr int transform_epilog_shared_buffer_total_size()
 {
   int offset = 0;
-  ((offset = transform_epilog_align_up(offset, transform_epilog_shared_buffer_align<ItemsPerBlock, InputIteratorTs>()),
-    offset += transform_epilog_shared_buffer_size<ItemsPerBlock, InputIteratorTs>()),
+  ((offset = transform_epilog_align_up(
+      offset, transform_epilog_shared_buffer_align<BulkCopyAlignment, ItemsPerBlock, InputIteratorTs>()),
+    offset += transform_epilog_shared_buffer_size<BulkCopyAlignment, ItemsPerBlock, InputIteratorTs>()),
    ...);
   return offset;
 }
 
-template <int TargetIndex, int ItemsPerBlock, typename... InputIteratorTs>
+template <int BulkCopyAlignment, int TargetIndex, int ItemsPerBlock, typename... InputIteratorTs>
 _CCCL_HOST_DEVICE constexpr int transform_epilog_shared_buffer_offset()
 {
   int offset = 0;
   int result = 0;
   int index  = 0;
-  ((offset = transform_epilog_align_up(offset, transform_epilog_shared_buffer_align<ItemsPerBlock, InputIteratorTs>()),
+  ((offset = transform_epilog_align_up(
+      offset, transform_epilog_shared_buffer_align<BulkCopyAlignment, ItemsPerBlock, InputIteratorTs>()),
     result = index == TargetIndex ? offset : result,
-    offset += transform_epilog_shared_buffer_size<ItemsPerBlock, InputIteratorTs>(),
+    offset += transform_epilog_shared_buffer_size<BulkCopyAlignment, ItemsPerBlock, InputIteratorTs>(),
     ++index),
    ...);
   return result;
 }
 
-template <int BlockThreads, int ItemsPerThread, typename... InputIteratorTs>
+template <int BlockThreads, int ItemsPerThread, int BulkCopyAlignment, typename... InputIteratorTs>
 struct transform_epilog_input_load_storage
 {
   static constexpr int items_per_block = BlockThreads * ItemsPerThread;
   static constexpr int shared_buffer_align =
-    transform_epilog_shared_buffer_max_align<items_per_block, InputIteratorTs...>();
+    transform_epilog_shared_buffer_max_align<BulkCopyAlignment, items_per_block, InputIteratorTs...>();
   static constexpr int shared_buffer_bytes =
-    transform_epilog_shared_buffer_total_size<items_per_block, InputIteratorTs...>();
+    transform_epilog_shared_buffer_total_size<BulkCopyAlignment, items_per_block, InputIteratorTs...>();
 
   using block_load_to_shared_t = BlockLoadToShared<BlockThreads>;
 
@@ -211,14 +212,14 @@ struct transform_epilog_input_load_storage
   template <int Index>
   _CCCL_HOST_DEVICE static constexpr int shared_buffer_offset()
   {
-    return transform_epilog_shared_buffer_offset<Index, items_per_block, InputIteratorTs...>();
+    return transform_epilog_shared_buffer_offset<BulkCopyAlignment, Index, items_per_block, InputIteratorTs...>();
   }
 
   template <int Index>
   _CCCL_HOST_DEVICE static constexpr int shared_buffer_size()
   {
     using input_iterator_t = typename ::cuda::std::tuple_element<Index, ::cuda::std::tuple<InputIteratorTs...>>::type;
-    return transform_epilog_shared_buffer_size<items_per_block, input_iterator_t>();
+    return transform_epilog_shared_buffer_size<BulkCopyAlignment, items_per_block, input_iterator_t>();
   }
 };
 
@@ -327,8 +328,9 @@ _CCCL_DEVICE _CCCL_FORCEINLINE transform_epilog_tile transform_epilog_get_tile(i
 
 template <int BlockThreads,
           int ItemsPerThread,
+          int BulkCopyAlignment,
           int StaticSegmentSize,
-          bool UseStripedNoEpilog,
+          bool UseFlatNoEpilog,
           typename OutputIteratorT,
           typename TransformOpT,
           typename DeviceEpilogOpT,
@@ -347,16 +349,17 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
   // - each thread owns ItemsPerThread consecutive rows inside that tile
   // - segment structure is preserved only through the per-item indices passed to the epilog
   // - `transform_op(index, values...)` or `transform_op(values...)` returns the per-item result
-  // - the transform result is materialized immediately through the output iterator
-  // - the same transform result is forwarded to the cooperative epilog
+  // - the no-epilog fast path stores a flat, striped tile directly to the output iterator
+  // - the epilog path keeps blocked per-thread results for the cooperative epilog, then stores them to the output
+  //   iterator
   // - `device_epilog_op` owns all per-segment and device-wide side effects, such as writing a mask word or updating a
   //   global counter
 
   static_assert(BlockThreads > 0, "BlockThreads must be positive.");
   static_assert(BlockThreads % 32 == 0, "BlockThreads must be a multiple of warp size.");
   static_assert(sizeof...(InputIteratorTs) > 0, "TransformEpilog requires at least one input.");
-  static_assert(!UseStripedNoEpilog || transform_epilog_all_load_to_shared<InputIteratorTs...>,
-                "The striped no-epilog fast path requires all inputs to use BlockLoadToShared.");
+  static_assert(!UseFlatNoEpilog || transform_epilog_all_load_to_shared<InputIteratorTs...>,
+                "The flat no-epilog fast path requires all inputs to use BlockLoadToShared.");
   static_assert(transform_epilog_all_load_to_shared<InputIteratorTs...>,
                 "TransformEpilog requires raw pointer inputs with trivially relocatable value types.");
 
@@ -394,9 +397,10 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
     ::cuda::std::conditional_t<epilog_accepts_indices,
                                transform_epilog_indices_storage<ItemsPerThread>,
                                transform_epilog_no_indices_storage>;
-  using input_load_storage_t = transform_epilog_input_load_storage<BlockThreads, ItemsPerThread, InputIteratorTs...>;
-  using loaded_inputs_t      = ::cuda::std::tuple<
-         transform_epilog_shared_input_values<ItemsPerThread, transform_epilog_input_value_t<InputIteratorTs>>...>;
+  using input_load_storage_t =
+    transform_epilog_input_load_storage<BlockThreads, ItemsPerThread, BulkCopyAlignment, InputIteratorTs...>;
+  using loaded_inputs_t = ::cuda::std::tuple<
+    transform_epilog_shared_input_values<ItemsPerThread, transform_epilog_input_value_t<InputIteratorTs>>...>;
 
   constexpr int max_items_per_block = BlockThreads * ItemsPerThread;
   const auto linear_tid             = static_cast<int>(threadIdx.x);
@@ -411,37 +415,38 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
 
   typename input_load_storage_t::block_load_to_shared_t load_to_shared{temp_storage.load_to_shared};
 
-  auto issue_load_to_shared = [&]<::cuda::std::size_t InputIndex, typename InputIteratorT>(
-                                ::cuda::std::integral_constant<::cuda::std::size_t, InputIndex>, InputIteratorT input) {
-    static_assert(transform_epilog_use_load_to_shared<InputIteratorT>);
+  auto issue_input_copy_async =
+    [&]<::cuda::std::size_t InputIndex, typename InputIteratorT>(
+      ::cuda::std::integral_constant<::cuda::std::size_t, InputIndex>, InputIteratorT input) {
+      static_assert(transform_epilog_use_load_to_shared<InputIteratorT>);
 
-    using input_value_t         = transform_epilog_input_value_t<InputIteratorT>;
-    constexpr int gmem_align    = transform_epilog_bulk_copy_alignment;
-    constexpr int buffer_offset = input_load_storage_t::template shared_buffer_offset<static_cast<int>(InputIndex)>();
-    constexpr int buffer_size   = input_load_storage_t::template shared_buffer_size<static_cast<int>(InputIndex)>();
+      using input_value_t         = transform_epilog_input_value_t<InputIteratorT>;
+      constexpr int gmem_align    = BulkCopyAlignment;
+      constexpr int buffer_offset = input_load_storage_t::template shared_buffer_offset<static_cast<int>(InputIndex)>();
+      constexpr int buffer_size   = input_load_storage_t::template shared_buffer_size<static_cast<int>(InputIndex)>();
 
-    const int bytes_to_copy    = static_cast<int>(sizeof(input_value_t)) * tile_items;
-    const char* const gmem_src = input.ptr + static_cast<::cuda::std::size_t>(tile_item_base) * sizeof(input_value_t);
+      const int bytes_to_copy    = static_cast<int>(sizeof(input_value_t)) * tile_items;
+      const char* const gmem_src = input.ptr + static_cast<::cuda::std::size_t>(tile_item_base) * sizeof(input_value_t);
 
-    _CCCL_ASSERT(input.head_padding == 0, "TransformEpilog raw inputs must satisfy the bulk copy alignment.");
-    _CCCL_ASSERT(bytes_to_copy % gmem_align == 0,
-                 "TransformEpilog raw input tiles must end on the bulk copy alignment.");
-    _CCCL_ASSERT(::cuda::is_aligned(temp_storage.shared_buffers + buffer_offset, gmem_align),
-                 "TransformEpilog raw shared tiles must satisfy the bulk copy alignment.");
+      _CCCL_ASSERT(input.head_padding == 0, "TransformEpilog raw inputs must satisfy the bulk copy alignment.");
+      _CCCL_ASSERT(bytes_to_copy % gmem_align == 0,
+                   "TransformEpilog raw input tiles must end on the bulk copy alignment.");
+      _CCCL_ASSERT(::cuda::is_aligned(temp_storage.shared_buffers + buffer_offset, gmem_align),
+                   "TransformEpilog raw shared tiles must satisfy the bulk copy alignment.");
 
-    ::cuda::std::span<char> shared_buffer{temp_storage.shared_buffers + buffer_offset, buffer_size};
-    ::cuda::std::span<const char> gmem_span{gmem_src, static_cast<::cuda::std::size_t>(bytes_to_copy)};
-    load_to_shared.template CopyAsync<char, transform_epilog_bulk_copy_alignment>(shared_buffer, gmem_span);
-  };
+      ::cuda::std::span<char> shared_buffer{temp_storage.shared_buffers + buffer_offset, buffer_size};
+      ::cuda::std::span<const char> gmem_span{gmem_src, static_cast<::cuda::std::size_t>(bytes_to_copy)};
+      load_to_shared.template CopyAsync<char, BulkCopyAlignment>(shared_buffer, gmem_span);
+    };
 
   [&]<::cuda::std::size_t... Is>(::cuda::std::index_sequence<Is...>, InputIteratorTs... input_iterators) {
-    (issue_load_to_shared(::cuda::std::integral_constant<::cuda::std::size_t, Is>{}, input_iterators), ...);
+    (issue_input_copy_async(::cuda::std::integral_constant<::cuda::std::size_t, Is>{}, input_iterators), ...);
   }(::cuda::std::index_sequence_for<InputIteratorTs...>{}, d_in...);
 
   auto token = load_to_shared.Commit();
 
   using input_iterators_tuple_t = ::cuda::std::tuple<InputIteratorTs...>;
-  auto bind_shared_input =
+  auto bind_input_shared_view =
     [&]<::cuda::std::size_t InputIndex>(::cuda::std::integral_constant<::cuda::std::size_t, InputIndex>) {
       using input_iterator_t = typename ::cuda::std::tuple_element<InputIndex, input_iterators_tuple_t>::type;
       static_assert(transform_epilog_use_load_to_shared<input_iterator_t>);
@@ -454,14 +459,14 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
     };
 
   [&]<::cuda::std::size_t... Is>(::cuda::std::index_sequence<Is...>) {
-    (bind_shared_input(::cuda::std::integral_constant<::cuda::std::size_t, Is>{}), ...);
+    (bind_input_shared_view(::cuda::std::integral_constant<::cuda::std::size_t, Is>{}), ...);
   }(::cuda::std::index_sequence_for<InputIteratorTs...>{});
 
   load_to_shared.Wait(::cuda::std::move(token));
 
-  if constexpr (UseStripedNoEpilog)
+  if constexpr (UseFlatNoEpilog)
   {
-    auto process_tile = [&](auto full_tile) {
+    auto store_flat_tile = [&](auto full_tile) {
       _CCCL_PRAGMA_UNROLL_FULL()
       for (int item = 0; item < ItemsPerThread; ++item)
       {
@@ -477,11 +482,11 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(BlockThreads) void DeviceHierarchicalT
 
     if (tile_items == max_items_per_block)
     {
-      process_tile(::cuda::std::true_type{});
+      store_flat_tile(::cuda::std::true_type{});
     }
     else
     {
-      process_tile(::cuda::std::false_type{});
+      store_flat_tile(::cuda::std::false_type{});
     }
 
     return;

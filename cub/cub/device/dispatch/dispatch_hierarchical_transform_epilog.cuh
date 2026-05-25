@@ -15,6 +15,7 @@
 
 #include <cub/detail/launcher/cuda_runtime.cuh>
 #include <cub/device/dispatch/kernels/kernel_hierarchical_transform_epilog.cuh>
+#include <cub/device/dispatch/tuning/tuning_transform.cuh>
 #include <cub/util_debug.cuh>
 #include <cub/util_device.cuh>
 
@@ -100,16 +101,17 @@ struct transform_epilog_has_segment_32_kernel : ::cuda::std::false_type
 template <typename KernelSourceT>
 struct transform_epilog_has_segment_32_kernel<
   KernelSourceT,
-  ::cuda::std::void_t<decltype(::cuda::std::declval<KernelSourceT>().HierarchicalTransformEpilogKernelSegment32())>>
+  ::cuda::std::void_t<
+    decltype(::cuda::std::declval<KernelSourceT>().template HierarchicalTransformEpilogKernelSegment32<16>())>>
     : ::cuda::std::true_type
 {};
 
-template <typename InputIteratorT>
+template <int BulkCopyAlignment, typename InputIteratorT>
 CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE auto transform_epilog_make_kernel_input(InputIteratorT&& d_in)
 {
   if constexpr (transform_epilog_should_assume_aligned_input<InputIteratorT>)
   {
-    return transform_epilog_make_aligned_base_ptr(d_in);
+    return transform_epilog_make_aligned_base_ptr<BulkCopyAlignment>(d_in);
   }
   else
   {
@@ -118,7 +120,7 @@ CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE auto transform_epilog_make_kernel_input(I
   }
 }
 
-template <typename InputIteratorT>
+template <int BulkCopyAlignment, typename InputIteratorT>
 CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE auto make_transform_epilog_input_tuple(InputIteratorT&& d_in)
 {
   if constexpr (transform_epilog_tuple_all_load_to_shared<::cuda::std::decay_t<InputIteratorT>>::value)
@@ -129,14 +131,15 @@ CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE auto make_transform_epilog_input_tuple(In
   {
     return ::cuda::std::apply(
       []<typename... InputIteratorTs>(InputIteratorTs&&... input_iterators) {
-        return ::cuda::std::make_tuple(
-          transform_epilog_make_kernel_input(::cuda::std::forward<InputIteratorTs>(input_iterators))...);
+        return ::cuda::std::make_tuple(transform_epilog_make_kernel_input<BulkCopyAlignment>(
+          ::cuda::std::forward<InputIteratorTs>(input_iterators))...);
       },
       ::cuda::std::forward<InputIteratorT>(d_in));
   }
   else
   {
-    return ::cuda::std::make_tuple(transform_epilog_make_kernel_input(::cuda::std::forward<InputIteratorT>(d_in)));
+    return ::cuda::std::make_tuple(
+      transform_epilog_make_kernel_input<BulkCopyAlignment>(::cuda::std::forward<InputIteratorT>(d_in)));
   }
 }
 
@@ -165,32 +168,61 @@ struct DeviceHierarchicalTransformEpilogKernelSource<
   static_assert(transform_epilog_all_load_to_shared<InputIteratorTs...>,
                 "TransformEpilog requires all transform inputs to be raw pointers to trivially relocatable types.");
 
-  static constexpr bool use_striped_no_epilog =
+  static constexpr bool use_flat_no_epilog =
     ::cuda::std::is_same_v<::cuda::std::decay_t<DeviceEpilogOpT>, NoopDeviceEpilogOp>
     && transform_epilog_all_load_to_shared<InputIteratorTs...>;
 
-  CUB_DEFINE_KERNEL_GETTER(
-    HierarchicalTransformEpilogKernel,
-    DeviceHierarchicalTransformEpilogKernel<
+  template <int BulkCopyAlignment>
+  _CCCL_HIDE_FROM_ABI
+  CUB_RUNTIME_FUNCTION static constexpr decltype(&DeviceHierarchicalTransformEpilogKernel<
+                                                 BlockThreads,
+                                                 ItemsPerThread,
+                                                 BulkCopyAlignment,
+                                                 0,
+                                                 use_flat_no_epilog,
+                                                 OutputIteratorT,
+                                                 TransformOpT,
+                                                 DeviceEpilogOpT,
+                                                 InputIteratorTs...>)
+  HierarchicalTransformEpilogKernel()
+  {
+    return &DeviceHierarchicalTransformEpilogKernel<
       BlockThreads,
       ItemsPerThread,
+      BulkCopyAlignment,
       0,
-      use_striped_no_epilog,
+      use_flat_no_epilog,
       OutputIteratorT,
       TransformOpT,
       DeviceEpilogOpT,
-      InputIteratorTs...>)
-  CUB_DEFINE_KERNEL_GETTER(
-    HierarchicalTransformEpilogKernelSegment32,
-    DeviceHierarchicalTransformEpilogKernel<
+      InputIteratorTs...>;
+  }
+
+  template <int BulkCopyAlignment>
+  _CCCL_HIDE_FROM_ABI
+  CUB_RUNTIME_FUNCTION static constexpr decltype(&DeviceHierarchicalTransformEpilogKernel<
+                                                 BlockThreads,
+                                                 ItemsPerThread,
+                                                 BulkCopyAlignment,
+                                                 32,
+                                                 use_flat_no_epilog,
+                                                 OutputIteratorT,
+                                                 TransformOpT,
+                                                 DeviceEpilogOpT,
+                                                 InputIteratorTs...>)
+  HierarchicalTransformEpilogKernelSegment32()
+  {
+    return &DeviceHierarchicalTransformEpilogKernel<
       BlockThreads,
       ItemsPerThread,
+      BulkCopyAlignment,
       32,
-      use_striped_no_epilog,
+      use_flat_no_epilog,
       OutputIteratorT,
       TransformOpT,
       DeviceEpilogOpT,
-      InputIteratorTs...>)
+      InputIteratorTs...>;
+  }
 };
 
 template <int BlockThreads,
@@ -250,7 +282,10 @@ struct DispatchHierarchicalTransformEpilog
       , launcher_factory(launcher_factory)
   {}
 
-  template <bool UseFlatTile, typename DeviceHierarchicalTransformEpilogKernelT, ::cuda::std::size_t... Is>
+  template <int BulkCopyAlignment,
+            bool UseFlatTile,
+            typename DeviceHierarchicalTransformEpilogKernelT,
+            ::cuda::std::size_t... Is>
   CUB_RUNTIME_FUNCTION _CCCL_VISIBILITY_HIDDEN _CCCL_FORCEINLINE cudaError_t InvokeKernel(
     DeviceHierarchicalTransformEpilogKernelT hierarchical_transform_epilog_kernel, ::cuda::std::index_sequence<Is...>)
   {
@@ -310,7 +345,9 @@ struct DispatchHierarchicalTransformEpilog
 
     const bool aligned_inputs_are_valid =
       [&]<::cuda::std::size_t... InputIndices>(::cuda::std::index_sequence<InputIndices...>) {
-        return (... && transform_epilog_is_valid_aligned_input(::cuda::std::get<InputIndices>(d_in), total_items));
+        return (...
+                && transform_epilog_is_valid_aligned_input<BulkCopyAlignment>(
+                  ::cuda::std::get<InputIndices>(d_in), total_items));
       }(::cuda::std::make_index_sequence<::cuda::std::tuple_size_v<InputIteratorT>>{});
 
     if (!aligned_inputs_are_valid)
@@ -345,6 +382,7 @@ struct DispatchHierarchicalTransformEpilog
     return cudaSuccess;
   }
 
+  template <int BulkCopyAlignment>
   CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE cudaError_t Invoke()
   {
     using input_indices_t = ::cuda::std::make_index_sequence<::cuda::std::tuple_size_v<InputIteratorT>>;
@@ -355,14 +393,138 @@ struct DispatchHierarchicalTransformEpilog
       if (segment_size == 32)
       {
         constexpr bool use_flat_tile = transform_epilog_can_use_flat_no_epilog<InputIteratorT, DeviceEpilogOpT>;
-        return InvokeKernel<use_flat_tile>(
-          kernel_source.HierarchicalTransformEpilogKernelSegment32(), input_indices_t{});
+        return InvokeKernel<BulkCopyAlignment, use_flat_tile>(
+          kernel_source.template HierarchicalTransformEpilogKernelSegment32<BulkCopyAlignment>(), input_indices_t{});
       }
     }
 
-    return InvokeKernel<false>(kernel_source.HierarchicalTransformEpilogKernel(), input_indices_t{});
+    return InvokeKernel<BulkCopyAlignment, false>(
+      kernel_source.template HierarchicalTransformEpilogKernel<BulkCopyAlignment>(), input_indices_t{});
   }
 };
+
+template <int BulkCopyAlignment,
+          int BlockThreads,
+          int ItemsPerThread,
+          typename InputIteratorT,
+          typename OutputIteratorT,
+          typename TransformOpT,
+          typename DeviceEpilogOpT,
+          typename InputIteratorTupleT,
+          typename KernelSource,
+          typename KernelLauncherFactory>
+CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE cudaError_t dispatch_transform_epilog_aligned(
+  InputIteratorT d_in,
+  OutputIteratorT d_out,
+  ::cuda::std::int64_t num_segments,
+  int segment_size,
+  TransformOpT transform_op,
+  DeviceEpilogOpT device_epilog_op,
+  cudaStream_t stream,
+  KernelSource kernel_source,
+  KernelLauncherFactory launcher_factory)
+{
+  static_assert(transform_epilog_tuple_all_load_to_shared<InputIteratorTupleT>::value,
+                "TransformEpilog requires all transform inputs to be raw pointers to trivially relocatable types.");
+
+  return DispatchHierarchicalTransformEpilog<
+           BlockThreads,
+           ItemsPerThread,
+           InputIteratorTupleT,
+           OutputIteratorT,
+           TransformOpT,
+           DeviceEpilogOpT,
+           KernelSource,
+           KernelLauncherFactory>{
+    make_transform_epilog_input_tuple<BulkCopyAlignment>(::cuda::std::move(d_in)),
+    ::cuda::std::move(d_out),
+    num_segments,
+    segment_size,
+    ::cuda::std::move(transform_op),
+    ::cuda::std::move(device_epilog_op),
+    stream,
+    kernel_source,
+    launcher_factory}
+    .template Invoke<BulkCopyAlignment>();
+}
+
+template <int BlockThreads,
+          int ItemsPerThread,
+          typename InputIteratorT,
+          typename OutputIteratorT,
+          typename TransformOpT,
+          typename DeviceEpilogOpT,
+          typename InputIteratorTupleT,
+          typename KernelSource,
+          typename KernelLauncherFactory>
+CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE cudaError_t dispatch_transform_epilog_for_arch(
+  InputIteratorT d_in,
+  OutputIteratorT d_out,
+  ::cuda::std::int64_t num_segments,
+  int segment_size,
+  TransformOpT transform_op,
+  DeviceEpilogOpT device_epilog_op,
+  cudaStream_t stream,
+  KernelSource kernel_source,
+  KernelLauncherFactory launcher_factory)
+{
+  ::cuda::arch_id arch_id{};
+  if (const auto error = CubDebug(launcher_factory.PtxArchId(arch_id)))
+  {
+    return error;
+  }
+
+  constexpr int sm90_bulk_copy_alignment  = transform::bulk_copy_alignment(::cuda::arch_id::sm_90);
+  constexpr int sm100_bulk_copy_alignment = transform::bulk_copy_alignment(::cuda::arch_id::sm_100);
+
+  // TODO: Move TransformEpilog bulk-copy alignment into an architecture-specific tuning policy. The kernel still
+  // needs the alignment as a template argument, so dispatch maps the runtime policy result onto the supported
+  // instantiations here.
+  if (transform::bulk_copy_alignment(arch_id) == sm90_bulk_copy_alignment)
+  {
+    return dispatch_transform_epilog_aligned<
+      sm90_bulk_copy_alignment,
+      BlockThreads,
+      ItemsPerThread,
+      InputIteratorT,
+      OutputIteratorT,
+      TransformOpT,
+      DeviceEpilogOpT,
+      InputIteratorTupleT,
+      KernelSource,
+      KernelLauncherFactory>(
+      ::cuda::std::move(d_in),
+      ::cuda::std::move(d_out),
+      num_segments,
+      segment_size,
+      ::cuda::std::move(transform_op),
+      ::cuda::std::move(device_epilog_op),
+      stream,
+      kernel_source,
+      launcher_factory);
+  }
+
+  return dispatch_transform_epilog_aligned<
+    sm100_bulk_copy_alignment,
+    BlockThreads,
+    ItemsPerThread,
+    InputIteratorT,
+    OutputIteratorT,
+    TransformOpT,
+    DeviceEpilogOpT,
+    InputIteratorTupleT,
+    KernelSource,
+    KernelLauncherFactory>(
+    ::cuda::std::move(d_in),
+    ::cuda::std::move(d_out),
+    num_segments,
+    segment_size,
+    ::cuda::std::move(transform_op),
+    ::cuda::std::move(device_epilog_op),
+    stream,
+    kernel_source,
+    launcher_factory);
+}
 
 template <int BlockThreads   = 256,
           int ItemsPerThread = 5,
@@ -391,17 +553,17 @@ CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE cudaError_t dispatch_transform_epilog(
   static_assert(transform_epilog_tuple_all_load_to_shared<InputIteratorTupleT>::value,
                 "TransformEpilog requires all transform inputs to be raw pointers to trivially relocatable types.");
 
-  return dispatch_transform_epilog<
+  return dispatch_transform_epilog_for_arch<
     BlockThreads,
     ItemsPerThread,
-    InputIteratorTupleT,
+    InputIteratorT,
     OutputIteratorT,
     TransformOpT,
     NoopDeviceEpilogOp,
     InputIteratorTupleT,
     KernelSource,
     KernelLauncherFactory>(
-    make_transform_epilog_input_tuple(::cuda::std::move(d_in)),
+    ::cuda::std::move(d_in),
     ::cuda::std::move(d_out),
     num_segments,
     segment_size,
@@ -441,16 +603,17 @@ CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE cudaError_t dispatch_transform_epilog(
   static_assert(transform_epilog_tuple_all_load_to_shared<InputIteratorTupleT>::value,
                 "TransformEpilog requires all transform inputs to be raw pointers to trivially relocatable types.");
 
-  return DispatchHierarchicalTransformEpilog<
-           BlockThreads,
-           ItemsPerThread,
-           InputIteratorTupleT,
-           OutputIteratorT,
-           TransformOpT,
-           DeviceEpilogOpT,
-           KernelSource,
-           KernelLauncherFactory>{
-    make_transform_epilog_input_tuple(::cuda::std::move(d_in)),
+  return dispatch_transform_epilog_for_arch<
+    BlockThreads,
+    ItemsPerThread,
+    InputIteratorT,
+    OutputIteratorT,
+    TransformOpT,
+    DeviceEpilogOpT,
+    InputIteratorTupleT,
+    KernelSource,
+    KernelLauncherFactory>(
+    ::cuda::std::move(d_in),
     ::cuda::std::move(d_out),
     num_segments,
     segment_size,
@@ -458,8 +621,7 @@ CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE cudaError_t dispatch_transform_epilog(
     ::cuda::std::move(device_epilog_op),
     stream,
     kernel_source,
-    launcher_factory}
-    .Invoke();
+    launcher_factory);
 }
 } // namespace detail::hierarchical
 
