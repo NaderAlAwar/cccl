@@ -40,38 +40,41 @@ struct transform_prolog_direct_vector_load<T*>
 {
   using value_t = ::cuda::std::remove_cv_t<T>;
 
-  static constexpr bool supported = ::cuda::std::is_same_v<value_t, float>;
+  static constexpr bool supported = transform_prolog_vectorizable_value_v<value_t>;
 
   [[nodiscard]] _CCCL_HOST_DEVICE _CCCL_FORCEINLINE static bool IsAligned(T* input, int index)
   {
-    constexpr auto alignment = static_cast<::cuda::std::uintptr_t>(sizeof(transform_prolog_f32_vector_storage_t));
+    constexpr auto alignment = static_cast<::cuda::std::uintptr_t>(sizeof(transform_prolog_vector_storage_t));
     return (reinterpret_cast<::cuda::std::uintptr_t>(input + index) % alignment) == 0;
   }
 
-  [[nodiscard]] _CCCL_DEVICE _CCCL_FORCEINLINE static transform_prolog_f32_vector_storage_t Load(T* input, int index)
+  [[nodiscard]] _CCCL_DEVICE _CCCL_FORCEINLINE static transform_prolog_vector_storage_t Load(T* input, int index)
   {
-    return reinterpret_cast<const transform_prolog_f32_vector_storage_t*>(input + index)[0];
+    return reinterpret_cast<const transform_prolog_vector_storage_t*>(input + index)[0];
   }
 };
 
-template <CacheLoadModifier Modifier, typename OffsetT>
-struct transform_prolog_direct_vector_load<CacheModifiedInputIterator<Modifier, float, OffsetT>>
+template <CacheLoadModifier Modifier, typename T, typename OffsetT>
+struct transform_prolog_direct_vector_load<CacheModifiedInputIterator<Modifier, T, OffsetT>>
 {
-  static constexpr bool supported = true;
+  using value_t = ::cuda::std::remove_cv_t<T>;
+
+  static constexpr bool supported = transform_prolog_vectorizable_value_v<value_t>;
 
   [[nodiscard]] _CCCL_HOST_DEVICE _CCCL_FORCEINLINE static bool
-  IsAligned(CacheModifiedInputIterator<Modifier, float, OffsetT> input, int index)
+  IsAligned(CacheModifiedInputIterator<Modifier, T, OffsetT> input, int index)
   {
-    constexpr auto alignment = static_cast<::cuda::std::uintptr_t>(sizeof(transform_prolog_f32_vector_storage_t));
+    constexpr auto alignment = static_cast<::cuda::std::uintptr_t>(sizeof(transform_prolog_vector_storage_t));
     return (reinterpret_cast<::cuda::std::uintptr_t>(input.ptr + index) % alignment) == 0;
   }
 
-  [[nodiscard]] _CCCL_DEVICE _CCCL_FORCEINLINE static transform_prolog_f32_vector_storage_t
-  Load(CacheModifiedInputIterator<Modifier, float, OffsetT> input, int index)
+  [[nodiscard]] _CCCL_DEVICE _CCCL_FORCEINLINE static transform_prolog_vector_storage_t
+  Load(CacheModifiedInputIterator<Modifier, T, OffsetT> input, int index)
   {
-    CacheModifiedInputIterator<Modifier, transform_prolog_f32_vector_storage_t, OffsetT> vector_input(
-      reinterpret_cast<transform_prolog_f32_vector_storage_t*>(input.ptr));
-    return vector_input[index / 4];
+    constexpr int vector_items = transform_prolog_vector_items_v<value_t>;
+    CacheModifiedInputIterator<Modifier, transform_prolog_vector_storage_t, OffsetT> vector_input(
+      reinterpret_cast<transform_prolog_vector_storage_t*>(input.ptr));
+    return vector_input[index / vector_items];
   }
 };
 
@@ -79,7 +82,7 @@ template <typename OutputIteratorT>
 [[nodiscard]] _CCCL_DEVICE _CCCL_FORCEINLINE bool
 transform_prolog_output_is_vector_aligned(OutputIteratorT output, ::cuda::std::size_t index)
 {
-  constexpr auto alignment = static_cast<::cuda::std::uintptr_t>(sizeof(transform_prolog_f32_vector_storage_t));
+  constexpr auto alignment = static_cast<::cuda::std::uintptr_t>(sizeof(transform_prolog_vector_storage_t));
   return (reinterpret_cast<::cuda::std::uintptr_t>(output + index) % alignment) == 0;
 }
 
@@ -103,20 +106,24 @@ _CCCL_DEVICE _CCCL_FORCEINLINE void transform_prolog_store_outputs(
   const int thread_rank = static_cast<int>(threadIdx.x);
 
   using direct_vector_load_t = transform_prolog_direct_vector_load<::cuda::std::remove_cv_t<DirectInputIteratorT>>;
-  constexpr int vector_items = 4;
-  constexpr bool output_is_contiguous_f32_pointer =
+  using raw_value_t          = ::cuda::std::remove_cv_t<ValueT>;
+  using direct_value_t       = ::cuda::std::remove_cv_t<cub::detail::it_value_t<DirectInputIteratorT>>;
+  using output_pointer_t     = ::cuda::std::remove_cv_t<OutputIteratorT>;
+  using output_value_t       = ::cuda::std::remove_cv_t<::cuda::std::remove_pointer_t<output_pointer_t>>;
+  constexpr int vector_items = transform_prolog_vector_items_v<raw_value_t>;
+  constexpr bool output_is_contiguous_pointer =
     ::cuda::std::is_pointer_v<::cuda::std::remove_cv_t<OutputIteratorT>>
-    && ::cuda::std::is_same_v<
-      ::cuda::std::remove_cv_t<::cuda::std::remove_pointer_t<::cuda::std::remove_cv_t<OutputIteratorT>>>,
-      float>;
-  constexpr bool can_vectorize = VectorizeOutputs && ::cuda::std::is_same_v<::cuda::std::remove_cv_t<ValueT>, float>
-                              && direct_vector_load_t::supported && output_is_contiguous_f32_pointer;
+    && ::cuda::std::is_same_v<output_value_t, raw_value_t>;
+  constexpr bool can_vectorize =
+    VectorizeOutputs && transform_prolog_vectorizable_value_v<raw_value_t>
+    && ::cuda::std::is_same_v<direct_value_t, raw_value_t> && direct_vector_load_t::supported
+    && output_is_contiguous_pointer;
 
   if constexpr (can_vectorize)
   {
     auto store_vectorized_outputs = [&](int vector_count) {
-      auto* d_out_vector          = reinterpret_cast<transform_prolog_f32_vector_storage_t*>(d_out + segment_offset);
-      auto* shared_segment_vector = reinterpret_cast<const transform_prolog_f32_vector_storage_t*>(shared_segment);
+      auto* d_out_vector          = reinterpret_cast<transform_prolog_vector_storage_t*>(d_out + segment_offset);
+      auto* shared_segment_vector = reinterpret_cast<const transform_prolog_vector_storage_t*>(shared_segment);
 
       for (int vector_index = thread_rank; vector_index < vector_count; vector_index += BlockThreads)
       {
@@ -124,14 +131,14 @@ _CCCL_DEVICE _CCCL_FORCEINLINE void transform_prolog_store_outputs(
         const int index_in_segment = chunk_begin + local_base;
 
         using THRUST_NS_QUALIFIER::cuda_cub::core::detail::uninitialized_array;
-        uninitialized_array<float, vector_items, sizeof(transform_prolog_f32_vector_storage_t)> direct_values;
-        uninitialized_array<float, vector_items, sizeof(transform_prolog_f32_vector_storage_t)> shared_values;
-        reinterpret_cast<transform_prolog_f32_vector_storage_t*>(direct_values.data())[0] =
+        uninitialized_array<raw_value_t, vector_items, sizeof(transform_prolog_vector_storage_t)> direct_values;
+        uninitialized_array<raw_value_t, vector_items, sizeof(transform_prolog_vector_storage_t)> shared_values;
+        reinterpret_cast<transform_prolog_vector_storage_t*>(direct_values.data())[0] =
           direct_vector_load_t::Load(d_direct, index_in_segment);
-        reinterpret_cast<transform_prolog_f32_vector_storage_t*>(shared_values.data())[0] =
+        reinterpret_cast<transform_prolog_vector_storage_t*>(shared_values.data())[0] =
           shared_segment_vector[local_base / vector_items];
 
-        uninitialized_array<float, vector_items, sizeof(transform_prolog_f32_vector_storage_t)> transformed_values;
+        uninitialized_array<raw_value_t, vector_items, sizeof(transform_prolog_vector_storage_t)> transformed_values;
         _CCCL_PRAGMA_UNROLL_FULL()
         for (int lane = 0; lane < vector_items; ++lane)
         {
@@ -140,7 +147,7 @@ _CCCL_DEVICE _CCCL_FORCEINLINE void transform_prolog_store_outputs(
         }
 
         d_out_vector[index_in_segment / vector_items] =
-          reinterpret_cast<const transform_prolog_f32_vector_storage_t*>(transformed_values.data())[0];
+          reinterpret_cast<const transform_prolog_vector_storage_t*>(transformed_values.data())[0];
       }
     };
 

@@ -323,19 +323,21 @@ struct DispatchHierarchicalTransform
   CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE bool CanVectorizeDirectAndOutput()
   {
     using direct_vector_load_t = transform_prolog_direct_vector_load<::cuda::std::remove_cv_t<DirectInputIteratorT>>;
-    constexpr bool output_is_contiguous_f32_pointer =
-      ::cuda::std::is_pointer_v<::cuda::std::remove_cv_t<OutputIteratorT>>
-      && ::cuda::std::is_same_v<
-        ::cuda::std::remove_cv_t<::cuda::std::remove_pointer_t<::cuda::std::remove_cv_t<OutputIteratorT>>>,
-        float>;
+    using raw_input_value_t    = ::cuda::std::remove_cv_t<input_value_t>;
+    using direct_value_t       = ::cuda::std::remove_cv_t<cub::detail::it_value_t<DirectInputIteratorT>>;
+    using output_pointer_t     = ::cuda::std::remove_cv_t<OutputIteratorT>;
+    using output_value_t       = ::cuda::std::remove_cv_t<::cuda::std::remove_pointer_t<output_pointer_t>>;
+    constexpr bool output_is_contiguous_pointer =
+      ::cuda::std::is_pointer_v<output_pointer_t> && ::cuda::std::is_same_v<output_value_t, raw_input_value_t>;
     constexpr bool uses_vectorized_store_outputs =
       transform_prolog_shared_vector_aligned_v<BulkCopyAlignment>
-      && ::cuda::std::is_same_v<::cuda::std::remove_cv_t<input_value_t>, float> && direct_vector_load_t::supported
-      && output_is_contiguous_f32_pointer;
+      && transform_prolog_vectorizable_value_v<raw_input_value_t>
+      && ::cuda::std::is_same_v<direct_value_t, raw_input_value_t> && direct_vector_load_t::supported
+      && output_is_contiguous_pointer;
 
     if constexpr (uses_vectorized_store_outputs)
     {
-      constexpr int vector_items = sizeof(transform_prolog_f32_vector_storage_t) / sizeof(float);
+      constexpr int vector_items = transform_prolog_vector_items_v<raw_input_value_t>;
       if (segment_size % vector_items != 0)
       {
         return false;
@@ -346,9 +348,8 @@ struct DispatchHierarchicalTransform
         return false;
       }
 
-      constexpr auto output_alignment =
-        static_cast<::cuda::std::uintptr_t>(alignof(transform_prolog_f32_vector_storage_t));
-      const auto output_address = reinterpret_cast<::cuda::std::uintptr_t>(d_out);
+      constexpr auto output_alignment = static_cast<::cuda::std::uintptr_t>(alignof(transform_prolog_vector_storage_t));
+      const auto output_address       = reinterpret_cast<::cuda::std::uintptr_t>(d_out);
       if (output_address % output_alignment != 0)
       {
         return false;

@@ -179,13 +179,22 @@ template <int BlockThreads, typename RandomAccessIteratorT>
 using striped_thread_segment_range_t =
   striped_thread_segment_range<striped_thread_segment_iterator_t<BlockThreads, RandomAccessIteratorT>>;
 
-using transform_prolog_f32_vector_storage_t = int4;
-static_assert(sizeof(transform_prolog_f32_vector_storage_t) == 4 * sizeof(float));
-static_assert(alignof(transform_prolog_f32_vector_storage_t) == 4 * sizeof(float));
+using transform_prolog_vector_storage_t = int4;
+static_assert(sizeof(transform_prolog_vector_storage_t) == 16);
+static_assert(alignof(transform_prolog_vector_storage_t) == 16);
+
+template <typename T>
+inline constexpr bool transform_prolog_vectorizable_value_v =
+  (sizeof(::cuda::std::remove_cv_t<T>) == 2 || sizeof(::cuda::std::remove_cv_t<T>) == 4)
+  && ::cuda::std::is_trivially_copyable_v<::cuda::std::remove_cv_t<T>>;
+
+template <typename T>
+inline constexpr int transform_prolog_vector_items_v =
+  static_cast<int>(sizeof(transform_prolog_vector_storage_t) / sizeof(::cuda::std::remove_cv_t<T>));
 
 template <int BulkCopyAlignment>
 inline constexpr bool transform_prolog_shared_vector_aligned_v =
-  BulkCopyAlignment >= static_cast<int>(alignof(transform_prolog_f32_vector_storage_t));
+  BulkCopyAlignment >= static_cast<int>(alignof(transform_prolog_vector_storage_t));
 
 template <int BlockThreads, typename ValueT, bool AssumeFullVectors = false>
 class vectorized_thread_segment_range
@@ -267,7 +276,7 @@ public:
 
   _CCCL_DEVICE reference operator[](int idx) const noexcept
   {
-    constexpr int vector_items = 4;
+    constexpr int vector_items = transform_prolog_vector_items_v<raw_value_t>;
     const int vector_group     = idx / vector_items;
     const int vector_lane      = idx % vector_items;
     const int vector_base      = first_item_ + vector_group * BlockThreads * vector_items;
@@ -277,7 +286,7 @@ public:
   template <typename FnT>
   _CCCL_DEVICE _CCCL_FORCEINLINE void for_each(FnT fn) const
   {
-    constexpr int vector_items = 4;
+    constexpr int vector_items = transform_prolog_vector_items_v<raw_value_t>;
 
     if constexpr (AssumeFullVectors)
     {
@@ -289,8 +298,8 @@ public:
       {
         const int vector_base = vector_index * vector_items;
 
-        transform_prolog_f32_vector_storage_t values_storage =
-          reinterpret_cast<const transform_prolog_f32_vector_storage_t*>(segment_begin_ + vector_base)[0];
+        transform_prolog_vector_storage_t values_storage =
+          reinterpret_cast<const transform_prolog_vector_storage_t*>(segment_begin_ + vector_base)[0];
         raw_value_t* values = reinterpret_cast<raw_value_t*>(&values_storage);
 
         _CCCL_PRAGMA_UNROLL_FULL()
@@ -307,7 +316,7 @@ public:
         const int vector_base = first_item_ + vector_group * BlockThreads * vector_items;
         const int lane_items  = (::cuda::std::min) (vector_items, items_ - consumed);
 
-        transform_prolog_f32_vector_storage_t values_storage{};
+        transform_prolog_vector_storage_t values_storage{};
         raw_value_t* values = reinterpret_cast<raw_value_t*>(&values_storage);
         FillValues(values_storage, values, vector_base);
 
@@ -327,18 +336,19 @@ public:
 
 private:
   _CCCL_DEVICE void
-  FillValues(transform_prolog_f32_vector_storage_t& values_storage, raw_value_t* values, int vector_base) const noexcept
+  FillValues(transform_prolog_vector_storage_t& values_storage, raw_value_t* values, int vector_base) const noexcept
   {
-    const bool full_vector = vector_base + 4 <= segment_size_;
+    constexpr int vector_items = transform_prolog_vector_items_v<raw_value_t>;
+    const bool full_vector     = vector_base + vector_items <= segment_size_;
 
     if (full_vector)
     {
-      values_storage = reinterpret_cast<const transform_prolog_f32_vector_storage_t*>(segment_begin_ + vector_base)[0];
+      values_storage = reinterpret_cast<const transform_prolog_vector_storage_t*>(segment_begin_ + vector_base)[0];
     }
     else
     {
       _CCCL_PRAGMA_UNROLL_FULL()
-      for (int lane = 0; lane < 4; ++lane)
+      for (int lane = 0; lane < vector_items; ++lane)
       {
         const int item = vector_base + lane;
         values[lane]   = item < segment_size_ ? segment_begin_[item] : raw_value_t{};
@@ -356,7 +366,8 @@ private:
 template <int BlockThreads, bool AssumeFullVectors = false, typename ValueT>
 _CCCL_DEVICE auto make_vectorized_thread_segment_range(ValueT* segment_begin, int segment_size, int segment_offset = 0)
 {
-  constexpr int vector_items = 4;
+  using raw_value_t          = ::cuda::std::remove_cv_t<ValueT>;
+  constexpr int vector_items = transform_prolog_vector_items_v<raw_value_t>;
   const int thread_rank      = static_cast<int>(threadIdx.x);
   const int first_item       = thread_rank * vector_items;
 
@@ -399,12 +410,11 @@ struct transform_prolog_segment_range_selector
   using striped_range    = striped_thread_segment_range_t<BlockThreads, ValueT*>;
   using thread_range     = thread_segment_range<ValueT*>;
 
-  // TODO: The vectorized/striped ranges are used so F32 RMSNorm-style reductions read shared memory with consecutive
-  // warp lanes touching consecutive 4-byte banks. This is only the right bank-conflict fix for F32/4-byte values;
-  // define a dtype-aware policy for smaller/larger value sizes before using these traversals there by default.
+  // TODO: The vectorized/striped ranges are tuned for RMSNorm-style reductions over 16-byte vectors. Revisit the
+  // policy before enabling this by default for value sizes beyond the 2- and 4-byte cases used here.
   static constexpr bool use_vectorized_range =
-    SharedSegmentVectorAligned
-    && ::cuda::std::is_same_v<raw_value_t, float> && ::cuda::std::is_invocable_v<SegmentOpT, GroupT, vectorized_range>;
+    SharedSegmentVectorAligned && transform_prolog_vectorizable_value_v<raw_value_t>
+    && ::cuda::std::is_invocable_v<SegmentOpT, GroupT, vectorized_range>;
   static constexpr bool use_striped_range =
     !use_vectorized_range && sizeof(raw_value_t) == 4 && ::cuda::std::is_invocable_v<SegmentOpT, GroupT, striped_range>;
   static constexpr bool use_thread_range =
