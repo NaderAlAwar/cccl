@@ -8,6 +8,9 @@
 
 #include <cuda/iterator>
 #include <cuda/std/functional>
+#include <cuda/std/tuple>
+#include <cuda/std/type_traits>
+#include <cuda/std/utility>
 
 #include <cstdint>
 #include <random>
@@ -40,6 +43,25 @@ static small_segments<OffsetT> make_random_0_to_5_segments(std::size_t segments)
 
   return {thrust::device_vector<OffsetT>(h_offsets.begin(), h_offsets.end()), static_cast<std::size_t>(total)};
 }
+
+template <typename T, typename SegmentSize, std::size_t... Indices>
+static auto make_fixed_size_transform_input(thrust::device_vector<T>& values, cuda::std::index_sequence<Indices...>)
+{
+  return cuda::std::make_tuple(cuda::make_strided_iterator(values.begin() + Indices, SegmentSize::value)...);
+}
+
+template <typename T, typename SegmentSize>
+struct fixed_size_sum_transform_op
+{
+  template <typename... Items>
+  __device__ T operator()(Items... items) const
+  {
+    static_assert(sizeof...(Items) == SegmentSize::value);
+    T sum = 0;
+    ((sum += items), ...);
+    return sum;
+  }
+};
 
 template <typename T>
 static void cccl_sum_segmented_reduce(nvbench::state& state, nvbench::type_list<T>)
@@ -122,11 +144,48 @@ static void cccl_sum_transform(nvbench::state& state, nvbench::type_list<T>)
 
   state.exec(nvbench::exec_tag::gpu | nvbench::exec_tag::no_batch, [&](nvbench::launch& launch) {
     cub::DeviceTransform::Transform(
-      cuda::counting_iterator<offset_t>{0}, output_ptr, output.size(), op, launch.get_stream().get_stream());
+      cuda::std::tuple{cuda::counting_iterator<offset_t>{0}},
+      output_ptr,
+      output.size(),
+      op,
+      launch.get_stream().get_stream());
+  });
+}
+
+template <typename T, typename SegmentSize>
+static void cccl_sum_fixed_size_transform(nvbench::state& state, nvbench::type_list<T, SegmentSize>)
+{
+  constexpr int segment_size = SegmentSize::value;
+
+  const auto segments = static_cast<std::size_t>(state.get_int64("Segments{io}"));
+  const auto elements = segments * segment_size;
+
+  thrust::device_vector<T> values = generate(elements, bit_entropy::_1_000, T{0}, T{1});
+  thrust::device_vector<T> output(segments);
+
+  auto input = make_fixed_size_transform_input<T, SegmentSize>(values, cuda::std::make_index_sequence<segment_size>{});
+
+  state.add_element_count(elements);
+  state.add_global_memory_reads<T>(elements, "Size");
+  state.add_global_memory_writes<T>(segments);
+
+  state.exec(nvbench::exec_tag::gpu | nvbench::exec_tag::no_batch, [&](nvbench::launch& launch) {
+    cub::DeviceTransform::Transform(
+      input,
+      output.begin(),
+      output.size(),
+      fixed_size_sum_transform_op<T, SegmentSize>{},
+      launch.get_stream().get_stream());
   });
 }
 
 using value_types = nvbench::type_list<double>;
+using segment_size_types =
+  nvbench::type_list<cuda::std::integral_constant<int, 2>,
+                     cuda::std::integral_constant<int, 3>,
+                     cuda::std::integral_constant<int, 4>,
+                     cuda::std::integral_constant<int, 5>,
+                     cuda::std::integral_constant<int, 6>>;
 
 NVBENCH_BENCH_TYPES(cccl_sum_segmented_reduce, NVBENCH_TYPE_AXES(value_types))
   .set_name("cccl_sum_segmented_reduce")
@@ -136,4 +195,9 @@ NVBENCH_BENCH_TYPES(cccl_sum_segmented_reduce, NVBENCH_TYPE_AXES(value_types))
 NVBENCH_BENCH_TYPES(cccl_sum_transform, NVBENCH_TYPE_AXES(value_types))
   .set_name("cccl_sum_transform")
   .set_type_axes_names({"T{ct}"})
+  .add_int64_power_of_two_axis("Segments{io}", nvbench::range(12, 24, 4));
+
+NVBENCH_BENCH_TYPES(cccl_sum_fixed_size_transform, NVBENCH_TYPE_AXES(value_types, segment_size_types))
+  .set_name("cccl_sum_fixed_size_transform")
+  .set_type_axes_names({"T{ct}", "SegmentSize{ct}"})
   .add_int64_power_of_two_axis("Segments{io}", nvbench::range(12, 24, 4));

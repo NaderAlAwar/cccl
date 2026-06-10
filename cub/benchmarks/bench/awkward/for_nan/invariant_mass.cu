@@ -13,8 +13,38 @@
 #include <nvbench_helper.cuh>
 
 template <typename T>
-static void invariant_mass_transform(nvbench::state& state, nvbench::type_list<T>)
+struct invariant_mass_particle_t
 {
+  T pt;
+  T eta;
+  T phi;
+};
+
+template <typename T>
+struct invariant_mass_pair_t
+{
+  invariant_mass_particle_t<T> first;
+  invariant_mass_particle_t<T> second;
+};
+
+template <typename T>
+struct invariant_mass_transform_op_t
+{
+  __device__ T operator()(invariant_mass_pair_t<T> pair) const
+  {
+    const T pt_product = pair.first.pt * pair.second.pt;
+    const T eta_delta  = pair.first.eta - pair.second.eta;
+    const T phi_delta  = pair.first.phi - pair.second.phi;
+    return cuda::std::sqrt(T{2} * pt_product * (cuda::std::cosh(eta_delta) - cuda::std::cos(phi_delta)));
+  }
+};
+
+template <typename T>
+static void invariant_mass_packed_transform(nvbench::state& state, nvbench::type_list<T>)
+{
+  using particle_t = invariant_mass_particle_t<T>;
+  using pair_t     = invariant_mass_pair_t<T>;
+
   constexpr int segment_size = 2;
 
   const auto segments = static_cast<std::size_t>(state.get_int64("Segments{io}"));
@@ -23,32 +53,46 @@ static void invariant_mass_transform(nvbench::state& state, nvbench::type_list<T
   thrust::device_vector<T> pt  = generate(elements, bit_entropy::_1_000, T{10}, T{100});
   thrust::device_vector<T> eta = generate(elements, bit_entropy::_1_000, T{-3}, T{3});
   thrust::device_vector<T> phi = generate(elements, bit_entropy::_1_000, T{0}, T{6.2831853071795864769});
-  thrust::device_vector<T> output(segments);
 
-  auto first = cuda::make_zip_iterator(
+  auto pack_input = cuda::std::make_tuple(
     cuda::make_strided_iterator(pt.begin(), segment_size),
     cuda::make_strided_iterator(eta.begin(), segment_size),
-    cuda::make_strided_iterator(phi.begin(), segment_size));
-
-  auto second = cuda::make_zip_iterator(
+    cuda::make_strided_iterator(phi.begin(), segment_size),
     cuda::make_strided_iterator(pt.begin() + 1, segment_size),
     cuda::make_strided_iterator(eta.begin() + 1, segment_size),
     cuda::make_strided_iterator(phi.begin() + 1, segment_size));
 
-  auto input = cuda::std::make_tuple(first, second);
-  auto op    = [] __device__(const cuda::std::tuple<T, T, T>& lhs, const cuda::std::tuple<T, T, T>& rhs) -> T {
-    const auto [pt1, eta1, phi1] = lhs;
-    const auto [pt2, eta2, phi2] = rhs;
-    return cuda::std::sqrt(T{2} * pt1 * pt2 * (cuda::std::cosh(eta1 - eta2) - cuda::std::cos(phi1 - phi2)));
+  thrust::device_vector<pair_t> input(segments, thrust::no_init);
+  auto pack_op = [] __device__(T pt1, T eta1, T phi1, T pt2, T eta2, T phi2) -> pair_t {
+    return pair_t{particle_t{pt1, eta1, phi1}, particle_t{pt2, eta2, phi2}};
   };
 
+  auto error = cub::DeviceTransform::Transform(pack_input, input.begin(), input.size(), pack_op);
+  if (error != cudaSuccess)
+  {
+    state.skip("Skipping: invariant mass input packing failed.");
+    return;
+  }
+  error = cudaDeviceSynchronize();
+  if (error != cudaSuccess)
+  {
+    state.skip("Skipping: invariant mass input packing failed.");
+    return;
+  }
+
+  thrust::device_vector<T> output(segments, thrust::no_init);
+
   state.add_element_count(elements);
-  state.add_global_memory_reads<T>(3 * elements, "Size");
+  state.add_global_memory_reads<pair_t>(segments);
   state.add_global_memory_writes<T>(segments);
 
   state.exec(nvbench::exec_tag::gpu | nvbench::exec_tag::no_batch, [&](nvbench::launch& launch) {
     cub::DeviceTransform::Transform(
-      input, thrust::raw_pointer_cast(output.data()), output.size(), op, launch.get_stream().get_stream());
+      cuda::std::tuple{input.begin()},
+      output.begin(),
+      output.size(),
+      invariant_mass_transform_op_t<T>{},
+      launch.get_stream().get_stream());
   });
 }
 
@@ -111,8 +155,8 @@ static void invariant_mass_segmented_reduce(nvbench::state& state, nvbench::type
 
 using value_types = nvbench::type_list<float, double>;
 
-NVBENCH_BENCH_TYPES(invariant_mass_transform, NVBENCH_TYPE_AXES(value_types))
-  .set_name("invariant_mass_transform")
+NVBENCH_BENCH_TYPES(invariant_mass_packed_transform, NVBENCH_TYPE_AXES(value_types))
+  .set_name("invariant_mass_packed_transform")
   .set_type_axes_names({"T{ct}"})
   .add_int64_power_of_two_axis("Segments{io}", nvbench::range(12, 24, 4));
 
