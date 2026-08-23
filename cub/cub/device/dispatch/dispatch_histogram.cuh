@@ -37,12 +37,15 @@
 
 #include <cuda/__cmath/ceil_div.h>
 #include <cuda/__functional/proclaim_return_type.h>
+#include <cuda/__numeric/mul_overflow.h>
+#include <cuda/__numeric/sub_overflow.h>
 #include <cuda/std/__algorithm/copy.h>
 #include <cuda/std/__algorithm/min.h>
 #include <cuda/std/__algorithm/transform.h>
 #include <cuda/std/__tuple_dir/apply.h>
 #include <cuda/std/__type_traits/conditional.h>
 #include <cuda/std/__type_traits/is_void.h>
+#include <cuda/std/__utility/cmp.h>
 #include <cuda/std/array>
 #include <cuda/std/limits>
 #include <cuda/std/tuple>
@@ -146,9 +149,13 @@ struct DeviceHistogramKernelSource
 
     if constexpr (::cuda::std::is_integral_v<CommonT>)
     {
+      if (!::cuda::std::in_range<CommonT>(num_bins))
+      {
+        return true;
+      }
       using IntArithmeticT = typename TransformsT::ScaleTransform::IntArithmeticT;
-      return static_cast<IntArithmeticT>(upper_level[channel] - lower_level[channel])
-           > (::cuda::std::numeric_limits<IntArithmeticT>::max() / static_cast<IntArithmeticT>(num_bins));
+      const auto range     = ::cuda::sub_overflow<IntArithmeticT>(upper_level[channel], lower_level[channel]).value;
+      return ::cuda::mul_overflow<IntArithmeticT>(range, num_bins).overflow;
     }
     else
     {
@@ -1001,8 +1008,6 @@ CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE static cudaError_t dispatch_even(
     // Use the scale transform op for converting privatized bins to output bins
     using OutputDecodeOpT = typename TransformsT::ScaleTransform;
 
-    using CommonT = typename TransformsT::ScaleTransform::CommonT;
-
     ::cuda::std::array<int, NUM_ACTIVE_CHANNELS> num_privatized_levels;
     ::cuda::std::array<PrivatizedDecodeOpT, NUM_ACTIVE_CHANNELS> privatized_decode_op{};
     ::cuda::std::array<OutputDecodeOpT, NUM_ACTIVE_CHANNELS> output_decode_op{};
@@ -1013,7 +1018,7 @@ CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE static cudaError_t dispatch_even(
       num_privatized_levels[channel] = 257;
 
       int num_levels = num_output_levels[channel];
-      if (kernel_source.MayOverflow(static_cast<CommonT>(num_levels - 1), upper_level, lower_level, channel))
+      if (kernel_source.MayOverflow(num_levels - 1, upper_level, lower_level, channel))
       {
         if (!d_temp_storage)
         {
@@ -1070,8 +1075,6 @@ CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE static cudaError_t dispatch_even(
     // Use the pass-thru transform op for converting privatized bins to output bins
     using OutputDecodeOpT = typename TransformsT::PassThruTransform;
 
-    using CommonT = typename TransformsT::ScaleTransform::CommonT;
-
     ::cuda::std::array<PrivatizedDecodeOpT, NUM_ACTIVE_CHANNELS> privatized_decode_op{};
     ::cuda::std::array<OutputDecodeOpT, NUM_ACTIVE_CHANNELS> output_decode_op{};
     int max_levels = num_output_levels[0];
@@ -1079,7 +1082,7 @@ CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE static cudaError_t dispatch_even(
     for (int channel = 0; channel < NUM_ACTIVE_CHANNELS; ++channel)
     {
       int num_levels = num_output_levels[channel];
-      if (kernel_source.MayOverflow(static_cast<CommonT>(num_levels - 1), upper_level, lower_level, channel))
+      if (kernel_source.MayOverflow(num_levels - 1, upper_level, lower_level, channel))
       {
         if (!d_temp_storage)
         {

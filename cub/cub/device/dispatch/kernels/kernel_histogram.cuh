@@ -18,8 +18,11 @@
 #include <cub/grid/grid_queue.cuh>
 #include <cub/util_arch.cuh>
 
+#include <cuda/__numeric/sub_overflow.h>
 #include <cuda/__type_traits/is_trivially_copyable.h>
 #include <cuda/std/__numeric/reduce.h>
+#include <cuda/std/__type_traits/make_unsigned.h>
+#include <cuda/std/__type_traits/type_identity.h>
 
 CUB_NAMESPACE_BEGIN
 namespace detail::histogram
@@ -117,14 +120,23 @@ struct Transforms
       ::cuda::std::is_integral<T>;
 #endif // !_CCCL_HAS_INT128()
 
+    // For integral types, the fraction is stored in the unsigned type of the same width: the range can span the
+    // type's full value range (e.g. an int16_t histogram over [-32768, 32767]), which exceeds a signed type's maximum
+    // by exactly one bit. Custom types and __[u]int128 compute bins with CommonT's own operators, so they need the
+    // fraction in CommonT.
+    using FractionStorageT =
+      typename ::cuda::std::_If<is_integral_excl_int128<CommonT>::value,
+                                ::cuda::std::make_unsigned<CommonT>,
+                                ::cuda::std::type_identity<CommonT>>::type;
+
     union ScaleT
     {
       // Used when CommonT is not floating-point to avoid intermediate
       // rounding errors (see NVIDIA/cub#489).
       struct FractionT
       {
-        CommonT bins;
-        CommonT range;
+        FractionStorageT bins;
+        FractionStorageT range;
       } fraction;
 
       // Used when CommonT is floating-point as an optimization.
@@ -149,8 +161,15 @@ struct Transforms
     ComputeScale(int num_levels, T max_level, T min_level, ::cuda::std::false_type /* is_fp */)
     {
       ScaleT result;
-      result.fraction.bins  = static_cast<T>(num_levels - 1);
-      result.fraction.range = static_cast<T>(max_level - min_level);
+      result.fraction.bins = static_cast<FractionStorageT>(num_levels - 1);
+      if constexpr (is_integral_excl_int128<T>::value)
+      {
+        result.fraction.range = ::cuda::sub_overflow<FractionStorageT>(max_level, min_level).value;
+      }
+      else
+      {
+        result.fraction.range = static_cast<FractionStorageT>(max_level - min_level);
+      }
       return result;
     }
 
@@ -235,7 +254,8 @@ struct Transforms
     _CCCL_HOST_DEVICE _CCCL_FORCEINLINE int ComputeBin(T sample, T min_level, ScaleT scale) const
     {
       return static_cast<int>(
-        (static_cast<IntArithmeticT>(sample - min_level) * static_cast<IntArithmeticT>(scale.fraction.bins))
+        (::cuda::sub_overflow<IntArithmeticT>(sample, min_level).value
+         * static_cast<IntArithmeticT>(scale.fraction.bins))
         / static_cast<IntArithmeticT>(scale.fraction.range));
     }
 
